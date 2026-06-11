@@ -11,6 +11,7 @@ import { APIClient } from '../../shared/api.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { DialogBase } from '../../shared/dialog/dialog-base.js';
 import { Notifications } from '../../shared/notifications.js';
+import { InvoiceAutocomplete } from './invoice-autocomplete.js';
 
 export class InvoiceDialog extends DialogBase {
     /**
@@ -415,7 +416,7 @@ export class InvoiceDialog extends DialogBase {
                     searchInput.value = '';
                     searchInput.classList.remove('has-value');
                 }
-                this._hideDropdown(overlay);
+                InvoiceAutocomplete.hideTableDropdown(overlay);
                 this._loadTables(overlay, radio.value);
             });
         });
@@ -433,21 +434,21 @@ export class InvoiceDialog extends DialogBase {
                 }
 
                 if (query.length === 0 && !this._selectedTable) {
-                    this._hideDropdown(overlay);
+                    InvoiceAutocomplete.hideTableDropdown(overlay);
                     return;
                 }
 
                 if (query.length === 0) {
-                    this._hideDropdown(overlay);
+                    InvoiceAutocomplete.hideTableDropdown(overlay);
                     return;
                 }
 
-                this._filterAndShowResults(overlay, query);
+                InvoiceAutocomplete.filterAndShowTables(this, overlay, query);
             });
 
             // Скрываем dropdown при потере фокуса (с задержкой для клика)
             searchInput.addEventListener('blur', () => {
-                setTimeout(() => this._hideDropdown(overlay), 200);
+                setTimeout(() => InvoiceAutocomplete.hideTableDropdown(overlay), 200);
             });
         }
 
@@ -469,7 +470,7 @@ export class InvoiceDialog extends DialogBase {
                         metricInput.value = '';
                         metricInput.classList.remove('has-value');
                     }
-                    this._hideMetricDropdown(overlay);
+                    InvoiceAutocomplete.hideMetricDropdown(overlay);
                 } else if (this._selectedMetrics[metric] !== undefined) {
                     // Клик по configured чипу — переключить фокус на него
                     this._switchFocus(overlay, metric);
@@ -501,18 +502,18 @@ export class InvoiceDialog extends DialogBase {
                     }
                 }
 
-                this._filterAndShowMetrics(overlay, query);
+                InvoiceAutocomplete.filterAndShowMetrics(this, overlay, query);
             });
 
             metricInput.addEventListener('focus', () => {
                 // При фокусе показать начальный список
                 if (this._focusedMetric && !this._selectedMetrics[this._focusedMetric]) {
-                    this._filterAndShowMetrics(overlay, metricInput.value.trim());
+                    InvoiceAutocomplete.filterAndShowMetrics(this, overlay, metricInput.value.trim());
                 }
             });
 
             metricInput.addEventListener('blur', () => {
-                setTimeout(() => this._hideMetricDropdown(overlay), 200);
+                setTimeout(() => InvoiceAutocomplete.hideMetricDropdown(overlay), 200);
             });
         }
 
@@ -533,18 +534,18 @@ export class InvoiceDialog extends DialogBase {
             processInput.addEventListener('input', () => {
                 const query = processInput.value.trim();
                 if (query.length === 0) {
-                    this._hideProcessDropdown(overlay);
+                    InvoiceAutocomplete.hideProcessDropdown(overlay);
                     return;
                 }
-                this._filterAndShowProcesses(overlay, query);
+                InvoiceAutocomplete.filterAndShowProcesses(this, overlay, query);
             });
             processInput.addEventListener('blur', () => {
-                setTimeout(() => this._hideProcessDropdown(overlay), 200);
+                setTimeout(() => InvoiceAutocomplete.hideProcessDropdown(overlay), 200);
             });
             processInput.addEventListener('focus', () => {
                 const query = processInput.value.trim();
                 if (query.length > 0) {
-                    this._filterAndShowProcesses(overlay, query);
+                    InvoiceAutocomplete.filterAndShowProcesses(this, overlay, query);
                 }
             });
         }
@@ -559,18 +560,18 @@ export class InvoiceDialog extends DialogBase {
                     subInput.classList.remove('has-value');
                 }
                 if (query.length === 0) {
-                    this._hideSubsidiaryDropdown(overlay);
+                    InvoiceAutocomplete.hideSubsidiaryDropdown(overlay);
                     return;
                 }
-                this._filterAndShowSubsidiaries(overlay, query);
+                InvoiceAutocomplete.filterAndShowSubsidiaries(this, overlay, query);
             });
             subInput.addEventListener('blur', () => {
-                setTimeout(() => this._hideSubsidiaryDropdown(overlay), 200);
+                setTimeout(() => InvoiceAutocomplete.hideSubsidiaryDropdown(overlay), 200);
             });
             subInput.addEventListener('focus', () => {
                 const query = subInput.value.trim();
                 if (query.length > 0 && !this._selectedSubsidiary) {
-                    this._filterAndShowSubsidiaries(overlay, query);
+                    InvoiceAutocomplete.filterAndShowSubsidiaries(this, overlay, query);
                 }
             });
         }
@@ -627,7 +628,7 @@ export class InvoiceDialog extends DialogBase {
         }
 
         this._showFullMetricList = false;
-        this._hideMetricDropdown(overlay);
+        InvoiceAutocomplete.hideMetricDropdown(overlay);
     }
 
     /**
@@ -657,7 +658,7 @@ export class InvoiceDialog extends DialogBase {
             metricInput.value = '';
             metricInput.classList.remove('has-value');
         }
-        this._hideMetricDropdown(overlay);
+        InvoiceAutocomplete.hideMetricDropdown(overlay);
     }
 
     /**
@@ -683,368 +684,9 @@ export class InvoiceDialog extends DialogBase {
         if (badge) badge.remove();
     }
 
-    /**
-     * Фильтрует кэш таблиц и показывает результаты.
-     * @private
-     */
-    static _filterAndShowResults(overlay, query) {
-        if (!this._cachedTables) {
-            this._showDropdown(overlay, []);
-            return;
-        }
-
-        const queryLower = query.toLowerCase();
-        const filtered = this._cachedTables.filter(
-            t => t.table_name.toLowerCase().includes(queryLower)
-        );
-
-        this._showDropdown(overlay, filtered.slice(0, 50));
-    }
-
-    /**
-     * Показывает dropdown с результатами поиска.
-     * @private
-     */
-    static _showDropdown(overlay, results) {
-        const dropdown = overlay.querySelector('.invoice-search-dropdown');
-        if (!dropdown) return;
-
-        dropdown.innerHTML = '';
-
-        if (results.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'invoice-search-dropdown-empty';
-            empty.textContent = 'Таблицы не найдены';
-            dropdown.appendChild(empty);
-        } else {
-            results.forEach(item => {
-                const el = document.createElement('div');
-                el.className = 'invoice-search-dropdown-item';
-                el.textContent = item.table_name;
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault(); // Предотвращаем blur на input
-                    this._selectTable(overlay, item);
-                });
-                dropdown.appendChild(el);
-            });
-        }
-
-        dropdown.classList.add('visible');
-    }
-
-    /**
-     * Скрывает dropdown.
-     * @private
-     */
-    static _hideDropdown(overlay) {
-        const dropdown = overlay.querySelector('.invoice-search-dropdown');
-        if (dropdown) dropdown.classList.remove('visible');
-    }
-
-    /**
-     * Выбирает таблицу из dropdown.
-     * @private
-     */
-    static _selectTable(overlay, item) {
-        this._selectedTable = item;
-
-        const searchInput = overlay.querySelector('.invoice-search-input');
-        if (searchInput) {
-            searchInput.value = item.table_name;
-            searchInput.classList.add('has-value');
-        }
-
-        this._hideDropdown(overlay);
-    }
-
-    // -----------------------------------------------------------------
-    // Секция кода метрики
-    // -----------------------------------------------------------------
-
-    /**
-     * Фильтрует справочник метрик и показывает dropdown.
-     *
-     * Логика:
-     * - Без запроса: показываем метрики выбранной группы, остальные через "Показать полный перечень"
-     * - С запросом: ищем по ВСЕМ метрикам, но группа выбранного типа идёт первой
-     * @private
-     */
-    static _filterAndShowMetrics(overlay, query) {
-        if (!this._cachedMetricDict) return;
-
-        let primaryItems;
-        let otherItems;
-
-        if (query.length > 0) {
-            // С запросом — ищем по ВСЕМ метрикам
-            const isDigitSearch = /^\d/.test(query);
-            const queryLower = query.toLowerCase();
-
-            const filterFn = isDigitSearch
-                ? (m) => m.code.includes(query)
-                : (m) => m.metric_name.toLowerCase().includes(queryLower);
-
-            const allFiltered = this._cachedMetricDict.filter(filterFn);
-
-            if (this._focusedMetric) {
-                // Выбранная группа — первая, остальные — ниже
-                primaryItems = allFiltered.filter(m => m.metric_group === this._focusedMetric);
-                otherItems = allFiltered.filter(m => m.metric_group !== this._focusedMetric);
-            } else {
-                primaryItems = allFiltered;
-                otherItems = [];
-            }
-        } else {
-            // Без запроса — фильтрация по группе
-            if (this._focusedMetric) {
-                primaryItems = this._cachedMetricDict.filter(
-                    m => m.metric_group === this._focusedMetric
-                );
-                otherItems = this._cachedMetricDict.filter(
-                    m => m.metric_group !== this._focusedMetric
-                );
-            } else {
-                primaryItems = this._cachedMetricDict;
-                otherItems = [];
-            }
-        }
-
-        const hasQuery = query.length > 0;
-        this._showMetricDropdown(overlay, primaryItems.slice(0, 100), otherItems, hasQuery);
-    }
-
-    /**
-     * Показывает dropdown с метриками.
-     * @param {HTMLElement} overlay
-     * @param {Array} primaryItems - основной список (выбранная группа или все)
-     * @param {Array} otherItems - метрики из других групп
-     * @param {boolean} hasQuery - есть ли поисковый запрос (если да, показываем всё сразу)
-     * @private
-     */
-    static _showMetricDropdown(overlay, primaryItems, otherItems, hasQuery = false) {
-        const dropdown = overlay.querySelector('.invoice-metric-dropdown');
-        if (!dropdown) return;
-
-        dropdown.innerHTML = '';
-
-        // При активном поиске показываем другие группы сразу
-        const expandOther = this._showFullMetricList || hasQuery;
-
-        if (primaryItems.length === 0 && (!expandOther || otherItems.length === 0)) {
-            const empty = document.createElement('div');
-            empty.className = 'invoice-search-dropdown-empty';
-            empty.textContent = 'Метрики не найдены';
-            dropdown.appendChild(empty);
-        } else {
-            // Основной список
-            primaryItems.forEach(item => {
-                dropdown.appendChild(this._createMetricDropdownItem(overlay, item));
-            });
-
-            // Другие группы
-            if (expandOther && otherItems.length > 0) {
-                // Группируем другие метрики по группам
-                const groups = {};
-                otherItems.forEach(item => {
-                    const group = item.metric_group || 'Без группы';
-                    if (!groups[group]) groups[group] = [];
-                    groups[group].push(item);
-                });
-
-                let totalShown = primaryItems.length;
-                for (const [groupName, items] of Object.entries(groups)) {
-                    if (totalShown >= 100) break;
-
-                    // Разделитель группы
-                    const separator = document.createElement('div');
-                    separator.className = 'invoice-metric-group-separator';
-                    separator.textContent = groupName;
-                    dropdown.appendChild(separator);
-
-                    for (const item of items) {
-                        if (totalShown >= 100) break;
-                        dropdown.appendChild(this._createMetricDropdownItem(overlay, item));
-                        totalShown++;
-                    }
-                }
-            }
-
-            // Кнопка "Показать полный перечень" только без активного поиска
-            if (!expandOther && otherItems.length > 0) {
-                const showAllBtn = document.createElement('div');
-                showAllBtn.className = 'invoice-metric-show-all';
-                showAllBtn.textContent = `Показать полный перечень метрик (ещё ${otherItems.length})`;
-                showAllBtn.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this._showFullMetricList = true;
-                    const metricInput = overlay.querySelector('.invoice-metric-search-input');
-                    this._filterAndShowMetrics(overlay, metricInput?.value?.trim() || '');
-                });
-                dropdown.appendChild(showAllBtn);
-            }
-        }
-
-        dropdown.classList.add('visible');
-    }
-
-    /**
-     * Создаёт элемент dropdown для метрики.
-     * @private
-     */
-    static _createMetricDropdownItem(overlay, item) {
-        const el = document.createElement('div');
-        el.className = 'invoice-metric-dropdown-item';
-
-        const codeSpan = document.createElement('span');
-        codeSpan.className = 'invoice-metric-item-code';
-        codeSpan.textContent = item.code;
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'invoice-metric-item-name';
-        nameSpan.textContent = ` — ${item.metric_name}`;
-
-        el.appendChild(codeSpan);
-        el.appendChild(nameSpan);
-
-        el.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            this._selectMetricCode(overlay, item);
-        });
-
-        return el;
-    }
-
-    /**
-     * Скрывает dropdown метрик.
-     * @private
-     */
-    static _hideMetricDropdown(overlay) {
-        const dropdown = overlay.querySelector('.invoice-metric-dropdown');
-        if (dropdown) dropdown.classList.remove('visible');
-    }
-
-    /**
-     * Выбирает код метрики из dropdown.
-     * @private
-     */
-    static _selectMetricCode(overlay, item) {
-        this._skipNextUnfocus = true;
-
-        // Определяем целевой тип метрики
-        let targetMetric = this._focusedMetric;
-
-        // Авто-корректировка: если группа метрики не совпадает с focused
-        if (item.metric_group && item.metric_group !== this._focusedMetric) {
-            targetMetric = item.metric_group;
-
-            // Если этот тип ещё не был выбран — добавляем
-            if (this._selectedMetrics[targetMetric] === undefined) {
-                this._selectedMetrics[targetMetric] = null;
-            }
-
-            // Переключаем фокус на новый тип
-            this._switchFocus(overlay, targetMetric);
-        }
-
-        // Сохраняем данные
-        this._selectedMetrics[targetMetric] = {
-            code: item.code,
-            metric_name: item.metric_name,
-            metric_group: item.metric_group,
-        };
-
-        // Обновляем поле кода
-        const metricInput = overlay.querySelector('.invoice-metric-search-input');
-        if (metricInput) {
-            metricInput.value = `${item.code} — ${item.metric_name}`;
-            metricInput.classList.add('has-value');
-        }
-
-        // Обновляем бейдж на чипе
-        const chip = overlay.querySelector(`.invoice-chip[data-metric="${targetMetric}"]`);
-        if (chip) {
-            this._updateChipBadge(chip, item.code);
-        }
-
-        this._hideMetricDropdown(overlay);
-    }
-
     // -----------------------------------------------------------------
     // Секция процессов
     // -----------------------------------------------------------------
-
-    static _filterAndShowProcesses(overlay, query) {
-        if (!this._cachedProcessDict) return;
-
-        const queryLower = query.toLowerCase();
-        const filtered = this._cachedProcessDict.filter(
-            p => p.process_code.toLowerCase().includes(queryLower) ||
-                 p.process_name.toLowerCase().includes(queryLower)
-        );
-
-        // Исключаем уже выбранные
-        const selectedCodes = new Set(this._selectedProcesses.map(p => p.process_code));
-        const available = filtered.filter(p => !selectedCodes.has(p.process_code));
-
-        this._showProcessDropdown(overlay, available.slice(0, 50));
-    }
-
-    static _showProcessDropdown(overlay, results) {
-        const dropdown = overlay.querySelector('.invoice-process-dropdown');
-        if (!dropdown) return;
-
-        dropdown.innerHTML = '';
-
-        if (results.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'invoice-process-search-dropdown-empty';
-            empty.textContent = 'Процессы не найдены';
-            dropdown.appendChild(empty);
-        } else {
-            results.forEach(item => {
-                const el = document.createElement('div');
-                el.className = 'invoice-process-dropdown-item';
-
-                const codeSpan = document.createElement('span');
-                codeSpan.className = 'invoice-process-item-code';
-                codeSpan.textContent = item.process_code;
-
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'invoice-process-item-name';
-                nameSpan.textContent = ` — ${item.process_name}`;
-
-                el.appendChild(codeSpan);
-                el.appendChild(nameSpan);
-
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this._selectProcess(overlay, item);
-                });
-                dropdown.appendChild(el);
-            });
-        }
-
-        dropdown.classList.add('visible');
-    }
-
-    static _hideProcessDropdown(overlay) {
-        const dropdown = overlay.querySelector('.invoice-process-dropdown');
-        if (dropdown) dropdown.classList.remove('visible');
-    }
-
-    static _selectProcess(overlay, item) {
-        this._selectedProcesses.push({
-            process_code: item.process_code,
-            process_name: item.process_name,
-        });
-
-        // Очищаем input
-        const processInput = overlay.querySelector('.invoice-process-search-input');
-        if (processInput) processInput.value = '';
-
-        this._hideProcessDropdown(overlay);
-        this._renderProcessChips(overlay);
-    }
 
     static _renderProcessChips(overlay) {
         const container = overlay.querySelector('.invoice-process-chips');
@@ -1072,65 +714,6 @@ export class InvoiceDialog extends DialogBase {
             chip.appendChild(removeBtn);
             container.appendChild(chip);
         });
-    }
-
-    // -----------------------------------------------------------------
-    // Секция подразделений
-    // -----------------------------------------------------------------
-
-    static _filterAndShowSubsidiaries(overlay, query) {
-        if (!this._cachedSubsidiaryDict) return;
-
-        const queryLower = query.toLowerCase();
-        const filtered = this._cachedSubsidiaryDict.filter(
-            s => s.name.toLowerCase().includes(queryLower)
-        );
-
-        this._showSubsidiaryDropdown(overlay, filtered.slice(0, 50));
-    }
-
-    static _showSubsidiaryDropdown(overlay, results) {
-        const dropdown = overlay.querySelector('.invoice-subsidiary-dropdown');
-        if (!dropdown) return;
-
-        dropdown.innerHTML = '';
-
-        if (results.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'invoice-subsidiary-search-dropdown-empty';
-            empty.textContent = 'Подразделения не найдены';
-            dropdown.appendChild(empty);
-        } else {
-            results.forEach(item => {
-                const el = document.createElement('div');
-                el.className = 'invoice-subsidiary-dropdown-item';
-                el.textContent = item.name;
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this._selectSubsidiary(overlay, item);
-                });
-                dropdown.appendChild(el);
-            });
-        }
-
-        dropdown.classList.add('visible');
-    }
-
-    static _hideSubsidiaryDropdown(overlay) {
-        const dropdown = overlay.querySelector('.invoice-subsidiary-dropdown');
-        if (dropdown) dropdown.classList.remove('visible');
-    }
-
-    static _selectSubsidiary(overlay, item) {
-        this._selectedSubsidiary = item.name;
-
-        const subInput = overlay.querySelector('.invoice-subsidiary-search-input');
-        if (subInput) {
-            subInput.value = item.name;
-            subInput.classList.add('has-value');
-        }
-
-        this._hideSubsidiaryDropdown(overlay);
     }
 
     /**
