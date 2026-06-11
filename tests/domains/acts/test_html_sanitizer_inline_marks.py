@@ -43,3 +43,20 @@ def test_onclick_still_stripped():
     html = '<span data-link-url="https://a/" onclick="alert(1)">t</span>'
     out = sanitize_html(html)
     assert "onclick" not in out
+
+
+def test_strike_tags_survive():
+    """M.19: зачёркивание не теряется — s/strike/del в whitelist.
+
+    Chromium execCommand('strikeThrough') эмитит <strike>; <s> и <del> —
+    эквиваленты (paste из внешних источников, diff-разметка).
+    """
+    for tag in ("s", "strike", "del"):
+        out = sanitize_html(f"до <{tag}>зачёркнуто</{tag}> после")
+        assert f"<{tag}>" in out, f"тег <{tag}> выкушен санитайзером"
+
+
+def test_strike_via_span_style_survives():
+    """Зачёркивание span-style формой (text-decoration: line-through) сохраняется."""
+    out = sanitize_html('<span style="text-decoration: line-through;">зач</span>')
+    assert "line-through" in out

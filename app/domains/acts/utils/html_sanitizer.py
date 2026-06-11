@@ -18,7 +18,7 @@ from bleach.css_sanitizer import CSSSanitizer
 
 
 ALLOWED_TAGS = [
-    "p", "br", "b", "strong", "i", "em", "u", "span", "a",
+    "p", "br", "b", "strong", "i", "em", "u", "s", "strike", "del", "span", "a",
     "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "div",
 ]
 
