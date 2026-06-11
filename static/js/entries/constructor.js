@@ -66,6 +66,7 @@ import '../constructor/state/state-core.js';
 import '../constructor/state/state-tree.js';
 import '../constructor/state/state-content.js';
 import '../constructor/state/metrics-risk-coordinator.js';
+import '../constructor/state/undo-delete.js';
 
 // Tree
 import '../constructor/tree/tree-drag-drop.js';
@@ -127,6 +128,7 @@ import { registerTablesSource } from '../constructor/header/notifications-source
 // без state-tree.js. Регистрация переехала в entry.
 import { App } from '../constructor/app.js';
 import { _initStateTracking } from '../constructor/state/state-core.js';
+import { UndoDeleteManager } from '../constructor/state/undo-delete.js';
 
 /**
  * Инициализирует shared-центр уведомлений в конструкторе и регистрирует
@@ -144,9 +146,11 @@ if (document.readyState === 'loading') {
         App.init();
         setTimeout(_initStateTracking, 0);
         _initNotificationCenter();
+        UndoDeleteManager.installHotkey();
     });
 } else {
     App.init();
     setTimeout(_initStateTracking, 0);
     _initNotificationCenter();
+    UndoDeleteManager.installHotkey();
 }

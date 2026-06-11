@@ -10,6 +10,7 @@ import { invalidateTableWarningsCache } from './notifications-source-tables.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { LockManager } from '../lock-manager.js';
 import { StorageManager } from '../storage-manager.js';
+import { UndoDeleteManager } from '../state/undo-delete.js';
 import { tableManager } from '../table/table-core.js';
 import { linkFootnoteContextMenu } from '../textblock/textblock-links-footnotes.js';
 import { violationManager } from '../violation/violation-init.js';
@@ -417,6 +418,9 @@ export class ActsMenuManager {
         // явная очистка гарантирует отсутствие ссылок на DOM старого акта.
         ItemsRenderer._domIndex.clear();
         invalidateTableWarningsCache();
+        // Снимки удалений принадлежат покидаемому акту — откат в новом
+        // акте привёл бы к вставке чужого поддерева.
+        UndoDeleteManager.clear();
     }
 
     /**
