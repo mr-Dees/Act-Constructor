@@ -125,11 +125,13 @@ export class LockManager {
 
             if (!resp.ok) {
                 console.warn('LockManager.manualUnlock: не удалось снять блокировку, статус', resp.status);
+                Notifications.error(`Не удалось снять блокировку акта (код ${resp.status}). Блокировка истечёт автоматически.`);
             } else {
                 console.log(`[LockManager] Акт ${this._actId} успешно разблокирован вручную`);
             }
         } catch (e) {
             console.error('[LockManager] Ошибка сети при manualUnlock:', e);
+            Notifications.error('Не удалось снять блокировку акта. Проверьте соединение.');
         }
     }
 
