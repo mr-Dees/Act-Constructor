@@ -172,7 +172,7 @@ Object.assign(ViolationManager.prototype, {
         // Перерисовываем с обновленными индексами
         this.renderContentItems(violation, container);
 
-        PreviewManager.update();
+        PreviewManager.updateBlock('violation', violation.id);
     },
 
     /**

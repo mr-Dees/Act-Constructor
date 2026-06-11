@@ -147,7 +147,7 @@ Object.assign(ViolationManager.prototype, {
                         content: content
                     });
 
-                    PreviewManager.update();
+                    PreviewManager.updateBlock('violation', violation.id);
                     Notifications.success(message);
                 }
             }

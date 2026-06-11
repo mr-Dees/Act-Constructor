@@ -78,7 +78,8 @@ export class TableCellsOperations {
                     ChangelogTracker._recordDebounced('modify_table', tableId, '', {field: 'cell'}, 5000);
                 }
 
-                PreviewManager.update();
+                // Контентная правка одной ячейки → точечный патч блока таблицы.
+                PreviewManager.updateBlock('table', tableId);
             }
 
             cellEl.classList.remove('editing');

@@ -141,7 +141,7 @@ Object.assign(ViolationManager.prototype, {
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);
@@ -198,7 +198,7 @@ Object.assign(ViolationManager.prototype, {
 
         captionInput.addEventListener('input', () => {
             item.caption = captionInput.value;
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
@@ -224,7 +224,7 @@ Object.assign(ViolationManager.prototype, {
 
         widthSelect.addEventListener('change', () => {
             item.width = parseInt(widthSelect.value, 10) || 0;
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         widthControl.appendChild(widthLabel);
@@ -268,7 +268,7 @@ Object.assign(ViolationManager.prototype, {
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);
