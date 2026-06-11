@@ -177,6 +177,30 @@ class TestSaveContentUsesTransaction:
         # Ни одной собственной транзакции
         assert mock_conn.transaction.call_count == 0
 
+    async def test_save_content_returns_updated_at(self, mock_conn):
+        """save_content отдаёт фактический updated_at акта после сохранения.
+
+        Фронт запоминает его как базу метаданных снимка-черновика
+        localStorage (baseUpdatedAt) для восстановления черновика (H3).
+        """
+        import datetime as dt
+
+        repo = ActContentRepository(mock_conn)
+        updated_at = dt.datetime(2026, 6, 11, 10, 0, 0, 123456)
+        # 1-й fetchval — audit_act_id, 2-й — SELECT updated_at после UPDATE
+        mock_conn.fetchval.side_effect = [None, updated_at]
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data()
+        result = await repo.save_content(act_id=1, data=data, username="user1")
+
+        assert result["status"] == "success"
+        assert result["updated_at"] == updated_at
+        # SELECT updated_at идёт отдельным запросом (не RETURNING — Greenplum)
+        select_sql = mock_conn.fetchval.call_args_list[-1].args[0]
+        assert "updated_at" in select_sql
+        assert "SELECT" in select_sql
+
 
 class TestInsertTableDenormalizationAndFlags:
     """insert_table сохраняет денормализацию (node_number/table_label) и 6 флагов."""
