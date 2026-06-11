@@ -9,6 +9,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
+from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.formatters.docx.builders.cover import build_cover_block
 from app.domains.acts.formatters.docx.builders.header_footer import apply_header_footer
 from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
@@ -18,6 +19,7 @@ from app.domains.acts.formatters.docx.builders.tables import build_table
 from app.domains.acts.formatters.docx.builders.violation import build_violation
 from app.domains.acts.formatters.docx.context import ExportContext
 from app.domains.acts.formatters.docx.numbering import apply_numbering, ensure_rubricator
+from app.domains.acts.formatters.tree_walker import WalkContext, collect_blocks, walk
 from app.domains.acts.formatters.docx.styles import (
     Fonts,
     Sizes,
@@ -64,45 +66,9 @@ class DocxFormatter:
         return doc
 
     def _render_tree(self, doc, ctx: ExportContext, num_id: int) -> None:
-        sections = (ctx.content.tree or {}).get("children", [])
-        for section in sections:
-            # Пустая строка-распорка до и после плашки рубрикатора.
-            add_blank_line(doc)
-            build_rubricator_plate(doc, num_id, section.get("label", ""))
-            add_blank_line(doc)
-            self._render_children(
-                doc, section.get("children", []),
-                ctx=ctx, num_id=num_id, ilvl=1,
-            )
-
-    def _render_children(self, doc, nodes, *, ctx, num_id, ilvl) -> None:
-        for node in nodes:
-            node_type = node.get("type", "item")
-            if node_type == "item":
-                # Пункты: выводятся и название, и нумерация уровня.
-                self._render_item(doc, node, num_id=num_id, ilvl=ilvl)
-                self._render_children(
-                    doc, node.get("children", []),
-                    ctx=ctx, num_id=num_id, ilvl=ilvl + 1,
-                )
-            elif node_type == "table" and node.get("tableId"):
-                schema = ctx.content.tables.get(node["tableId"])
-                if schema:
-                    # Таблица: только заголовок, без нумерации (не пункт).
-                    self._add_table_title(doc, node)
-                    build_table(doc, schema)
-                    # Пустая строка-распорка после любой таблицы.
-                    add_blank_line(doc)
-            elif node_type == "textblock" and node.get("textBlockId"):
-                schema = ctx.content.textBlocks.get(node["textBlockId"])
-                if schema:
-                    # Текстблок: без заголовка и без нумерации — только содержимое.
-                    self._render_textblock(doc, schema)
-            elif node_type == "violation" and node.get("violationId"):
-                schema = ctx.content.violations.get(node["violationId"])
-                if schema:
-                    # Нарушение: без заголовка и без нумерации (см. build_violation).
-                    build_violation(doc, schema)
+        # Обход дерева — единый walker, представление — в визиторе.
+        visitor = _DocxTreeVisitor(self, doc, num_id)
+        walk(ctx.content.tree or {}, visitor, collect_blocks(ctx.content))
 
     def _render_item(self, doc, node, *, num_id, ilvl) -> None:
         para = doc.add_paragraph()
@@ -166,6 +132,55 @@ class DocxFormatter:
         run.font.name = Fonts.main
         run.font.size = Pt(Sizes.body_pt)
         run.bold = True
+
+
+class _DocxTreeVisitor:
+    """Визитор tree-walker'а для DOCX: представление узлов дерева.
+
+    Контекст обхода (depth) транслируется в Word-нумерацию: дети корня
+    (depth 0) — плашки рубрикатора (уровень 0 multilevel-списка), вложенные
+    пункты — ilvl = depth. Рендеринг делегируется builders'ам и методам
+    DocxFormatter — сами builders walker'ом не затронуты.
+    """
+
+    def __init__(self, formatter: DocxFormatter, doc, num_id: int):
+        self._fmt = formatter
+        self._doc = doc
+        self._num_id = num_id
+
+    def on_item_enter(self, node: dict, ctx: WalkContext) -> None:
+        if ctx.depth == 0:
+            # Раздел верхнего уровня: плашка рубрикатора с распорками.
+            add_blank_line(self._doc)
+            build_rubricator_plate(self._doc, self._num_id, node.get("label", ""))
+            add_blank_line(self._doc)
+            return
+        # Пункт: выводятся и название, и нумерация уровня (ilvl = depth).
+        self._fmt._render_item(self._doc, node, num_id=self._num_id, ilvl=ctx.depth)
+
+    def on_item_exit(self, node: dict, ctx: WalkContext) -> None:
+        pass
+
+    def on_table(self, node: dict, schema, ctx: WalkContext) -> None:
+        if schema is None:
+            return
+        if node.get("type") == NODE_TYPE_TABLE:
+            # Узел-таблица: только заголовок, без нумерации (не пункт).
+            # Прикреплённой к пункту таблице заголовком служит сам пункт.
+            self._fmt._add_table_title(self._doc, node)
+        build_table(self._doc, schema)
+        # Пустая строка-распорка после любой таблицы.
+        add_blank_line(self._doc)
+
+    def on_textblock(self, node: dict, schema, ctx: WalkContext) -> None:
+        if schema is not None:
+            # Текстблок: без заголовка и без нумерации — только содержимое.
+            self._fmt._render_textblock(self._doc, schema)
+
+    def on_violation(self, node: dict, schema, ctx: WalkContext) -> None:
+        if schema is not None:
+            # Нарушение: без заголовка и без нумерации (см. build_violation).
+            build_violation(self._doc, schema)
 
 
 def _set_mark_bold(paragraph) -> None:

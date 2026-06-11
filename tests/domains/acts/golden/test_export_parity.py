@@ -156,72 +156,42 @@ def test_docx_footnote_text_preserved(golden_docx):
 
 
 # ---------------------------------------------------------------------------
-# Известные потери данных (НЕ чиним — фиксируем xfail strict)
+# Бывшие известные потери данных (зафиксированы xfail strict, починены
+# веткой export-tree-walker — теперь обычные регрессионные ассерты)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Узел type='item' с tableId: DOCX игнорирует таблицу "
-    "(formatter._render_children рендерит таблицу только у type='table'), "
-    "MD/TXT её выводят — потеря данных только в DOCX",
-)
 def test_docx_item_node_attached_table_rendered(golden_docx):
+    """Узел type='item' с tableId: DOCX рендерит и пункт, и таблицу (как MD/TXT)."""
     assert MARKER_ATTACHED_TBL_CELL in _docx_body_text(golden_docx)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ebe-8: «Рекомендации» нарушения не рендерятся в MD "
-    "(markdown_formatter._format_violation не имеет ветки recommendations; "
-    "DOCX рендерит)",
-)
 def test_md_recommendations_rendered(golden_md):
+    """«Рекомендации» нарушения рендерятся в MD (ebe-8 закрыт)."""
     assert MARKER_RECOMMENDATIONS in golden_md
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ebe-8: «Рекомендации» нарушения не рендерятся в TXT "
-    "(text_formatter._format_violation не имеет ветки recommendations; "
-    "DOCX рендерит)",
-)
 def test_txt_recommendations_rendered(golden_txt):
+    """«Рекомендации» нарушения рендерятся в TXT (ebe-8 закрыт)."""
     assert MARKER_RECOMMENDATIONS in golden_txt
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="URL ссылки текстблока (data-link-url) теряется в MD: "
-    "html_to_markdown вырезает теги вместе с атрибутами, текст ссылки остаётся",
-)
 def test_md_link_url_preserved(golden_md):
+    """URL ссылки текстблока (data-link-url) выводится в MD как [текст](url)."""
     assert MARKER_LINK_URL in golden_md
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="URL ссылки текстблока (data-link-url) теряется в TXT: "
-    "clean_html вырезает теги вместе с атрибутами, текст ссылки остаётся",
-)
 def test_txt_link_url_preserved(golden_txt):
+    """URL ссылки текстблока (data-link-url) выводится в TXT как «текст (url)»."""
     assert MARKER_LINK_URL in golden_txt
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Текст сноски (data-footnote-text) теряется в MD: "
-    "html_to_markdown вырезает теги вместе с атрибутами, виден только якорь",
-)
 def test_md_footnote_text_preserved(golden_md):
+    """Текст сноски (data-footnote-text) выводится в MD inline: «(сноска: …)»."""
     assert MARKER_FOOTNOTE_TEXT in golden_md
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Текст сноски (data-footnote-text) теряется в TXT: "
-    "clean_html вырезает теги вместе с атрибутами, виден только якорь",
-)
 def test_txt_footnote_text_preserved(golden_txt):
+    """Текст сноски (data-footnote-text) выводится в TXT inline: «(сноска: …)»."""
     assert MARKER_FOOTNOTE_TEXT in golden_txt
 
 
