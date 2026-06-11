@@ -99,11 +99,18 @@ class ActContentRepository(BaseRepository):
         await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
         await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
         await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
-        await self._update_edit_timestamp(act_id, username)
+        updated_at = await self._update_edit_timestamp(act_id, username)
 
         logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
 
-        return {"status": "success", "message": "Содержимое акта сохранено"}
+        # updated_at отдаётся фронту: он запоминает его как базу метаданных
+        # снимка-черновика localStorage (baseUpdatedAt) для решения о
+        # восстановлении черновика при следующей загрузке акта.
+        return {
+            "status": "success",
+            "message": "Содержимое акта сохранено",
+            "updated_at": updated_at,
+        }
 
     # -------------------------------------------------------------------------
     # ЗАГРУЗКА
@@ -613,8 +620,12 @@ class ActContentRepository(BaseRepository):
             is_other_risk_table,
         )
 
-    async def _update_edit_timestamp(self, act_id: int, username: str) -> None:
-        """Обновляет метку последнего редактирования."""
+    async def _update_edit_timestamp(self, act_id: int, username: str):
+        """Обновляет метку последнего редактирования.
+
+        Возвращает фактическое значение updated_at отдельным SELECT
+        (не UPDATE ... RETURNING — для совместимости с Greenplum).
+        """
         await self.conn.execute(
             f"""
             UPDATE {self.acts}
@@ -624,5 +635,9 @@ class ActContentRepository(BaseRepository):
             WHERE id = $2
             """,
             username,
+            act_id
+        )
+        return await self.conn.fetchval(
+            f"SELECT updated_at FROM {self.acts} WHERE id = $1",
             act_id
         )

@@ -685,11 +685,9 @@ export class AppConfig {
      * Настройки локального хранилища
      */
     static localStorage = {
-        // Ключ для хранения состояния акта
-        stateKey: 'audit_workstation_state',
-
-        // Ключ для хранения временной метки последнего сохранения
-        timestampKey: 'audit_workstation_timestamp',
+        // Префикс ключа снимка-черновика акта; полный ключ — per-act:
+        // `${stateKeyPrefix}:{actId}` (снимки разных актов не затирают друг друга)
+        stateKeyPrefix: 'audit_workstation_state',
 
         // Дебаунс для автосохранения (мс) - 3 секунды для меньшей частоты
         autoSaveDebounce: 3000,

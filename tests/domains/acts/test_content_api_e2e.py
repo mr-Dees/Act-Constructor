@@ -207,6 +207,25 @@ class TestSaveActContent:
         assert body["status"] == "success"
         svc.save_content.assert_awaited_once()
 
+    def test_save_content_response_includes_updated_at(self):
+        """PUT отдаёт серверный updated_at — базу метаданных снимка-черновика (H3)."""
+        svc = _make_content_service()
+        svc.save_content.return_value = {
+            "status": "success",
+            "message": "Содержимое сохранено",
+            "updated_at": dt.datetime(2026, 6, 11, 10, 0, 0, 123456),
+        }
+        app = _build_app(content_service=svc)
+
+        with TestClient(app) as client:
+            resp = client.put(
+                "/api/v1/acts/42/content", json=_valid_save_payload(),
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["updated_at"] == "2026-06-11T10:00:00.123456"
+
     def test_save_content_lock_conflict_returns_409(self):
         """Чужая блокировка → 409 через ActLockError."""
         svc = _make_content_service()

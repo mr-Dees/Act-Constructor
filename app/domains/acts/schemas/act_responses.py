@@ -1,5 +1,7 @@
 """Pydantic-модели ответов API."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -39,6 +41,12 @@ class RestoreVersionResponse(BaseModel):
 
 
 class SaveContentResponse(BaseModel):
-    """Ответ на сохранение содержимого."""
+    """Ответ на сохранение содержимого.
+
+    updated_at — серверная метка обновления акта после сохранения; фронт
+    запоминает её как базу метаданных снимка-черновика localStorage
+    (baseUpdatedAt) для решения о восстановлении черновика (H3).
+    """
     status: str
     message: str
+    updated_at: datetime | None = None
