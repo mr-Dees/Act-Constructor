@@ -8,6 +8,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
+import { UndoDeleteManager } from './undo-delete.js';
 import { AppState, _unwrap } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
@@ -185,6 +186,45 @@ Object.assign(AppState, {
     },
 
     /**
+     * Вставляет ГОТОВЫЙ узел (с поддеревом) в children родителя по индексу.
+     * Официальный мутатор для восстановления удалённых блоков (undo-delete):
+     * вставка через tracked-узел (dirty-tracking), индекс clamp'ится по
+     * pinned-инварианту (_getFirstNonPinnedIndex) и длине children,
+     * поддерево регистрируется в _nodeIndex/_parentIndex.
+     *
+     * НЕ создаёт новый узел (в отличие от addNode) и НЕ трогает записи
+     * словарей — вызывающий отвечает за их восстановление.
+     *
+     * @param {string} parentId - ID родительского узла
+     * @param {Object} node - Готовый узел с поддеревом
+     * @param {number} index - Желаемый индекс в children родителя
+     * @returns {Object} Результат с полями valid, message
+     */
+    insertNodeAt(parentId, node, index) {
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
+
+        const parent = this.findNodeById(parentId);
+        if (!parent) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+
+        if (!parent.children) parent.children = [];
+
+        // Clamp: не раньше первого незакреплённого (pinned-инвариант),
+        // не дальше конца children.
+        const firstNonPinned = this._getFirstNonPinnedIndex(parent);
+        let effectiveIndex = Number.isInteger(index) ? index : parent.children.length;
+        if (effectiveIndex < firstNonPinned) effectiveIndex = firstNonPinned;
+        if (effectiveIndex > parent.children.length) effectiveIndex = parent.children.length;
+
+        parent.children.splice(effectiveIndex, 0, node);
+        this._indexNodeAdded(node, parent);
+
+        return ValidationCore.success();
+    },
+
+    /**
      * Удаляет узел и все связанные данные
      * @param {string} nodeId - ID узла для удаления
      * @returns {boolean} true если удаление успешно
@@ -212,7 +252,18 @@ Object.assign(AppState, {
             return false;
         }
 
-        return this._deleteNodeUnchecked(node, nodeId);
+        // Снимок для отката — ДО удаления (Б-4). В стек попадает только после
+        // фактического удаления: rollback каскада metrics↔risk возвращает узел,
+        // и тогда commit пропускается (откатывать нечего).
+        const undoSnapshot = UndoDeleteManager.captureDeletion(nodeId);
+
+        const result = this._deleteNodeUnchecked(node, nodeId);
+
+        if (result && undoSnapshot && !this._findNodeRaw(nodeId)) {
+            UndoDeleteManager.commit(undoSnapshot);
+        }
+
+        return result;
     },
 
     /**

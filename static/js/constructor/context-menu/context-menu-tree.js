@@ -6,6 +6,7 @@ import { InvoiceDialog } from '../dialog/dialog-invoice.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { PreviewManager } from '../preview/preview.js';
 import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
+import { UndoDeleteManager } from '../state/undo-delete.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import {
@@ -476,7 +477,8 @@ export class TreeContextMenu {
                 const deleted = AppState.deleteNode(nodeId);
                 if (deleted) {
                     this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
-                    Notifications.info('Элемент удалён');
+                    // Toast с кнопкой «Отменить» — откат последнего удаления (Б-4).
+                    UndoDeleteManager.showDeletedToast();
                 }
             }
         });
