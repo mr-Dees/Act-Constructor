@@ -25,6 +25,22 @@ from app.domains.acts.formatters.docx.styles import (
     apply_document_defaults,
     ensure_footnote_styles,
 )
+from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
+
+# Нетронутый юзером formatting (все значения схемных дефолтов) → легаси-рендер
+# текстблока: JUSTIFY + body_pt. Любое отличие — formatting задан явно и
+# применяется буквально (M.1): поведение существующих актов не меняется.
+_DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
+
+# px → pt: умножение на 0.75 (16px → 12pt), как в builders/inline.py.
+_PX_TO_PT = 0.75
+
+_TB_ALIGNMENT_MAP = {
+    "left": WD_ALIGN_PARAGRAPH.LEFT,
+    "center": WD_ALIGN_PARAGRAPH.CENTER,
+    "right": WD_ALIGN_PARAGRAPH.RIGHT,
+    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
+}
 
 
 class DocxFormatter:
@@ -81,9 +97,7 @@ class DocxFormatter:
                 schema = ctx.content.textBlocks.get(node["textBlockId"])
                 if schema:
                     # Текстблок: без заголовка и без нумерации — только содержимое.
-                    para = doc.add_paragraph()
-                    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                    apply_inline_html(para, schema.content, base_size_pt=Sizes.body_pt)
+                    self._render_textblock(doc, schema)
             elif node_type == "violation" and node.get("violationId"):
                 schema = ctx.content.violations.get(node["violationId"])
                 if schema:
@@ -103,9 +117,39 @@ class DocxFormatter:
         _set_mark_bold(para)
 
         if node.get("content"):
+            # content пункта — plain-текст из textarea (M.4): выводится дословно,
+            # без HTML-парсинга — литеральные `<`/`&` не искажаются (паритет MD/TXT).
             body_para = doc.add_paragraph()
             body_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            apply_inline_html(body_para, node["content"], base_size_pt=Sizes.body_pt)
+            body_run = body_para.add_run(node["content"])
+            body_run.font.name = Fonts.main
+            body_run.font.size = Pt(Sizes.body_pt)
+
+    def _render_textblock(self, doc, schema) -> None:
+        """Текстблок с учётом базового formatting (M.1).
+
+        Нетронутый formatting (равен схемным дефолтам) → легаси: JUSTIFY +
+        body_pt. Заданный юзером — применяется буквально: alignment,
+        fontSize (px→pt ×0.75), bold/italic/underline поверх runs.
+        Inline-разметка содержимого (теги <b>/<i>/... ) имеет приоритет —
+        базовые свойства лишь «включают», но не снимают начертание.
+        """
+        para = doc.add_paragraph()
+        fmt = schema.formatting
+        if fmt == _DEFAULT_TB_FORMATTING:
+            para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            apply_inline_html(para, schema.content, base_size_pt=Sizes.body_pt)
+            return
+        para.alignment = _TB_ALIGNMENT_MAP.get(fmt.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY)
+        apply_inline_html(para, schema.content, base_size_pt=fmt.fontSize * _PX_TO_PT)
+        if fmt.bold or fmt.italic or fmt.underline:
+            for run in para.runs:
+                if fmt.bold:
+                    run.bold = True
+                if fmt.italic:
+                    run.italic = True
+                if fmt.underline:
+                    run.underline = True
 
     def _add_table_title(self, doc, node) -> None:
         """Заголовок таблицы: жирная подпись без нумерации (таблица — не пункт)."""
