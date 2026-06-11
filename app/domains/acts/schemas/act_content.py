@@ -10,6 +10,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domains.acts.block_types import (
+    LEAF_BLOCK_REFS,
+    NODE_TYPE_TABLE,
+    NODE_TYPE_TEXTBLOCK,
+    NODE_TYPE_VIOLATION,
+)
+
 # Жёсткие границы таблиц и шрифта текстблоков — единый источник для
 # Field-констрейнтов схем ниже и эндпоинта GET /acts/limits (api/limits.py).
 TABLE_MAX_ROWS = 64
@@ -509,6 +516,9 @@ class ActItemSchema(BaseModel):
     # введения метки). Поле опционально, чтобы валидатор дерева (C4) не
     # отбраковывал легитимные сохранённые снимки; id остаётся обязательным.
     label: str | None = ""
+    # Набор типов = реестр app/domains/acts/block_types.py (NODE_TYPES).
+    # Literal статичен сознательно: Literal из переменных капризен для
+    # type checker'ов. Соответствие пинит test_block_types_guard.py.
     type: Literal["item", "textblock", "violation", "table"] = "item"
     content: str | None = ""
     protected: bool | None = False
@@ -601,11 +611,23 @@ class ActDataSchema(BaseModel):
         Обратное направление НЕ проверяется: запись словаря без узла в дереве —
         не ошибка запроса, такие сироты отбрасывает orphan-фильтр репозитория
         при сохранении (pbe-4).
+
+        Состав проверяемых ссылок строится из реестра LEAF_BLOCK_REFS
+        (block_types.py): новый leaf-тип без словаря в схеме упадёт здесь
+        AttributeError'ом на старте, а не потеряет ссылки молча.
         """
-        ref_checks = (
-            ("tableId", self.tables, "несуществующую таблицу"),
-            ("textBlockId", self.textBlocks, "несуществующий текстовый блок"),
-            ("violationId", self.violations, "несуществующее нарушение"),
+        target_names = {
+            NODE_TYPE_TABLE: "несуществующую таблицу",
+            NODE_TYPE_TEXTBLOCK: "несуществующий текстовый блок",
+            NODE_TYPE_VIOLATION: "несуществующее нарушение",
+        }
+        ref_checks = tuple(
+            (
+                ref_field,
+                getattr(self, dict_name),
+                target_names.get(block_type, "несуществующую запись словаря"),
+            )
+            for block_type, (ref_field, dict_name) in LEAF_BLOCK_REFS.items()
         )
         stack = [self.tree] if self.tree else []
         while stack:
