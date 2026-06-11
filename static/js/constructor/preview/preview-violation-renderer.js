@@ -1,218 +1,196 @@
 /**
  * Рендерер нарушений для предпросмотра
  *
- * Создает компактное текстовое представление нарушений
- * с обрезкой длинных текстов и подсчетом элементов.
+ * Паритет ПОЛНОТЫ данных с DOCX (build_violation): полные тексты всех полей
+ * без обрезки, полный список описаний (descriptionList), полные кейсы и
+ * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подписи-ярлыки
+ * остаются превью-стилем (решение Д.3 — паритет данных, не букв подписей).
  */
-import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML } from '../../shared/sanitize.js';
+import { getImageLimits } from '../violation/violation-image-validator.js';
+
+/** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
+const SHEET_HEIGHT_MM = 297;
+
+/**
+ * Чистая модель строк нарушения — полные тексты, как в DOCX.
+ * Семантика нумерации кейсов и сброса счётчиков — как в
+ * docx/builders/violation.py и MD/TXT-форматтерах.
+ *
+ * @param {Object} violation - Данные нарушения
+ * @returns {Array<Object>} Строки: {type:'line', label, text} |
+ *          {type:'list', label, items} | {type:'image', item}
+ */
+export function collectViolationLines(violation) {
+    const lines = [];
+
+    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '—' });
+    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '—' });
+
+    if (violation.descriptionList?.enabled) {
+        const items = (violation.descriptionList.items || []).filter(item => item && item.trim());
+        if (items.length > 0) {
+            lines.push({ type: 'list', label: 'В том числе', items });
+        }
+    }
+
+    if (violation.additionalContent?.enabled) {
+        let caseNumber = 1;
+        let textNumber = 1;
+        for (const item of violation.additionalContent.items || []) {
+            if (item.type === 'case') {
+                if (item.content?.trim()) {
+                    lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content });
+                    caseNumber++;
+                }
+            } else if (item.type === 'image') {
+                lines.push({ type: 'image', item });
+                caseNumber = 1;
+            } else if (item.type === 'freeText') {
+                if (item.content?.trim()) {
+                    lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content });
+                    textNumber++;
+                }
+                caseNumber = 1;
+            }
+        }
+    }
+
+    const optionalFields = [
+        ['reasons', 'Причины'],
+        ['consequences', 'Последствия'],
+        ['responsible', 'Ответственный за решение проблем'],
+        ['recommendations', 'Рекомендации'],
+    ];
+    for (const [key, label] of optionalFields) {
+        const field = violation[key];
+        if (field?.enabled && field?.content) {
+            lines.push({ type: 'line', label, text: field.content });
+        }
+    }
+
+    return lines;
+}
+
+/**
+ * Чистый маппинг item.width / лимита высоты → inline-стиль картинки превью.
+ *
+ * @param {Object} item - Элемент типа image (поле width: 0 — авто)
+ * @param {number} previewMaxHeightPercent - Лимит высоты, % высоты листа
+ * @returns {{width: string, maxHeight: string}} Значения CSS-свойств
+ */
+export function imagePresentationStyle(item, previewMaxHeightPercent) {
+    const width = item && item.width > 0 ? `${item.width}%` : '';
+    const heightMm = SHEET_HEIGHT_MM * (previewMaxHeightPercent || 40) / 100;
+    // Округление до 0.1 мм, без хвоста «.0».
+    const maxHeight = `${parseFloat(heightMm.toFixed(1))}mm`;
+    return { width, maxHeight };
+}
 
 export class PreviewViolationRenderer {
     /**
-     * Создает элемент нарушения
+     * Создает элемент нарушения (полные данные, без обрезки)
      *
      * @param {Object} violation - Данные нарушения
-     * @param {number} [previewTrim] - Максимальная длина текста (по умолчанию из конфига)
      * @returns {HTMLElement} Элемент нарушения
      */
-    static create(violation, previewTrim = AppConfig.preview.defaultTrimLength) {
-        const container = this._createContainer();
-
-        this._renderBasicInfo(container, violation, previewTrim);
-        this._renderDescriptionList(container, violation);
-        this._renderAdditionalContent(container, violation, previewTrim);
-        this._renderOptionalFields(container, violation, previewTrim);
-
-        return container;
-    }
-
-    /**
-     * Создает контейнер нарушения
-     * @private
-     */
-    static _createContainer() {
+    static create(violation) {
         const container = document.createElement('div');
         container.className = 'preview-violation';
+
+        for (const line of collectViolationLines(violation)) {
+            if (line.type === 'line') {
+                this._addLine(container, line.label, line.text);
+            } else if (line.type === 'list') {
+                this._addList(container, line.label, line.items);
+            } else if (line.type === 'image') {
+                this._addImage(container, line.item);
+            }
+        }
+
         return container;
     }
 
     /**
-     * Рендерит базовую информацию
+     * Добавляет строку «Метка: полный текст»
      * @private
      */
-    static _renderBasicInfo(container, violation, previewTrim) {
-        // Используем меньшую длину для критичных полей (половина от основного)
-        const shortTrim = Math.floor(previewTrim / 2);
-
-        this._addLine(container, 'Нарушено', violation.violated, shortTrim);
-        this._addLine(container, 'Установлено', violation.established, shortTrim);
-    }
-
-    /**
-     * Рендерит список описаний
-     * @private
-     */
-    static _renderDescriptionList(container, violation) {
-        if (!violation.descriptionList?.enabled) return;
-
-        const items = violation.descriptionList.items;
-        const count = items.filter(item => item.trim()).length;
-
-        if (count > 0) {
-            const text = `${count} ${this._pluralize(count, 'метрика', 'метрики', 'метрик')}`;
-            this._addLine(container, 'В том числе', text);
-        }
-    }
-
-    /**
-     * Рендерит дополнительный контент
-     * @private
-     */
-    static _renderAdditionalContent(container, violation, previewTrim) {
-        if (!violation.additionalContent?.enabled) return;
-
-        const items = violation.additionalContent.items || [];
-        const counters = {case: 1, image: 1, text: 1};
-
-        items.forEach(item => {
-            this._renderContentItem(container, item, counters, previewTrim);
-        });
-    }
-
-    /**
-     * Рендерит элемент дополнительного контента
-     * @private
-     */
-    static _renderContentItem(container, item, counters, previewTrim) {
-        const handlers = {
-            'case': this._renderCase,
-            'image': this._renderImage,
-            'freeText': this._renderFreeText
-        };
-
-        const handler = handlers[item.type];
-        if (handler) {
-            handler.call(this, container, item, counters, previewTrim);
-        }
-    }
-
-    /**
-     * Рендерит кейс
-     * @private
-     */
-    static _renderCase(container, item, counters, previewTrim) {
-        if (!item.content?.trim()) return;
-
-        // Для кейсов используем увеличенную длину (в 1.5 раза больше)
-        const extendedTrim = Math.floor(previewTrim * 1.5);
-
-        this._addLine(
-            container,
-            `Кейс ${counters.case}`,
-            item.content,
-            extendedTrim
-        );
-        counters.case++;
-        counters.image = 1;
-        counters.text = 1;
-    }
-
-    /**
-     * Рендерит изображение
-     * @private
-     */
-    static _renderImage(container, item, counters, previewTrim) {
-        const caption = item.caption ? ` - ${this._trim(item.caption, previewTrim)}` : '';
-        const text = `${this._trim(item.filename, previewTrim)}${caption}`;
-
-        this._addLine(container, `Изображение ${counters.image}`, text);
-        counters.image++;
-        counters.case = 1;
-    }
-
-    /**
-     * Рендерит свободный текст
-     * @private
-     */
-    static _renderFreeText(container, item, counters, previewTrim) {
-        if (!item.content?.trim()) return;
-
-        // Для свободного текста используем увеличенную длину
-        const extendedTrim = Math.floor(previewTrim * 1.5);
-
-        this._addLine(
-            container,
-            `Текст ${counters.text}`,
-            item.content,
-            extendedTrim
-        );
-        counters.text++;
-        counters.case = 1;
-    }
-
-    /**
-     * Рендерит опциональные поля
-     * @private
-     */
-    static _renderOptionalFields(container, violation, previewTrim) {
-        // Для опциональных полей используем меньшую длину
-        const shortTrim = Math.floor(previewTrim / 2);
-
-        const fields = [
-            ['reasons', 'Причины'],
-            ['consequences', 'Последствия'],
-            ['responsible', 'Ответственный за решение проблем'],
-            ['recommendations', 'Рекомендации']
-        ];
-
-        fields.forEach(([key, label]) => {
-            const field = violation[key];
-            if (field?.enabled && field?.content) {
-                this._addLine(container, label, field.content, shortTrim);
-            }
-        });
-    }
-
-    /**
-     * Добавляет строку информации
-     * @private
-     */
-    static _addLine(container, label, text, maxLength = null) {
-        // Если maxLength не указан, используем значение по умолчанию из конфига
-        const trimLength = maxLength ?? AppConfig.preview.defaultTrimLength;
-
+    static _addLine(container, label, text) {
         const line = document.createElement('div');
         line.className = 'preview-violation-line';
         // label статичен; text — пользовательское поле нарушения, escape перед склейкой.
-        const safeText = SafeHTML.escapeHtml(this._trim(text, trimLength));
-        line.innerHTML = `${label}: ${safeText}`;
+        line.innerHTML = `${label}: ${SafeHTML.escapeHtml(text)}`;
         container.appendChild(line);
     }
 
     /**
-     * Обрезает текст до указанной длины
+     * Добавляет полный список описаний (паритет с буллетами DOCX)
      * @private
-     * @param {string} text - Исходный текст
-     * @param {number} maxLength - Максимальная длина
-     * @returns {string} Обрезанный текст
      */
-    static _trim(text, maxLength) {
-        if (!text) return '—';
-        const str = text.toString();
-        return str.length > maxLength ? str.slice(0, maxLength) + '...' : str;
+    static _addList(container, label, items) {
+        const line = document.createElement('div');
+        line.className = 'preview-violation-line';
+        line.textContent = `${label}:`;
+        container.appendChild(line);
+
+        const list = document.createElement('ul');
+        list.className = 'preview-violation-desclist';
+        for (const item of items) {
+            const li = document.createElement('li');
+            li.textContent = item;
+            list.appendChild(li);
+        }
+        container.appendChild(list);
     }
 
     /**
-     * Правильное склонение существительных
+     * Добавляет картинку: по центру, подпись курсивом снизу (как DOCX, Б-1.5).
+     * Сломанная картинка (onerror) заменяется текстовым плейсхолдером.
      * @private
      */
-    static _pluralize(count, one, few, many) {
-        const mod10 = count % 10;
-        const mod100 = count % 100;
+    static _addImage(container, item) {
+        const wrap = document.createElement('div');
+        wrap.className = 'preview-violation-image-wrap';
 
-        if (mod10 === 1 && mod100 !== 11) return one;
-        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-        return many;
+        if (!item.url) {
+            // Пустой url (черновик) → плейсхолдер, как в DOCX/MD/TXT.
+            const placeholder = document.createElement('div');
+            placeholder.className = 'preview-violation-line';
+            placeholder.textContent = `Изображение: ${item.filename || ''}`;
+            wrap.appendChild(placeholder);
+            container.appendChild(wrap);
+            this._appendCaption(container, item);
+            return;
+        }
+
+        const img = document.createElement('img');
+        img.className = 'preview-violation-image';
+        img.alt = item.caption || item.filename || '';
+        const style = imagePresentationStyle(item, getImageLimits().previewMaxHeightPercent);
+        if (style.width) img.style.width = style.width;
+        img.style.maxHeight = style.maxHeight;
+        img.onerror = () => {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'preview-violation-line';
+            placeholder.textContent = `Изображение: ${item.filename || ''}`;
+            wrap.replaceChildren(placeholder);
+        };
+        img.src = item.url;
+        wrap.appendChild(img);
+        container.appendChild(wrap);
+        this._appendCaption(container, item);
+    }
+
+    /**
+     * Подпись картинки курсивом по центру (если задана)
+     * @private
+     */
+    static _appendCaption(container, item) {
+        if (!item.caption) return;
+        const caption = document.createElement('div');
+        caption.className = 'preview-violation-caption';
+        caption.textContent = item.caption;
+        container.appendChild(caption);
     }
 }
 

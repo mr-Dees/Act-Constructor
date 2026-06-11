@@ -328,7 +328,9 @@ export class PreviewManager {
 
         const contentDiv = document.createElement('div');
         contentDiv.className = 'preview-content';
-        contentDiv.textContent = this._trimText(child.content, previewTrim);
+        // M.5: content пункта выводится полностью (DOCX не обрезает),
+        // previewTrim к нему не применяется.
+        contentDiv.textContent = child.content;
         container.appendChild(contentDiv);
     }
 
@@ -338,18 +340,6 @@ export class PreviewManager {
      */
     static _hasContent(textBlock) {
         return textBlock?.content?.trim();
-    }
-
-    /**
-     * Обрезает текст до указанной длины
-     * @private
-     * @param {string} text - Исходный текст
-     * @param {number} maxLength - Максимальная длина
-     * @returns {string} Обрезанный текст
-     */
-    static _trimText(text, maxLength) {
-        const str = text.toString();
-        return str.length > maxLength ? str.slice(0, maxLength) + '…' : str;
     }
 
     /**
