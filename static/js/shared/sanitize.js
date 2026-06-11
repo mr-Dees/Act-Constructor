@@ -7,6 +7,15 @@
  *
  * Защищает: textblock-editor, preview-violation-renderer, diff-renderer,
  * preview-textblock-renderer, chat-renderer.
+ *
+ * Профили (5.2.3):
+ * - 'acts' — строгий allowlist, СИНХРОННЫЙ с бэк-whitelist
+ *   app/domains/acts/utils/html_sanitizer.py (ALLOWED_TAGS/ALLOWED_ATTRS,
+ *   включая s/strike/del из M.19 и data-атрибуты ссылок/сносок).
+ *   Используется рендерами контента актов (preview-textblock-renderer).
+ * - default — прежний blocklist-конфиг: его используют чат (markdown →
+ *   strong/em/code/br) и diff-renderer (ins/del) — менять без аудита
+ *   потребителей нельзя (shared-модуль).
  */
 
 const DEFAULT_CONFIG = {
@@ -28,6 +37,35 @@ const DEFAULT_CONFIG = {
     ],
 };
 
+// Allowlist контента актов — зеркало ALLOWED_TAGS/ALLOWED_ATTRS бэка
+// (app/domains/acts/utils/html_sanitizer.py). При изменении бэк-whitelist —
+// менять синхронно (страж: tests/js/sanitize-profiles.test.mjs).
+const ACTS_CONFIG = {
+    ALLOWED_TAGS: [
+        'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del',
+        'span', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div',
+    ],
+    // DOMPurify не разделяет атрибуты по тегам — объединение бэковых
+    // a[href,title] + span[class,style,data-*] + *[class].
+    ALLOWED_ATTR: [
+        'href', 'title', 'class', 'style',
+        'data-footnote-id', 'data-footnote-text',
+        'data-link-id', 'data-link-url',
+    ],
+};
+
+export const SAFE_HTML_PROFILES = {
+    acts: ACTS_CONFIG,
+};
+
+function resolveConfig(extraConfig) {
+    if (!extraConfig) return DEFAULT_CONFIG;
+    if (typeof extraConfig === 'string') {
+        return SAFE_HTML_PROFILES[extraConfig] || DEFAULT_CONFIG;
+    }
+    return Object.assign({}, DEFAULT_CONFIG, extraConfig);
+}
+
 let fallbackWarned = false;
 
 function warnFallbackOnce() {
@@ -43,10 +81,7 @@ function sanitize(html, extraConfig) {
     if (html == null) return '';
     const str = String(html);
     if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
-        const config = extraConfig
-            ? Object.assign({}, DEFAULT_CONFIG, extraConfig)
-            : DEFAULT_CONFIG;
-        return window.DOMPurify.sanitize(str, config);
+        return window.DOMPurify.sanitize(str, resolveConfig(extraConfig));
     }
     warnFallbackOnce();
     return escapeHtml(str);
@@ -55,10 +90,7 @@ function sanitize(html, extraConfig) {
 function set(el, html, extraConfig) {
     if (!el) return;
     if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
-        const config = extraConfig
-            ? Object.assign({}, DEFAULT_CONFIG, extraConfig)
-            : DEFAULT_CONFIG;
-        el.innerHTML = window.DOMPurify.sanitize(String(html ?? ''), config);
+        el.innerHTML = window.DOMPurify.sanitize(String(html ?? ''), resolveConfig(extraConfig));
         return;
     }
     warnFallbackOnce();
