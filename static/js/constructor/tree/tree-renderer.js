@@ -24,14 +24,14 @@ export class TreeRenderer {
         // через AppState.setNodeInvoice. Заменяет полный treeManager.render()
         // после save в диалоге фактуры.
         window.ChatEventBus?.on?.('node:invoice-changed', ({nodeId}) => {
-            const node = TreeUtils?.findNodeById?.(nodeId);
+            const node = AppState?.findNodeById?.(nodeId);
             if (node) this.updateInvoiceBadge(node);
         });
 
         // Точечный апдейт бейджа ТБ при изменении node.tb через AppState.setNodeTb.
         // Подписчик отвечает за обновление и текущего узла, и родителей под §5.
         window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
-            const node = TreeUtils?.findNodeById?.(nodeId);
+            const node = AppState?.findNodeById?.(nodeId);
             if (node) this.updateTbBadge(node);
         });
     }
@@ -648,7 +648,7 @@ export class TreeRenderer {
         }
 
         // Обновляем бейджи родительских узлов (computed TB)
-        let parent = TreeUtils.findParentNode(node.id);
+        let parent = AppState.findParentNode(node.id);
         while (parent && parent.id !== 'root') {
             if (TreeUtils.isUnderSection5(parent)) {
                 const parentLi = this.manager.container.querySelector(`[data-node-id="${parent.id}"]`);
@@ -660,7 +660,7 @@ export class TreeRenderer {
                     }
                 }
             }
-            parent = TreeUtils.findParentNode(parent.id);
+            parent = AppState.findParentNode(parent.id);
         }
     }
 

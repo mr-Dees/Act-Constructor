@@ -44,6 +44,7 @@ Object.assign(AppState, {
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, '', false, true);
 
         node.children.push(tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const headers = this._generateDefaultHeaders(cols);
         const grid = this._createTableGrid(rows, cols, headers);
@@ -86,6 +87,7 @@ Object.assign(AppState, {
         const textBlockNode = this._createContentNode(nodeId, textBlockId, AppConfig.nodeTypes.TEXTBLOCK);
 
         node.children.push(textBlockNode);
+        this._indexNodeAdded(textBlockNode, node);
 
         const textBlock = this._createTextBlockObject(textBlockId, textBlockNode.id);
 
@@ -116,6 +118,7 @@ Object.assign(AppState, {
         const violationNode = this._createContentNode(nodeId, violationId, AppConfig.nodeTypes.VIOLATION);
 
         node.children.push(violationNode);
+        this._indexNodeAdded(violationNode, node);
 
         const violation = this._createViolationObject(violationId, violationNode.id);
 
@@ -248,6 +251,7 @@ Object.assign(AppState, {
         tableNode.kind = KIND_METRICS;
 
         node.children.unshift(tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
@@ -400,6 +404,7 @@ Object.assign(AppState, {
         tableNode.kind = KIND_MAIN_METRICS;
 
         node5.children.unshift(tableNode);
+        this._indexNodeAdded(tableNode, node5);
 
         const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
@@ -494,6 +499,7 @@ Object.assign(AppState, {
                     firstLevelNode.children = firstLevelNode.children.filter(
                         child => child.id !== metricsTableNode.id
                     );
+                    this._unindexNodeRemoved(metricsTableNode);
                 }
             }
         }
@@ -509,6 +515,7 @@ Object.assign(AppState, {
                 node5.children = node5.children.filter(
                     child => child.id !== mainMetricsTableNode.id
                 );
+                this._unindexNodeRemoved(mainMetricsTableNode);
             }
         }
 
@@ -536,6 +543,7 @@ Object.assign(AppState, {
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createTableGrid(preset.rows, preset.headers.length, preset.headers);
 
@@ -574,6 +582,7 @@ Object.assign(AppState, {
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createOperationalRiskGrid();
 
@@ -711,6 +720,7 @@ Object.assign(AppState, {
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createTaxRiskGrid();
 
@@ -798,6 +808,7 @@ Object.assign(AppState, {
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         // Явно переиспользуем общую шапку метрик: «прочие риски» намеренно
         // имеют ту же сводную сетку (см. docstring _createMetricsHeaderGrid).

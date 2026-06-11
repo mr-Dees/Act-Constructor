@@ -61,6 +61,9 @@ export const MetricsRiskCoordinator = {
             rollback: () => {
                 if (node5 && tables5) node5.children = tables5;
                 if (tablesCopy) AppState.tables = tablesCopy;
+                // Восстановленные узлы — новые объекты (JSON-копии): индекс
+                // id→node обязан быть перестроен, иначе он держит мёртвые ссылки.
+                AppState._rebuildNodeIndex?.();
             }
         };
     },

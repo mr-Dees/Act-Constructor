@@ -206,6 +206,7 @@ Object.assign(AppState, {
     _addAsChild(parent, newNode) {
         if (!parent.children) parent.children = [];
         parent.children.push(newNode);
+        this._indexNodeAdded(newNode, parent);
     },
 
     /**
@@ -220,6 +221,7 @@ Object.assign(AppState, {
         if (grandParent?.children) {
             const index = grandParent.children.findIndex(n => n.id === siblingId);
             grandParent.children.splice(index + 1, 0, newNode);
+            this._indexNodeAdded(newNode, grandParent);
         }
     },
 
@@ -347,7 +349,9 @@ Object.assign(AppState, {
         const parent = this.findParentNode(nodeId);
 
         if (parent?.children) {
+            const removed = parent.children.find(child => child.id === nodeId);
             parent.children = parent.children.filter(child => child.id !== nodeId);
+            if (removed) this._unindexNodeRemoved(removed);
         }
     },
 
@@ -542,6 +546,7 @@ Object.assign(AppState, {
             node.children = node.children.filter(
                 child => child.id !== metricsTableNode.id
             );
+            this._unindexNodeRemoved(metricsTableNode);
         }
     },
 
@@ -749,6 +754,9 @@ Object.assign(AppState, {
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }
+
+        // Membership поддерева не изменился — обновляем только запись родителя.
+        this._reindexNodeMoved(draggedNode, newParent);
     },
 
     /**

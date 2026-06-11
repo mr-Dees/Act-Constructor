@@ -106,7 +106,7 @@ export class ItemsRenderer {
             return this.renderAll();
         }
 
-        const tableNode = this._findNodeById(table.nodeId);
+        const tableNode = AppState.findNodeById(table.nodeId);
         if (!tableNode) return this.renderAll();
 
         const newSection = this.renderTable(table, tableNode);
@@ -540,7 +540,7 @@ export class ItemsRenderer {
      * @private
      */
     static _updateParentTbInItems(node) {
-        let parent = TreeUtils.findParentNode(node.id);
+        let parent = AppState.findParentNode(node.id);
         while (parent && parent.id !== 'root') {
             if (TreeUtils.isUnderSection5(parent)) {
                 const parentBlock = document.querySelector(`.item-block[data-node-id="${parent.id}"]`);
@@ -552,7 +552,7 @@ export class ItemsRenderer {
                     }
                 }
             }
-            parent = TreeUtils.findParentNode(parent.id);
+            parent = AppState.findParentNode(parent.id);
         }
     }
 
@@ -764,33 +764,13 @@ export class ItemsRenderer {
         return cellEl;
     }
 
-    /**
-     * Поиск узла в дереве по ID (рекурсивный обход).
-     * @param {string} id - ID узла для поиска
-     * @param {Object} [node=AppState.treeData] - Узел, с которого начинать поиск
-     * @returns {Object|null} Найденный узел или null
-     * @private
-     */
-    static _findNodeById(id, node = AppState.treeData) {
-        if (node.id === id) return node;
-
-        if (node.children) {
-            for (const child of node.children) {
-                const found = this._findNodeById(id, child);
-                if (found) return found;
-            }
-        }
-
-        return null;
-    }
-
 }
 
 // Подписчик на 'node:tb-changed' — обновляет бейджи ТБ на шаге 2 без полного
 // renderAll. Симметричен подписчику в TreeRenderer (он обновляет дерево).
 // AppState.setNodeTb эмитит событие, оба подписчика срабатывают независимо.
 window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
-    const node = typeof TreeUtils !== 'undefined' ? TreeUtils.findNodeById?.(nodeId) : null;
+    const node = typeof AppState !== 'undefined' ? AppState.findNodeById?.(nodeId) : null;
     if (!node) return;
 
     const itemBlock = document.querySelector(`.item-block[data-node-id="${nodeId}"]`);

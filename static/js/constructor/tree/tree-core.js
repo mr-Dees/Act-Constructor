@@ -374,8 +374,8 @@ export class TreeManager {
                     const label = li.querySelector(':scope > .tree-label');
                     if (label && !li.classList.contains('protected') && typeof ItemsTitleEditing !== 'undefined') {
                         const nodeId = li.dataset.nodeId;
-                        const node = (typeof TreeUtils !== 'undefined')
-                            ? TreeUtils.findNodeById(nodeId)
+                        const node = (typeof AppState !== 'undefined')
+                            ? AppState.findNodeById(nodeId)
                             : null;
                         if (node) {
                             const editTarget = label.querySelector('.tree-node-text') || label;
