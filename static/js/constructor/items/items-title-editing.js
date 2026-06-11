@@ -115,7 +115,8 @@ export class ItemsTitleEditing {
         if (typeof ItemsRenderer !== 'undefined') {
             ItemsRenderer.updateNodeTitle(node.id, node.label);
         }
-        treeManager.render();
+        // Точечное обновление подписи в дереве вместо полного render().
+        treeManager.renderer.renderNodeRenamed(node.id);
         // Preview-зона перерисовывается дешёвым trim-режимом; для редактирования
         // заголовка пункта это адекватная стоимость.
         PreviewManager.update('previewTrim');
@@ -168,7 +169,8 @@ export class ItemsTitleEditing {
         }
 
         titleElement.textContent = node.customLabel || node.number || node.label;
-        treeManager.render();
+        // Точечное обновление подписи в дереве вместо полного render().
+        treeManager.renderer.renderNodeRenamed(node.id);
         PreviewManager.update();
     }
 
@@ -264,7 +266,7 @@ export class ItemsTitleEditing {
         }
 
         labelElement.textContent = node.customLabel || node.number || node.label;
-        this._updateTreeUI();
+        this._updateTreeUI(node);
     }
 
     /**
@@ -282,7 +284,7 @@ export class ItemsTitleEditing {
             if (typeof ChangelogTracker !== 'undefined') {
                 ChangelogTracker.record('rename_node', node.id, newLabel, {old: originalLabel, new: newLabel});
             }
-            this._updateTreeUI();
+            this._updateTreeUI(node);
         } else if (!newLabel) {
             labelElement.textContent = originalLabel;
         } else {
@@ -291,12 +293,14 @@ export class ItemsTitleEditing {
     }
 
     /**
-     * Обновляет UI дерева и предпросмотра.
-     * Вызывается после изменения структуры или меток дерева.
+     * Обновляет UI дерева и предпросмотра после переименования узла.
+     * Точечно обновляет подпись в дереве (полный render не нужен:
+     * rename структуру и нумерацию не меняет).
+     * @param {Object} node - Переименованный узел
      * @private
      */
-    static _updateTreeUI() {
-        treeManager.render();
+    static _updateTreeUI(node) {
+        treeManager.renderer.renderNodeRenamed(node.id);
         PreviewManager.update();
     }
 

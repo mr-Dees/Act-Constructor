@@ -545,11 +545,17 @@ export class TreeContextMenu {
     /**
      * Обновление UI после изменения дерева.
      * @param {string} [scopeNodeId] - ID узла-родителя, чьё поддерево достаточно перерисовать.
-     *   Если не указан — fallback на полный renderAll (используется для рисковых таблиц,
+     *   Если не указан — fallback на полный рендер (используется для рисковых таблиц,
      *   которые затрагивают метрики-таблицы в произвольных местах раздела 5).
      */
     updateTreeViews(scopeNodeId) {
-        treeManager.render();
+        if (scopeNodeId) {
+            // Точечная пересборка поддерева в дереве (внутри — fallback на
+            // полный render, если узел не отрисован, напр. scope === 'root').
+            treeManager.renderer.renderSubtree(scopeNodeId);
+        } else {
+            treeManager.render();
+        }
         PreviewManager.update('previewTrim', 30);
         if (AppState.currentStep === 2) {
             if (scopeNodeId) {
