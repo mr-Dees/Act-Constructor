@@ -19,7 +19,7 @@ import {
 const LIMITS = {
     maxFileSize: 1000,
     maxTotalSizePerAct: 3000,
-    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 3,
     previewMaxHeightPercent: 40,
 };
@@ -87,7 +87,7 @@ test('дефолтные лимиты зеркалят ACTS__IMAGES__* (10МБ/3
     assert.equal(DEFAULT_IMAGE_LIMITS.previewMaxHeightPercent, 40);
     assert.deepEqual(
         DEFAULT_IMAGE_LIMITS.allowedMimeTypes,
-        ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+        ['image/jpeg', 'image/png', 'image/gif'],
     );
 });
 

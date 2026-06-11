@@ -846,9 +846,8 @@ window.SafeHTML = { set, sanitize, escapeHtml };
 
 **Конфигурация (`DEFAULT_CONFIG`, `sanitize.js:17-38`):**
 
-- `USE_PROFILES: { html: true }` (SVG/MathML отключены — не используются).
-- `FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']` — даже из «trusted» источника.
-- `FORBID_ATTR` — полный список 60+ inline event-handlers (`onerror`, `onload`, `onclick`, `onpointerdown`, и т.п.) — главный XSS-вектор.
+- Дефолт-профиль (blocklist, используется чатом/diff-renderer): `USE_PROFILES: { html: true }` (SVG/MathML отключены), `FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']`, `FORBID_ATTR` — полный список 60+ inline event-handlers (`onerror`, `onclick`, и т.п.).
+- Профиль `'acts'` (strict allowlist, используется рендером текстблоков конструктора): `ALLOWED_TAGS`/`ALLOWED_ATTR`, зеркальные бэк-whitelist'у `html_sanitizer.py` (включая `s/strike/del` и data-атрибуты ссылок/сносок). Вызов: `SafeHTML.set(el, html, 'acts')`. Состав закреплён стражем `tests/js/sanitize-profiles.test.mjs`.
 
 **Потребители**: `textblock-editor.js`, `preview-violation-renderer.js`, `preview-textblock-renderer.js`, `diff-renderer.js`, `chat-renderer.js`. Все `innerHTML`-sink'и в коде обязаны идти через `SafeHTML.set` или (если HTML заведомо безопасен) через `textContent` напрямую.
 

@@ -3175,7 +3175,7 @@ def test_chat_settings_defaults():
 | `ACTS__AUDIT_LOG__MAX_DIFF_CELLS_PER_TABLE` | int | `50` | Макс. ячеек diff на таблицу |
 | `ACTS__IMAGES__MAX_FILE_SIZE` | int | `10485760` | Макс. размер картинки нарушения (байт) |
 | `ACTS__IMAGES__MAX_TOTAL_SIZE_PER_ACT` | int | `31457280` | Суммарный размер картинок на акт (байт) |
-| `ACTS__IMAGES__ALLOWED_MIME_TYPES` | list | `jpeg/png/gif/webp` | Whitelist MIME картинок (без SVG) |
+| `ACTS__IMAGES__ALLOWED_MIME_TYPES` | list | `jpeg/png/gif` | Whitelist MIME картинок (без SVG; без webp — python-docx не встраивает его в DOCX) |
 | `ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION` | int | `50` | Макс. элементов additionalContent на нарушение |
 | `ACTS__IMAGES__PREVIEW_MAX_HEIGHT_PERCENT` | int | `40` | Макс. высота картинки в превью (% листа A4) |
 

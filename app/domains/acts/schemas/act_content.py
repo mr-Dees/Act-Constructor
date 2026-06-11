@@ -33,10 +33,11 @@ FONT_SIZE_MAX = 72
 VIOLATION_IMAGE_URL_MAX_LENGTH = 15_000_000
 VIOLATION_CONTENT_ITEMS_MAX = 50
 
-# Whitelist data-URL картинок: только растровые форматы (без SVG — XSS).
+# Whitelist data-URL картинок: только растровые форматы (без SVG — XSS;
+# без webp — python-docx не встраивает его в DOCX, превью и экспорт должны совпадать).
 # Согласован с ACTS__IMAGES__ALLOWED_MIME_TYPES (пин — тест
 # test_mime_whitelist_matches_schema_url_whitelist).
-_IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif|webp);base64,")
+_IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif);base64,")
 
 
 class TableCellSchema(BaseModel):
@@ -393,7 +394,7 @@ class ViolationContentItemSchema(BaseModel):
         Валидирует url картинки (4.3.M.2 + 5.2.2).
 
         Для type='image' непустой url обязан быть data:image-URL разрешённого
-        растрового формата (png/jpeg/gif/webp, base64) — отсекает
+        растрового формата (png/jpeg/gif, base64) — отсекает
         javascript:/data:text-схемы (XSS) и не-картинки. Пустая строка
         допустима (черновик без содержимого). Лимит длины защищает БД и
         снимки версий от многомегабайтных payload'ов.
@@ -407,7 +408,7 @@ class ViolationContentItemSchema(BaseModel):
         if self.type == "image" and self.url and not _IMAGE_DATA_URL_RE.match(self.url):
             raise ValueError(
                 "Изображение нарушения должно быть встроенным data:image-URL "
-                "формата png, jpeg, gif или webp (base64)."
+                "формата png, jpeg или gif (base64)."
             )
         return self
 

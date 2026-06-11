@@ -14,7 +14,7 @@ import { AppConfig } from '../../shared/app-config.js';
 export const DEFAULT_IMAGE_LIMITS = {
     maxFileSize: 10 * 1024 * 1024,
     maxTotalSizePerAct: 30 * 1024 * 1024,
-    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 50,
     previewMaxHeightPercent: 40,
 };
@@ -124,7 +124,7 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
         return {
             ok: false,
             reason: `Недопустимый тип файла «${file.name || ''}» (${file.type || 'неизвестный'}). `
-                + 'Разрешены: JPEG, PNG, GIF, WebP.',
+                + 'Разрешены: JPEG, PNG, GIF.',
         };
     }
     if (file.size > lim.maxFileSize) {

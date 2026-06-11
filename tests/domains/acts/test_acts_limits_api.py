@@ -40,7 +40,7 @@ class TestImagesSettingsDefaults:
         assert s.max_file_size == 10 * 1024 * 1024
         assert s.max_total_size_per_act == 30 * 1024 * 1024
         assert s.allowed_mime_types == [
-            "image/jpeg", "image/png", "image/gif", "image/webp",
+            "image/jpeg", "image/png", "image/gif",
         ]
         assert s.max_items_per_violation == 50
         assert s.preview_max_height_percent == 40
@@ -107,7 +107,7 @@ class TestActsLimitsEndpoint:
             "max_file_size": 10 * 1024 * 1024,
             "max_total_size_per_act": 30 * 1024 * 1024,
             "allowed_mime_types": [
-                "image/jpeg", "image/png", "image/gif", "image/webp",
+                "image/jpeg", "image/png", "image/gif",
             ],
             "max_items_per_violation": 50,
             "preview_max_height_percent": 40,

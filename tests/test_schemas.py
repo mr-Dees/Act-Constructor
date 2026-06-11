@@ -326,12 +326,20 @@ class TestViolationContentItemUrl:
         )
         assert item.url.startswith("data:image/png")
 
-    def test_valid_data_image_jpeg_webp_gif_pass(self):
-        for mime in ("jpeg", "jpg", "gif", "webp"):
+    def test_valid_data_image_jpeg_jpg_gif_pass(self):
+        for mime in ("jpeg", "jpg", "gif"):
             item = ViolationContentItemSchema(
                 id="i1", type="image", url=f"data:image/{mime};base64,AAAA",
             )
             assert item.url
+
+    def test_webp_rejected(self):
+        # webp исключён из whitelist: python-docx не встраивает его в DOCX,
+        # картинка молча расходилась бы между превью и экспортом.
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="data:image/webp;base64,AAAA",
+            )
 
     def test_empty_url_allowed_for_image(self):
         # Картинка без содержимого (черновик) — допустима.

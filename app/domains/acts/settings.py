@@ -104,8 +104,10 @@ class ImagesSettings(BaseModel):
     """
     max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
     max_total_size_per_act: int = Field(default=30 * 1024 * 1024, gt=0)
+    # webp исключён сознательно: python-docx (без Pillow) не встраивает его
+    # в DOCX — картинка молча расходилась бы между превью и экспортом.
     allowed_mime_types: list[str] = Field(
-        default=["image/jpeg", "image/png", "image/gif", "image/webp"]
+        default=["image/jpeg", "image/png", "image/gif"]
     )
     max_items_per_violation: int = Field(default=50, gt=0)
     preview_max_height_percent: int = Field(default=40, gt=0, le=100)
