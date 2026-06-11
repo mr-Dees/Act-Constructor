@@ -1,28 +1,52 @@
 /**
- * Предикаты классификации специальной таблицы (метрики / риски).
+ * Подвид таблицы (enum kind) — единый источник истины.
  *
- * Один источник истины для проверок pinned-таблиц (isPinnedTable) и
- * риск-таблиц (isRiskTable), а также нормализации порядка детей
- * (normalizePinnedOrder). Раньше та же логика дублировалась OR-списками
- * флагов в tree-utils, state-tree, state-content и context-menu — теперь
- * все они делегируют сюда.
+ * Поле `kind` классифицирует специальные таблицы (метрики / риски):
+ * 'regular' — обычная таблица (дефолт/отсутствие подвида). Значение живёт
+ * на узле дерева (источник истины) и дублируется на объект таблицы.
+ * СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с бэкендом: TABLE_KINDS в
+ * app/domains/acts/schemas/act_content.py и CHECK-констрейнт
+ * check_table_kind_values в миграциях PG/GP.
+ *
+ * Здесь же — предикаты pinned/risk-таблиц (isPinnedTable / isRiskTable),
+ * реконсайлер kind при загрузке (reconcileTableKind) и нормализация порядка
+ * детей (normalizePinnedOrder).
  *
  * Модуль БЕЗ DOM- и БЕЗ AppConfig-зависимостей (импортируется и из тестов
  * напрямую). Тип узла-таблицы — литерал 'table' (== AppConfig.nodeTypes.TABLE);
  * совпадение зафиксировано регрессионно через call-site'ы.
  */
-import { TABLE_FLAG_NAMES } from '../state/flags.js';
+
+/** Значения подвида таблицы. */
+export const KIND_REGULAR = 'regular';
+export const KIND_METRICS = 'metrics';
+export const KIND_MAIN_METRICS = 'mainMetrics';
+export const KIND_REGULAR_RISK = 'regularRisk';
+export const KIND_OPERATIONAL_RISK = 'operationalRisk';
+export const KIND_TAX_RISK = 'taxRisk';
+export const KIND_OTHER_RISK = 'otherRisk';
+
+/** @type {readonly string[]} Все 7 значений подвида таблицы. */
+export const TABLE_KINDS = Object.freeze([
+    KIND_REGULAR,
+    KIND_METRICS,
+    KIND_MAIN_METRICS,
+    KIND_REGULAR_RISK,
+    KIND_OPERATIONAL_RISK,
+    KIND_TAX_RISK,
+    KIND_OTHER_RISK,
+]);
+
+/** 4 риск-подвида (подмножество TABLE_KINDS). */
+const RISK_KINDS = Object.freeze(new Set([
+    KIND_REGULAR_RISK,
+    KIND_OPERATIONAL_RISK,
+    KIND_TAX_RISK,
+    KIND_OTHER_RISK,
+]));
 
 /** Тип узла-таблицы (зеркало AppConfig.nodeTypes.TABLE). */
 const NODE_TYPE_TABLE = 'table';
-
-/** Имена 4 риск-флагов (подмножество TABLE_FLAG_NAMES). */
-const RISK_FLAG_NAMES = Object.freeze([
-    'isRegularRiskTable',
-    'isOperationalRiskTable',
-    'isTaxRiskTable',
-    'isOtherRiskTable',
-]);
 
 /** Проверяет, что узел — таблица (по type). */
 function isTableNode(node) {
@@ -30,33 +54,66 @@ function isTableNode(node) {
 }
 
 /**
- * Закреплённая таблица (метрики или риск) — любой из 6 флагов.
- * Семантика идентична прежней tree-utils.isPinnedTable.
+ * Возвращает подвид таблицы узла или объекта таблицы.
+ * Отсутствие поля kind = 'regular' (обычная таблица).
+ *
+ * @param {Object|null|undefined} obj - Узел дерева или объект таблицы.
+ * @returns {string}
+ */
+export function getTableKind(obj) {
+    return (obj && obj.kind) || KIND_REGULAR;
+}
+
+/**
+ * Закреплённая таблица (метрики или риск) — любой подвид, кроме 'regular'.
  *
  * @param {Object|null|undefined} node - Узел дерева.
  * @returns {boolean}
  */
 export function isPinnedTable(node) {
-    if (!isTableNode(node)) return false;
-    for (const name of TABLE_FLAG_NAMES) {
-        if (node[name]) return true;
-    }
-    return false;
+    return isTableNode(node) && getTableKind(node) !== KIND_REGULAR;
 }
 
 /**
- * Риск-таблица — любой из 4 риск-флагов (regular / operational / tax / other).
- * Семантика идентична прежней state-tree._isRiskTable.
+ * Риск-таблица — один из 4 риск-подвидов (regular / operational / tax / other).
  *
  * @param {Object|null|undefined} node - Узел дерева.
  * @returns {boolean}
  */
 export function isRiskTable(node) {
-    if (!isTableNode(node)) return false;
-    for (const name of RISK_FLAG_NAMES) {
-        if (node[name]) return true;
+    return isTableNode(node) && RISK_KINDS.has(getTableKind(node));
+}
+
+/**
+ * Реконсайлер подвида таблицы (kind) при загрузке акта.
+ *
+ * Синхронизирует kind node↔table: узел — источник истины; если подвид задан
+ * только на объекте таблицы — поднимает его на узел; объект таблицы всегда
+ * приводится в соответствие с узлом. Пишет ТОЛЬКО при реальном изменении —
+ * иначе чистая загрузка пометит акт несохранённым (AppState — Proxy).
+ * Рекурсивно обходит детей. Идемпотентен.
+ *
+ * @param {Object|null|undefined} node - Узел дерева.
+ * @param {Object<string, Object>} tables - Словарь таблиц AppState.tables.
+ */
+export function reconcileTableKind(node, tables) {
+    if (!node) return;
+    if (node.type === NODE_TYPE_TABLE && node.tableId) {
+        const table = tables ? tables[node.tableId] : null;
+        if (table) {
+            const nodeKind = getTableKind(node);
+            // Узел побеждает; 'regular' на узле = «подвид не задан» — тогда
+            // поднимаем значение с таблицы (если оно там есть).
+            const resolved = nodeKind !== KIND_REGULAR ? nodeKind : getTableKind(table);
+            if (nodeKind !== resolved) node.kind = resolved;
+            if (getTableKind(table) !== resolved) table.kind = resolved;
+        }
     }
-    return false;
+    if (node.children) {
+        for (const child of node.children) {
+            reconcileTableKind(child, tables);
+        }
+    }
 }
 
 /**

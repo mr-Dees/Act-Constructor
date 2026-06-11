@@ -13,10 +13,10 @@ import { normalizePinnedOrder } from '../../static/js/constructor/table/table-ki
 const TABLE = 'table';
 
 function pinned(id) {
-  return { id, type: TABLE, isMetricsTable: true };
+  return { id, type: TABLE, kind: 'metrics' };
 }
 function risk(id) {
-  return { id, type: TABLE, isRegularRiskTable: true };
+  return { id, type: TABLE, kind: 'regularRisk' };
 }
 function normal(id) {
   return { id, type: 'item' };
