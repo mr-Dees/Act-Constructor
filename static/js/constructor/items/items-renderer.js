@@ -101,6 +101,12 @@ export class ItemsRenderer {
     static updateTable(tableId) {
         if (!tableId) return this.renderAll();
 
+        // replaceChild оставил бы в selectedCells detached-ячейки старой
+        // section (операции по ним читают устаревшие координаты) — снимаем
+        // выделение, как это делает renderAll. Закрывает в т.ч. путь ресайза
+        // колонок (TableSizes._commitColWidths завершается updateTable).
+        tableManager.clearSelection();
+
         const oldSection = this._domIndex.get(`table:${tableId}`);
         const table = AppState.tables[tableId];
 
