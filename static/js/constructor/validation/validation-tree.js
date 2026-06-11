@@ -8,6 +8,7 @@
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationCore } from './validation-core.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType } from '../block-types.js';
 
 export const ValidationTree = {
     /**
@@ -138,22 +139,14 @@ export const ValidationTree = {
      * @returns {Object} Результат проверки
      */
     _validateContentLimits(node, contentType) {
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        const limits = AppConfig.content.limits;
-
-        // Маппинг типов на лимиты
-        const limitMap = {
-            [TABLE]: limits.tablesPerNode,
-            [TEXTBLOCK]: limits.textBlocksPerNode,
-            [VIOLATION]: limits.violationsPerNode
-        };
-
         if (!node.children) {
             return ValidationCore.success();
         }
 
+        // Лимит per-type — из реестра типов блоков (block-types.js).
+        const spec = getBlockType(contentType);
         const existingCount = TreeUtils.countChildrenByType(node, contentType);
-        const limit = limitMap[contentType];
+        const limit = spec ? spec.limitPerNode : undefined;
         const limitName = AppConfig.content.limitNames[contentType];
 
         return ValidationCore.validateLimit(existingCount, limit, limitName);

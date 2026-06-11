@@ -101,6 +101,8 @@
   - [10.7 Фактуры (invoice attachment)](#107-фактуры-invoice-attachment)
   - [10.8 URL страницы акта](#108-url-страницы-акта)
   - [10.9 Фронтенд: AppState и StorageManager](#109-фронтенд-appstate-и-storagemanager)
+  - [10.10 Как добавить новый тип блока конструктора](#1010-как-добавить-новый-тип-блока-конструктора)
+  - [10.11 Сознательные ограничения конструктора](#1011-сознательные-ограничения-конструктора)
 - [11. Chat domain deep-dive](#11-chat-domain-deep-dive)
   - [11.1 Слои сервисов и их роли](#111-слои-сервисов-и-их-роли)
   - [11.2 Orchestrator: итерации agent loop](#112-orchestrator-итерации-agent-loop)
@@ -3516,6 +3518,40 @@ Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/fro
 - §5 «StorageManager и persistence» — state machine `saved` / `local-only` / `unsaved` (Wave 3), debounce 3 сек + periodic 2 мин, `_dragInProgress` guard, `forceSaveAsync` для Ctrl+S, navigation interception (popstate + `confirmNavigation` + `_lockNavGuard`), per-act LS-ключи с префиксом `actId`.
 
 **Связь с lock-механизмом**: при 409 на `PUT /content` `APIClient` бросает `LockLostError`, `NavigationManager._handleSaveAndExport` ловит и делает жёсткий редирект на `/acts` (без `confirmNavigation`-диалога — сессия уже потеряна). Детали — §6 в `frontend-architecture.md`.
+
+### 10.10 Как добавить новый тип блока конструктора
+
+Типы листовых блоков (`table`, `textblock`, `violation`) и структурный `item` описаны **двумя реестрами**, синхронизируемыми вручную (как `names.py` ↔ `chat-client-actions.js`):
+
+- **Фронт** — `static/js/constructor/block-types.js`: `BLOCK_TYPES` (frozen-объект описаний: `idProp`, `dictName`, `defaultLabel`, `limitPerNode`, `domIndexPrefix`), `LEAF_BLOCK_TYPES`, хелперы `getBlockType` / `isBlockType` / `isLeafBlockType`. Строки типов — `AppConfig.nodeTypes` (реестр использует их как ключи).
+- **Бэк** — `app/domains/acts/block_types.py`: константы `NODE_TYPE_*`, наборы `NODE_TYPES` / `LEAF_BLOCK_TYPES`, маппинг `LEAF_BLOCK_REFS` (тип → поле-ссылка + имя словаря `ActDataSchema`).
+
+Синхронность и полноту обработки держат **тест-стражи**: `tests/domains/acts/test_block_types_guard.py` (Literal схемы = реестр; каждый leaf-тип семантически доходит до вывода DOCX/MD/text-форматтеров; HTML-поля проходят санитайзер) и `tests/js/block-types.test.mjs` (точные строки типов, полнота полей, render-обработчики `ItemsRenderer._leafRenderers`). Новый тип в реестре **провалит стражи**, пока не закрыты все точки ниже.
+
+Чек-лист добавления типа (пример — гипотетический блок `chart` → `chartId` → словарь `charts`):
+
+**Одна запись в каждом реестре (закрывает сразу несколько бывших точек):**
+
+1. `AppConfig.nodeTypes.CHART = 'chart'` + лимит в `AppConfig.content.limits` (`app-config.js`) + метка в `AppConfig.tree.labels` — строки-источники.
+2. Описание типа в `BLOCK_TYPES` (`block-types.js`) — после этого `state-content._createContentNode`, диспетч `ItemsRenderer.renderItem`, лимиты `ValidationTree` и префикс `_domIndex` работают автоматически.
+3. Константа + наборы + запись `LEAF_BLOCK_REFS` в `block_types.py` — после этого кросс-валидатор ссылок дерево↔словари (`validate_tree_dict_refs`) подхватывает тип автоматически.
+
+**Оставшиеся ручные точки (стражи о них напомнят):**
+
+4. Pydantic-схема: `"chart"` в `Literal` `ActItemSchema.type`, поле `chartId` на `ActItemSchema`, класс `ChartSchema`, словарь `charts: dict[str, ChartSchema]` в `ActDataSchema` (`schemas/act_content.py`).
+5. Метод создания `addChartToNode()` в `state-content.js` + render-метод и запись в `ItemsRenderer._leafRenderers` (`items-renderer.js`).
+6. Preview-рендерер: `preview-chart-renderer.js` + диспетч в `preview.js`.
+7. Три форматтера экспорта: ветка/`_format_chart` в `text_formatter.py`, `markdown_formatter.py` и `docx/formatter.py._render_children` (+ builder).
+8. Санитайзер: если у блока есть HTML-поля — обработка в `sanitize_act_data` И `sanitize_act_content_dict` (`utils/html_sanitizer.py`). Пропуск = молчаливая XSS-дыра.
+9. Фикстура типа в `_BLOCK_PAYLOADS` тест-стража (`test_block_types_guard.py`) — параметризация по `LEAF_BLOCK_TYPES` сама потребует её.
+10. Иконка типа в `AppConfig.tree.icons` и, при необходимости, названия в `typeNames` / `limitNames` (`app-config.js`).
+
+> До реестров добавление типа требовало ~13-16 несвязанных правок в 9 файлах, и пропуск любой был молчаливым (блок исчезал из одного экспорта, забытый санитайзер не чистил HTML). Теперь точки 1-3 декларативны, а пропуск точек 4, 7-9 ловят стражи.
+
+### 10.11 Сознательные ограничения конструктора
+
+- **Конструктор — desktop-only.** Мобильная поддержка сознательно отсутствует: в шаблонах конструктора нет viewport-меты, раскладка (дерево + редактор + превью) рассчитана на широкий экран, drag-and-drop и resize-handles таблиц требуют мыши. Не добавляй viewport/media-queries «для галочки» — это создаст видимость поддержки без работоспособного UX.
+- **Копирование узлов между актами не поддерживается.** Осознанное ограничение: перенос поддерева в другой акт требует re-id всех узлов (id содержат `parentId` и таймстемпы), переноса связанных записей словарей (`tables`/`textBlocks`/`violations`) и прогона валидатора целостности ссылок. Реализация — только при реальном спросе; до этого попытки «скопировать через localStorage/JSON» считаются неподдерживаемым сценарием.
 
 ---
 

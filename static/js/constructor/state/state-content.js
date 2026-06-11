@@ -13,6 +13,7 @@ import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-co
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType } from '../block-types.js';
 
 Object.assign(AppState, {
     /**
@@ -131,23 +132,14 @@ Object.assign(AppState, {
      * @returns {Object} Узел контента
      */
     _createContentNode(parentId, contentId, type, label = '', isProtected = false, deletable = true) {
-        const defaultLabels = {
-            table: AppConfig.tree.labels.table,
-            textblock: AppConfig.tree.labels.textBlock,
-            violation: AppConfig.tree.labels.violation
-        };
-
-        const idProps = {
-            table: 'tableId',
-            textblock: 'textBlockId',
-            violation: 'violationId'
-        };
+        // Метка по умолчанию и поле-ссылка на словарь — из реестра типов блоков.
+        const spec = getBlockType(type);
 
         const node = {
             id: `${parentId}_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            label: label || defaultLabels[type],
+            label: label || spec.defaultLabel,
             type,
-            [idProps[type]]: contentId,
+            [spec.idProp]: contentId,
             parentId,
             protected: isProtected,
             deletable

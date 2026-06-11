@@ -27,6 +27,14 @@ export class AppConfig {
         { abbr: 'ББ',    name: 'Байкальский' }
     ];
 
+    /**
+     * Канонические строковые типы узлов дерева акта.
+     * Полный реестр описаний типов (idProp/dictName/defaultLabel/лимиты/
+     * domIndexPrefix) — static/js/constructor/block-types.js: он использует
+     * эти константы как ключи, отдельного дубля строк нет. Набор типов
+     * синхронизирован ВРУЧНУЮ с бэкенд-реестром app/domains/acts/block_types.py
+     * (пин — tests/js/block-types.test.mjs и tests/domains/acts/test_block_types_guard.py).
+     */
     static nodeTypes = {
         ITEM: 'item',
         TABLE: 'table',
