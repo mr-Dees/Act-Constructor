@@ -163,12 +163,10 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     col_widths JSONB NOT NULL,
     is_protected BOOLEAN DEFAULT FALSE,
     is_deletable BOOLEAN DEFAULT TRUE,
-    is_metrics_table BOOLEAN DEFAULT FALSE,
-    is_main_metrics_table BOOLEAN DEFAULT FALSE,
-    is_regular_risk_table BOOLEAN DEFAULT FALSE,
-    is_operational_risk_table BOOLEAN DEFAULT FALSE,
-    is_tax_risk_table BOOLEAN DEFAULT FALSE,
-    is_other_risk_table BOOLEAN DEFAULT FALSE,
+    -- Подвид таблицы (enum). Значения синхронизируются вручную с
+    -- TABLE_KINDS (app/domains/acts/schemas/act_content.py) и фронтом
+    -- (static/js/constructor/table/table-kind.js).
+    kind VARCHAR(20) DEFAULT 'regular' NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -177,6 +175,10 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
 
     CONSTRAINT check_col_widths_is_array
         CHECK (jsonb_typeof(col_widths) = 'array'),
+
+    CONSTRAINT check_table_kind_values
+        CHECK (kind IN ('regular', 'metrics', 'mainMetrics', 'regularRisk',
+                        'operationalRisk', 'taxRisk', 'otherRisk')),
 
     UNIQUE(act_id, table_id),
     -- Не более одной активной таблицы на узел дерева.
@@ -417,14 +419,9 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_label
     ON {SCHEMA}.{PREFIX}act_tables(act_id, table_label)
     WHERE table_label IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_kind
     ON {SCHEMA}.{PREFIX}act_tables(act_id)
-    WHERE is_metrics_table = TRUE
-       OR is_main_metrics_table = TRUE
-       OR is_regular_risk_table = TRUE
-       OR is_operational_risk_table = TRUE
-       OR is_tax_risk_table = TRUE
-       OR is_other_risk_table = TRUE;
+    WHERE kind <> 'regular';
 
 -- Индексы на act_textblocks
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_id

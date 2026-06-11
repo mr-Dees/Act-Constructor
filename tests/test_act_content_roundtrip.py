@@ -55,8 +55,9 @@ def _make_export_fixture() -> dict:
     """
     Минимальный акт в точной форме exportData():
     дерево (root → раздел 5 → пункт с таблицей/текстблоком/нарушением),
-    1 обычная таблица с colWidths и объединением, 1 текстблок с formatting,
-    1 нарушение с descriptionList и additionalContent.
+    1 обычная таблица с colWidths и объединением, 1 риск-таблица с подвидом
+    kind (exportData сериализует kind только при не-'regular'), 1 текстблок
+    с formatting, 1 нарушение с descriptionList и additionalContent.
     """
     grid = _grid(3, 3)
     # Горизонтальное объединение в строке данных — spanOrigin переживает round-trip.
@@ -102,6 +103,16 @@ def _make_export_fixture() -> dict:
                                     "children": [],
                                 },
                                 {
+                                    "id": "5.1_table_2",
+                                    "label": "Выявлены риски",
+                                    "type": "table",
+                                    "protected": True,
+                                    "deletable": True,
+                                    "tableId": "t2",
+                                    "kind": "regularRisk",
+                                    "children": [],
+                                },
+                                {
                                     "id": "5.1_tb_1",
                                     "label": "Текстовый блок",
                                     "type": "textblock",
@@ -133,6 +144,15 @@ def _make_export_fixture() -> dict:
                 "colWidths": [150, 200, 100],
                 "protected": False,
                 "deletable": True,
+            },
+            "t2": {
+                "id": "t2",
+                "nodeId": "5.1_table_2",
+                "grid": _grid(2, 2),
+                "colWidths": [100, 100],
+                "protected": True,
+                "deletable": True,
+                "kind": "regularRisk",
             },
         },
         "textBlocks": {

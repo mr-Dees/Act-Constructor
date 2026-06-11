@@ -79,6 +79,10 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     # ── acts: act_tables ─────────────────────────────────────────────────────
     "check_grid_data_is_array": "Данные таблицы (grid_data) должны быть массивом JSON",
     "check_col_widths_is_array": "Ширины столбцов (col_widths) должны быть массивом JSON",
+    "check_table_kind_values": (
+        "Недопустимый подвид таблицы. Допустимые значения: regular, metrics, "
+        "mainMetrics, regularRisk, operationalRisk, taxRisk, otherRisk"
+    ),
     # ── acts: act_textblocks ─────────────────────────────────────────────────
     "check_formatting_is_object": "Данные форматирования должны быть объектом JSON",
     # ── acts: act_violations ─────────────────────────────────────────────────

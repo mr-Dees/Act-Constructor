@@ -8,7 +8,15 @@ import { PreviewManager } from '../preview/preview.js';
 import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import {
+    KIND_MAIN_METRICS,
+    KIND_METRICS,
+    KIND_OPERATIONAL_RISK,
+    KIND_OTHER_RISK,
+    KIND_REGULAR_RISK,
+    KIND_TAX_RISK,
+    isRiskTable as kindIsRiskTable,
+} from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics } from '../state/metrics-risk-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
@@ -129,15 +137,15 @@ export class TreeContextMenu {
     /** Проверяет, есть ли у узла прямая дочерняя таблица риска данного типа. */
     _hasDirectRiskTableOfType(node, riskType) {
         if (!node.children) return false;
-        const flagByType = {
-            'regular':     'isRegularRiskTable',
-            'operational': 'isOperationalRiskTable',
-            'tax':         'isTaxRiskTable',
-            'other':       'isOtherRiskTable',
+        const kindByType = {
+            'regular':     KIND_REGULAR_RISK,
+            'operational': KIND_OPERATIONAL_RISK,
+            'tax':         KIND_TAX_RISK,
+            'other':       KIND_OTHER_RISK,
         };
-        const flag = flagByType[riskType];
-        if (!flag) return false;
-        return node.children.some(child => child.type === AppConfig.nodeTypes.TABLE && !!child[flag]);
+        const kind = kindByType[riskType];
+        if (!kind) return false;
+        return node.children.some(child => child.type === AppConfig.nodeTypes.TABLE && child.kind === kind);
     }
 
     /**
@@ -417,7 +425,7 @@ export class TreeContextMenu {
             const findRisks = n => AppState._findRiskTablesInSubtree(n);
 
             // Проверка под узлом 5.* (единый предикат необходимости сводной).
-            if (table?.isMetricsTable) {
+            if (table?.kind === KIND_METRICS) {
                 const parentUnder5 = this._findParentFirstLevelUnderPoint5(node);
                 if (parentUnder5 && shouldHaveMetricsTable(parentUnder5, findRisks)) {
                     Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
@@ -426,7 +434,7 @@ export class TreeContextMenu {
             }
 
             // Проверка главной таблицы метрик (единый предикат).
-            if (table?.isMainMetricsTable) {
+            if (table?.kind === KIND_MAIN_METRICS) {
                 const node5 = AppState.findNodeById('5');
                 if (shouldHaveMainMetrics(node5, findRisks)) {
                     Notifications.error('Нельзя удалить общую таблицу метрик, пока в пункте 5 есть таблицы рисков');
@@ -511,7 +519,7 @@ export class TreeContextMenu {
 
         // Главная сводная: останутся ли риски в §5 кроме удаляемого?
         const remaining = AppState._findRiskTablesInSubtree(node5).filter(n => n.id !== node.id);
-        const mainNode = node5.children?.find(c => c.type === TABLE && c.isMainMetricsTable === true);
+        const mainNode = node5.children?.find(c => c.type === TABLE && c.kind === KIND_MAIN_METRICS);
         const mainSvod = !!mainNode && remaining.length === 0;
 
         // Per-point сводная по 5.X-предку (только для глубоких рисков 5.X.Y+).
@@ -525,7 +533,7 @@ export class TreeContextMenu {
                 }
             }
             deep = deep.filter(n => n.id !== node.id);
-            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.isMetricsTable === true);
+            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.kind === KIND_METRICS);
             if (perNode && deep.length === 0) {
                 perPoint = ancestor5x.number;
             }

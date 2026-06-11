@@ -293,23 +293,22 @@ class TestTableSchema:
         )
         assert t.grid == []
 
-    def test_special_table_flags(self):
-        # Одного флага подвида достаточно; два одновременно запрещены (A3).
+    def test_special_table_kind(self):
+        # Подвид таблицы — единое поле kind (взаимоисключение по построению).
         t = TableSchema(
             id="table_1711270400456_3x2m8p1",
             nodeId="node_1711270400123_7a4k9b2",
-            isMetricsTable=True,
+            kind="metrics",
         )
-        assert t.isMetricsTable is True
-        assert t.isRegularRiskTable is False
+        assert t.kind == "metrics"
 
-    def test_mutually_exclusive_type_flags(self):
-        # Два флага подвида одновременно — взаимоисключение (A3) → ValidationError.
-        with pytest.raises(ValidationError, match="несколько типов"):
+    def test_unknown_table_kind_rejected(self):
+        # Неизвестный подвид таблицы → ValidationError (422).
+        with pytest.raises(ValidationError):
             TableSchema(
                 id="table_1711270400456_3x2m8p1",
                 nodeId="node_1711270400123_7a4k9b2",
-                isMetricsTable=True, isRegularRiskTable=True,
+                kind="superRisk",
             )
 
 
@@ -505,7 +504,7 @@ class TestExtraForbidPolicy:
                 isSpanned=False, spanOrigin=None, originRow=0, originCol=0,
             )]],
             colWidths=[100],
-            protected=True, deletable=False, isMetricsTable=True,
+            protected=True, deletable=False, kind="metrics",
         )
         dumped = t.model_dump()
         restored = TableSchema.model_validate(dumped)
@@ -544,7 +543,7 @@ class TestTreeNormalization:
                     "content": "текст", "protected": True, "deletable": False,
                     "customLabel": "Своя метка", "number": "5.1",
                     "tb": ["ВВБ", "СЗБ"], "auditPointId": "AP-1",
-                    "isMetricsTable": True,
+                    "kind": "metrics",
                     "children": [],
                 },
             ],
@@ -561,7 +560,7 @@ class TestTreeNormalization:
         assert child["number"] == "5.1"
         assert child["tb"] == ["ВВБ", "СЗБ"]
         assert child["auditPointId"] == "AP-1"
-        assert child["isMetricsTable"] is True
+        assert child["kind"] == "metrics"
         assert child["children"] == []
 
     def test_tree_is_normalized_dict_not_raw_reference(self):

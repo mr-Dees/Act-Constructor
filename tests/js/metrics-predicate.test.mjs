@@ -12,20 +12,20 @@ import {
   shouldHaveMainMetrics,
 } from '../../static/js/constructor/state/metrics-risk-core.js';
 
-// Поиск риск-таблиц в поддереве (regular/operational — как в боевом дискриминаторе).
+// Поиск риск-таблиц в поддереве (4 риск-подвида kind — как в боевом дискриминаторе).
+const RISK_KINDS = new Set(['regularRisk', 'operationalRisk', 'taxRisk', 'otherRisk']);
 function findRiskTables(node) {
   const out = [];
   const walk = (n) => {
     if (!n) return;
-    if (n.type === 'table' && (n.isRegularRiskTable || n.isOperationalRiskTable
-      || n.isTaxRiskTable || n.isOtherRiskTable)) out.push(n);
+    if (n.type === 'table' && RISK_KINDS.has(n.kind)) out.push(n);
     for (const c of n.children || []) walk(c);
   };
   walk(node);
   return out;
 }
 
-const risk = () => ({ id: 'r', type: 'table', isRegularRiskTable: true, children: [] });
+const risk = () => ({ id: 'r', type: 'table', kind: 'regularRisk', children: [] });
 
 test('shouldHaveMetricsTable: false без рисков', () => {
   const node5x = { number: '5.1', children: [{ type: 'item', number: '5.1.1', children: [] }] };

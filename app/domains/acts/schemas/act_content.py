@@ -39,6 +39,29 @@ VIOLATION_CONTENT_ITEMS_MAX = 50
 # test_mime_whitelist_matches_schema_url_whitelist).
 _IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif);base64,")
 
+# Подвиды таблиц (enum kind). 'regular' — обычная таблица (дефолт/отсутствие
+# подвида). Единый источник значений на бэке; СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с
+# фронтом (static/js/constructor/table/table-kind.js, TABLE_KINDS) и с
+# CHECK-констрейнтом check_table_kind_values в миграциях
+# (app/domains/acts/migrations/{postgresql,greenplum}/schema.sql).
+TABLE_KINDS = (
+    "regular",
+    "metrics",
+    "mainMetrics",
+    "regularRisk",
+    "operationalRisk",
+    "taxRisk",
+    "otherRisk",
+)
+
+# Literal статичен сознательно (Literal из переменных капризен для type
+# checker'ов). Соответствие TABLE_KINDS пинит
+# test_table_kind_roundtrip.py::test_table_kind_literal_matches_tuple.
+TableKind = Literal[
+    "regular", "metrics", "mainMetrics", "regularRisk",
+    "operationalRisk", "taxRisk", "otherRisk",
+]
+
 
 class TableCellSchema(BaseModel):
     """
@@ -90,12 +113,7 @@ class TableSchema(BaseModel):
         colWidths: Массив относительных весов ширины колонок (целые > 0; нормируются по сумме)
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
-        isMetricsTable: Является ли таблицей метрик для пункта под разделом 5
-        isMainMetricsTable: Является ли главной таблицей метрик раздела 5
-        isRegularRiskTable: Является ли таблицей регулярных рисков
-        isOperationalRiskTable: Является ли таблицей операционных рисков
-        isTaxRiskTable: Является ли таблицей налоговых рисков
-        isOtherRiskTable: Является ли таблицей прочих рисков
+        kind: Подвид таблицы (TABLE_KINDS); 'regular' — обычная таблица
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -120,30 +138,11 @@ class TableSchema(BaseModel):
         description="Разрешено ли удаление таблицы"
     )
 
-    # Флаги специальных таблиц
-    isMetricsTable: bool | None = Field(
-        default=False,
-        description="Таблица метрик для пункта под разделом 5"
-    )
-    isMainMetricsTable: bool | None = Field(
-        default=False,
-        description="Главная таблица метрик раздела 5"
-    )
-    isRegularRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица регулярных рисков"
-    )
-    isOperationalRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица операционных рисков"
-    )
-    isTaxRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица налоговых рисков"
-    )
-    isOtherRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица прочих рисков"
+    # Подвид таблицы: enum взаимоисключающ по построению (заменил 6 булевых
+    # флагов is*Table и валидатор «не более одного типа»).
+    kind: TableKind = Field(
+        default="regular",
+        description="Подвид таблицы (метрики / риски); 'regular' — обычная"
     )
 
     @field_validator("grid")
@@ -205,8 +204,10 @@ class TableSchema(BaseModel):
         3. объединения ячеек не выходят за границы матрицы (закрывает
            IndexError в DOCX-builder'е);
         4. объединения не пересекаются — покрытия двух origin-ячеек не
-           накладываются (закрывает крэш DOCX-builder'а на наложении merge);
-        5. взаимоисключение флагов подвида таблицы (не более одного типа).
+           накладываются (закрывает крэш DOCX-builder'а на наложении merge).
+
+        Взаимоисключение подвидов таблицы НЕ проверяется: поле kind —
+        enum, взаимоисключающ по построению.
 
         СОЗНАТЕЛЬНО НЕ проверяется когерентность spanOrigin и пометка
         поглощённых ячеек isSpanned: легаси-операции вставки/удаления колонок
@@ -270,22 +271,6 @@ class TableSchema(BaseModel):
                                 f"Объединения пересекаются в ячейке ({rr},{cc})"
                             )
                         coverage[rr][cc] = (r, c)
-
-        # 5. Взаимоисключение флагов подвида таблицы.
-        type_flags = {
-            "isMetricsTable": self.isMetricsTable,
-            "isMainMetricsTable": self.isMainMetricsTable,
-            "isRegularRiskTable": self.isRegularRiskTable,
-            "isOperationalRiskTable": self.isOperationalRiskTable,
-            "isTaxRiskTable": self.isTaxRiskTable,
-            "isOtherRiskTable": self.isOtherRiskTable,
-        }
-        active = [name for name, value in type_flags.items() if value]
-        if len(active) > 1:
-            raise ValueError(
-                f"Таблица не может одновременно иметь несколько типов: "
-                f"{', '.join(active)}"
-            )
 
         return self
 
@@ -502,12 +487,7 @@ class ActItemSchema(BaseModel):
         violationId: ID привязанного нарушения
         customLabel: Пользовательская метка узла
         number: Номер узла в иерархии
-        isMetricsTable: Является ли узел таблицей метрик
-        isMainMetricsTable: Является ли узел главной таблицей метрик
-        isRegularRiskTable: Является ли узел таблицей регулярных рисков
-        isOperationalRiskTable: Является ли узел таблицей операционных рисков
-        isTaxRiskTable: Является ли узел таблицей налоговых рисков
-        isOtherRiskTable: Является ли узел таблицей прочих рисков
+        kind: Подвид таблицы узла-таблицы (TABLE_KINDS); 'regular' — обычная
     """
     # M.21: политика extra='ignore' задана ЯВНО и сознательно (не forbid):
     # незадекларированные поля узла отбрасываются нормализацией
@@ -535,12 +515,8 @@ class ActItemSchema(BaseModel):
     violationId: str | None = None
     customLabel: str | None = None
     number: str | None = None
-    isMetricsTable: bool | None = False
-    isMainMetricsTable: bool | None = False
-    isRegularRiskTable: bool | None = False
-    isOperationalRiskTable: bool | None = False
-    isTaxRiskTable: bool | None = False
-    isOtherRiskTable: bool | None = False
+    # Подвид таблицы (узел — источник истины; см. TABLE_KINDS).
+    kind: TableKind = "regular"
     tb: list[str] | None = None
     auditPointId: str | None = None
 

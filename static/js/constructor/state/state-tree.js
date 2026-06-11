@@ -11,7 +11,7 @@ import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
@@ -120,7 +120,7 @@ Object.assign(AppState, {
         if (!node?.children) return;
 
         const metricsTableNode = node.children.find(child =>
-            child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (metricsTableNode && node.number) {
@@ -505,7 +505,7 @@ Object.assign(AppState, {
      */
     async _checkMetricsTableDeletion(draggedNode, newParent) {
         const hasMetricsTable = draggedNode.children?.some(
-            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (!hasMetricsTable) return ValidationCore.success();
@@ -534,7 +534,7 @@ Object.assign(AppState, {
      */
     _removeMetricsTable(node) {
         const metricsTableNode = node.children.find(
-            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (metricsTableNode) {
@@ -777,7 +777,7 @@ Object.assign(AppState, {
 
         const {TABLE} = AppConfig.nodeTypes;
         const hasTable = node.children?.some(
-            child => child.type === TABLE && child.isMetricsTable === true
+            child => child.type === TABLE && child.kind === KIND_METRICS
         );
 
         if (!hasTable) {

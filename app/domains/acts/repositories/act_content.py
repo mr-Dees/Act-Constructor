@@ -131,9 +131,7 @@ class ActContentRepository(BaseRepository):
         rows = await self.conn.fetch(
             f"""
             SELECT table_id, node_id, grid_data, col_widths, is_protected,
-                   is_deletable, is_metrics_table, is_main_metrics_table,
-                   is_regular_risk_table, is_operational_risk_table,
-                   is_tax_risk_table, is_other_risk_table
+                   is_deletable, kind
             FROM {self.tables}
             WHERE act_id = $1
             """,
@@ -147,12 +145,7 @@ class ActContentRepository(BaseRepository):
                 'colWidths': json.loads(row['col_widths']),
                 'protected': row['is_protected'],
                 'deletable': row['is_deletable'],
-                'isMetricsTable': row['is_metrics_table'],
-                'isMainMetricsTable': row['is_main_metrics_table'],
-                'isRegularRiskTable': row['is_regular_risk_table'],
-                'isOperationalRiskTable': row['is_operational_risk_table'],
-                'isTaxRiskTable': row['is_tax_risk_table'],
-                'isOtherRiskTable': row['is_other_risk_table']
+                'kind': row['kind']
             }
             for row in rows
         }
@@ -303,12 +296,7 @@ class ActContentRepository(BaseRepository):
                 json.dumps(table_data.colWidths),
                 table_data.protected,
                 table_data.deletable,
-                getattr(table_data, 'isMetricsTable', False),
-                getattr(table_data, 'isMainMetricsTable', False),
-                getattr(table_data, 'isRegularRiskTable', False),
-                getattr(table_data, 'isOperationalRiskTable', False),
-                getattr(table_data, 'isTaxRiskTable', False),
-                getattr(table_data, 'isOtherRiskTable', False),
+                getattr(table_data, 'kind', 'regular') or 'regular',
             ))
 
         if dropped:
@@ -324,11 +312,9 @@ class ActContentRepository(BaseRepository):
                     act_id, audit_act_id, audit_point_id,
                     table_id, node_id, node_number, table_label,
                     grid_data, col_widths, is_protected, is_deletable,
-                    is_metrics_table, is_main_metrics_table,
-                    is_regular_risk_table, is_operational_risk_table,
-                    is_tax_risk_table, is_other_risk_table
+                    kind
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 """,
                 args,
             )
@@ -577,20 +563,15 @@ class ActContentRepository(BaseRepository):
         is_deletable: bool,
         node_number: str | None = None,
         table_label: str | None = None,
-        is_metrics_table: bool = False,
-        is_main_metrics_table: bool = False,
-        is_regular_risk_table: bool = False,
-        is_operational_risk_table: bool = False,
-        is_tax_risk_table: bool = False,
-        is_other_risk_table: bool = False,
+        kind: str = "regular",
     ) -> None:
         """Вставляет одну системную таблицу (qualityAssessment и т.п.).
 
         Используется при перестройке разделов 1-2: при переходе на процессный
         тип проверки добавляются специальные таблицы оценки качества.
 
-        Заполняет денормализацию (node_number/table_label) и все 6 флагов
-        подвидов — чтобы вставленная системная таблица была согласована с теми,
+        Заполняет денормализацию (node_number/table_label) и подвид kind —
+        чтобы вставленная системная таблица была согласована с теми,
         что пишет _save_tables, и не теряла классификацию.
         """
         await self.conn.execute(
@@ -598,10 +579,8 @@ class ActContentRepository(BaseRepository):
             INSERT INTO {self.tables}
                 (act_id, table_id, node_id, node_number, table_label,
                  grid_data, col_widths, is_protected, is_deletable,
-                 is_metrics_table, is_main_metrics_table,
-                 is_regular_risk_table, is_operational_risk_table,
-                 is_tax_risk_table, is_other_risk_table)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 kind)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             act_id,
             table_id,
@@ -612,12 +591,7 @@ class ActContentRepository(BaseRepository):
             json.dumps(col_widths),
             is_protected,
             is_deletable,
-            is_metrics_table,
-            is_main_metrics_table,
-            is_regular_risk_table,
-            is_operational_risk_table,
-            is_tax_risk_table,
-            is_other_risk_table,
+            kind,
         )
 
     async def _update_edit_timestamp(self, act_id: int, username: str):

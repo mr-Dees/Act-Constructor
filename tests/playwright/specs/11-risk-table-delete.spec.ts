@@ -111,7 +111,7 @@ async function findRiskTableChildId(
     const tableType = AppConfig.nodeTypes.TABLE;
     const riskChild = parent.children.find((c: any) =>
       c.type === tableType &&
-      (c.isRegularRiskTable || c.isOperationalRiskTable || c.isTaxRiskTable || c.isOtherRiskTable)
+      ['regularRisk', 'operationalRisk', 'taxRisk', 'otherRisk'].includes(c.kind)
     );
     return riskChild ? riskChild.id : null;
   }, parentId);
@@ -131,7 +131,7 @@ async function countRiskTablesInSection5(page: import('@playwright/test').Page):
 }
 
 /**
- * Проверяет, есть ли в §5 главная сводная таблица (isMainMetricsTable).
+ * Проверяет, есть ли в §5 главная сводная таблица (kind === 'mainMetrics').
  */
 async function hasMainSvod(page: import('@playwright/test').Page): Promise<boolean> {
   return page.evaluate(() => {
@@ -140,12 +140,12 @@ async function hasMainSvod(page: import('@playwright/test').Page): Promise<boole
     if (!node5?.children) return false;
     // @ts-expect-error
     const tableType = AppConfig.nodeTypes.TABLE;
-    return node5.children.some((c: any) => c.type === tableType && c.isMainMetricsTable === true);
+    return node5.children.some((c: any) => c.type === tableType && c.kind === 'mainMetrics');
   });
 }
 
 /**
- * Проверяет, есть ли per-point сводная таблица (isMetricsTable) среди детей узла с данным id.
+ * Проверяет, есть ли per-point сводная таблица (kind === 'metrics') среди детей узла с данным id.
  */
 async function hasPerPointSvod(page: import('@playwright/test').Page, nodeId: string): Promise<boolean> {
   return page.evaluate((nid: string) => {
@@ -154,7 +154,7 @@ async function hasPerPointSvod(page: import('@playwright/test').Page, nodeId: st
     if (!node?.children) return false;
     // @ts-expect-error
     const tableType = AppConfig.nodeTypes.TABLE;
-    return node.children.some((c: any) => c.type === tableType && c.isMetricsTable === true);
+    return node.children.some((c: any) => c.type === tableType && c.kind === 'metrics');
   }, nodeId);
 }
 
