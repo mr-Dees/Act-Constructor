@@ -137,7 +137,8 @@ Object.assign(TextBlockManager.prototype, {
             this.applyFormattingToNewNodes(editor);
 
             // typing-flow: дополнительный 150 мс debounce поверх 500 мс save-debounce.
-            PreviewManager.scheduleTyping();
+            // Контентная правка одного блока → точечный патч.
+            PreviewManager.scheduleTypingBlock('textblock', textBlock.id);
         }, 500);
     },
 

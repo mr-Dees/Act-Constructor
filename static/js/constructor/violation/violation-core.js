@@ -109,7 +109,7 @@ export class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
                 }
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -141,7 +141,7 @@ export class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
                 }
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -250,7 +250,7 @@ export class ViolationManager {
         checkbox.addEventListener('change', () => {
             violation[fieldName].enabled = checkbox.checked;
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         const checkboxLabel = document.createElement('label');
@@ -279,7 +279,7 @@ export class ViolationManager {
             addButton.addEventListener('click', () => {
                 violation[fieldName].items.push('');
                 this.renderList(listContainer, violation, fieldName);
-                PreviewManager.update();
+                PreviewManager.updateBlock('violation', violation.id);
             });
 
             contentContainer.appendChild(addButton);
@@ -296,7 +296,7 @@ export class ViolationManager {
             // Настраиваем обработку клавиш
             this.setupTextareaHandlers(textarea, (value) => {
                 violation[fieldName].content = value;
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
 
             contentContainer.appendChild(textarea);
@@ -330,7 +330,7 @@ export class ViolationManager {
             // Обновляем массив при вводе
             input.addEventListener('input', () => {
                 violation[fieldName].items[index] = input.value;
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
 
             // Обработка горячих клавиш для элементов списка
@@ -345,7 +345,7 @@ export class ViolationManager {
                     input.value = originalValue;
                     violation[fieldName].items[index] = originalValue;
                     input.blur();
-                    PreviewManager.update();
+                    PreviewManager.updateBlock('violation', violation.id);
                 }
             });
 
@@ -362,7 +362,7 @@ export class ViolationManager {
             deleteBtn.addEventListener('click', () => {
                 violation[fieldName].items.splice(index, 1);
                 this.renderList(container, violation, fieldName);
-                PreviewManager.update();
+                PreviewManager.updateBlock('violation', violation.id);
             });
 
             itemContainer.appendChild(input);

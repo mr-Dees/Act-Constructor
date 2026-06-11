@@ -161,6 +161,7 @@ export const AppState = {
         const tableNode = this._createTableNode(nodeId, tableId, label, isProtected, deletable);
 
         node.children.push(tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createTableGrid(rows, cols, headers);
         const table = this._createTableObject(tableId, tableNode.id, grid, cols, isProtected, deletable);
@@ -293,18 +294,178 @@ export const AppState = {
     },
 
     /**
-     * Рекурсивно ищет узел по ID
+     * Индекс id → raw-узел дерева. Держит «сырые» объекты (не Proxy):
+     * горячие read-пути ходят по нему без get-трапов. Наружу raw не отдаётся —
+     * findNodeById/findParentNode оборачивают результат через _trackedNode.
+     * @private
+     * @type {Map<string, Object>}
+     */
+    _nodeIndex: new Map(),
+
+    /**
+     * Индекс childId → raw-родитель. Поддерживается синхронно с _nodeIndex.
+     * @private
+     * @type {Map<string, Object>}
+     */
+    _parentIndex: new Map(),
+
+    /**
+     * Raw-корень, по которому построен индекс. Несовпадение с текущим
+     * raw-treeData (замена дерева целиком: загрузка акта, initializeTree,
+     * тесты) — сигнал на полный rebuild.
+     * @private
+     * @type {Object|null}
+     */
+    _indexRoot: null,
+
+    /**
+     * Полностью перестраивает индексы узлов обходом raw-дерева.
+     * Вызывается лениво при смене корня (_ensureNodeIndex) и явно после
+     * операций, заменяющих узлы по ссылкам (rollback каскада metrics↔risk).
+     * @private
+     */
+    _rebuildNodeIndex() {
+        this._nodeIndex.clear();
+        this._parentIndex.clear();
+        const root = _unwrap(this.treeData) || null;
+        this._indexRoot = root;
+        if (!root) return;
+
+        const walk = (node, parent) => {
+            this._nodeIndex.set(node.id, node);
+            if (parent) this._parentIndex.set(node.id, parent);
+            if (node.children) {
+                for (const child of node.children) walk(child, node);
+            }
+        };
+        walk(root, null);
+    },
+
+    /**
+     * Гарантирует актуальность индекса относительно текущего корня дерева.
+     * @private
+     */
+    _ensureNodeIndex() {
+        const root = _unwrap(this.treeData) || null;
+        if (this._indexRoot !== root) this._rebuildNodeIndex();
+    },
+
+    /**
+     * Регистрирует добавленное поддерево в индексах.
+     * Вызывается во ВСЕХ структурных мутациях, добавляющих узлы
+     * (addNode/_addAsChild/_addAsSibling, создание контент-узлов,
+     * каскадные metrics-таблицы).
+     * @private
+     * @param {Object} node - Добавленный узел (с поддеревом)
+     * @param {Object} parent - Родитель, в children которого вставлен узел
+     */
+    _indexNodeAdded(node, parent) {
+        this._ensureNodeIndex();
+        const walk = (n, p) => {
+            this._nodeIndex.set(n.id, n);
+            if (p) this._parentIndex.set(n.id, p);
+            if (n.children) {
+                for (const child of n.children) walk(child, n);
+            }
+        };
+        walk(_unwrap(node), _unwrap(parent));
+    },
+
+    /**
+     * Снимает удалённое поддерево с индексов.
+     * @private
+     * @param {Object} node - Удалённый узел (с поддеревом)
+     */
+    _unindexNodeRemoved(node) {
+        const walk = (n) => {
+            this._nodeIndex.delete(n.id);
+            this._parentIndex.delete(n.id);
+            if (n.children) {
+                for (const child of n.children) walk(child);
+            }
+        };
+        walk(_unwrap(node));
+    },
+
+    /**
+     * Обновляет индекс родителя после перемещения узла (membership поддерева
+     * не меняется — достаточно одной записи).
+     * @private
+     * @param {Object} node - Перемещённый узел
+     * @param {Object} newParent - Новый родитель
+     */
+    _reindexNodeMoved(node, newParent) {
+        this._ensureNodeIndex();
+        this._parentIndex.set(_unwrap(node).id, _unwrap(newParent));
+    },
+
+    /**
+     * Оборачивает raw-узел в tracking-Proxy, если deep-tracking активен.
+     * Гарантия: наружу из индекса не выходит raw-объект — мутации через
+     * результат findNodeById всегда ловятся markAsUnsaved.
+     * @private
+     * @param {Object|null} node - Raw-узел из индекса
+     * @returns {Object|null}
+     */
+    _trackedNode(node) {
+        if (!node) return null;
+        return _isStateTrackingActive() ? _wrapDeep(node) : node;
+    },
+
+    /**
+     * Ищет узел по ID. Без второго аргумента — O(1) по индексу;
+     * с явным начальным узлом — рекурсивный обход поддерева (legacy-режим).
      * @param {string} id - ID искомого узла
-     * @param {Object} [node] - Начальный узел для поиска
+     * @param {Object} [node] - Начальный узел для scoped-поиска
      * @returns {Object|null} Найденный узел или null
      */
-    findNodeById(id, node = this.treeData) {
+    findNodeById(id, node) {
+        if (node !== undefined) {
+            return this._findNodeWalk(id, node);
+        }
+        return this._trackedNode(this._findNodeRaw(id));
+    },
+
+    /**
+     * Внутренний raw-поиск узла по индексу (без оборачивания в Proxy).
+     * Использовать ТОЛЬКО для read-only путей (сериализация, рендер) —
+     * мутации raw-узла обходят dirty-tracking.
+     * @private
+     * @param {string} id - ID искомого узла
+     * @returns {Object|null} Raw-узел или null
+     */
+    _findNodeRaw(id) {
+        if (!this.treeData) return null;
+
+        this._ensureNodeIndex();
+        const hit = this._nodeIndex.get(id);
+        if (hit) return hit;
+
+        // Промах индекса: страховочный полный обход. Найденный обходом узел —
+        // сигнал пропущенной инвалидации (warn), индекс перестраивается.
+        const found = this._findNodeWalk(id, this._indexRoot);
+        if (found) {
+            console.warn(`[AppState] findNodeById('${id}'): промах индекса — найден полным обходом, индекс перестроен (пропущенная инвалидация)`);
+            this._rebuildNodeIndex();
+            return found;
+        }
+        return null;
+    },
+
+    /**
+     * Рекурсивный поиск узла по ID (без индекса).
+     * @private
+     * @param {string} id - ID искомого узла
+     * @param {Object} node - Начальный узел
+     * @returns {Object|null}
+     */
+    _findNodeWalk(id, node) {
         if (!node) return null;
         if (node.id === id) return node;
         if (!node.children) return null;
 
         for (const child of node.children) {
-            const found = this.findNodeById(id, child);
+            const found = this._findNodeWalk(id, child);
             if (found) return found;
         }
 
@@ -312,18 +473,57 @@ export const AppState = {
     },
 
     /**
-     * Находит родительский узел
+     * Находит родительский узел. Без второго аргумента — O(1) по индексу;
+     * с явным начальным узлом — рекурсивный обход (legacy-режим).
      * @param {string} nodeId - ID дочернего узла
-     * @param {Object} [parent] - Начальный узел для поиска
+     * @param {Object} [parent] - Начальный узел для scoped-поиска
      * @returns {Object|null} Родительский узел или null
      */
-    findParentNode(nodeId, parent = this.treeData) {
-        if (!parent.children) return null;
+    findParentNode(nodeId, parent) {
+        if (parent !== undefined) {
+            return this._findParentWalk(nodeId, parent);
+        }
+        return this._trackedNode(this._findParentRaw(nodeId));
+    },
+
+    /**
+     * Внутренний raw-поиск родителя по индексу (без оборачивания в Proxy).
+     * @private
+     * @param {string} nodeId - ID дочернего узла
+     * @returns {Object|null} Raw-родитель или null
+     */
+    _findParentRaw(nodeId) {
+        if (!this.treeData) return null;
+
+        this._ensureNodeIndex();
+        const hit = this._parentIndex.get(nodeId);
+        if (hit) return hit;
+        // Узел известен индексу, но родителя нет — это корень.
+        if (this._nodeIndex.has(nodeId)) return null;
+
+        const found = this._findParentWalk(nodeId, this._indexRoot);
+        if (found) {
+            console.warn(`[AppState] findParentNode('${nodeId}'): промах индекса — найден полным обходом, индекс перестроен (пропущенная инвалидация)`);
+            this._rebuildNodeIndex();
+            return found;
+        }
+        return null;
+    },
+
+    /**
+     * Рекурсивный поиск родителя (без индекса).
+     * @private
+     * @param {string} nodeId - ID дочернего узла
+     * @param {Object} parent - Начальный узел
+     * @returns {Object|null}
+     */
+    _findParentWalk(nodeId, parent) {
+        if (!parent?.children) return null;
 
         for (const child of parent.children) {
             if (child.id === nodeId) return parent;
 
-            const found = this.findParentNode(nodeId, child);
+            const found = this._findParentWalk(nodeId, child);
             if (found) return found;
         }
 
@@ -331,12 +531,14 @@ export const AppState = {
     },
 
     /**
-     * Экспортирует состояние для отправки на бэкенд
+     * Экспортирует состояние для отправки на бэкенд.
+     * Read-only путь: обходы идут по raw-данным (без Proxy get-трапов),
+     * результат — новые plain-объекты, исходное состояние не мутируется.
      * @returns {Object} Сериализованное состояние
      */
     exportData() {
         return {
-            tree: this._serializeTree(this.treeData),
+            tree: this._serializeTree(_unwrap(this.treeData)),
             tables: this._serializeTables(),
             textBlocks: this._serializeTextBlocks(),
             violations: this._serializeViolations(),
@@ -355,7 +557,8 @@ export const AppState = {
             if (node.invoice) ids.push(node.id);
             if (node.children) node.children.forEach(walk);
         };
-        if (this.treeData) walk(this.treeData);
+        const rawTree = _unwrap(this.treeData);
+        if (rawTree) walk(rawTree);
         return ids;
     },
 
@@ -412,7 +615,7 @@ export const AppState = {
     _serializeTables() {
         const serialized = {};
 
-        for (const [tableId, table] of Object.entries(this.tables)) {
+        for (const [tableId, table] of Object.entries(_unwrap(this.tables))) {
             serialized[tableId] = {
                 id: table.id,
                 nodeId: table.nodeId,
@@ -434,7 +637,8 @@ export const AppState = {
             // Подвид kind: источник истины — узел таблицы. Если узел не
             // найден (рассинхрон) — fallback на kind самого объекта таблицы,
             // чтобы рантайм-подвид пережил round-trip. 'regular' не пишем.
-            const node = this.findNodeById?.(table.nodeId);
+            // Read-only lookup → raw-индекс, O(1) без Proxy.
+            const node = this._findNodeRaw?.(table.nodeId);
             const tableKind = node ? getTableKind(node) : getTableKind(table);
             if (tableKind !== KIND_REGULAR) serialized[tableId].kind = tableKind;
         }
@@ -451,7 +655,7 @@ export const AppState = {
         const serialized = {};
         const defaults = AppConfig.content.defaults;
 
-        for (const [blockId, block] of Object.entries(this.textBlocks)) {
+        for (const [blockId, block] of Object.entries(_unwrap(this.textBlocks))) {
             serialized[blockId] = {
                 id: block.id,
                 nodeId: block.nodeId,
@@ -477,7 +681,7 @@ export const AppState = {
     _serializeViolations() {
         const serialized = {};
 
-        for (const [violationId, violation] of Object.entries(this.violations)) {
+        for (const [violationId, violation] of Object.entries(_unwrap(this.violations))) {
             serialized[violationId] = {
                 id: violation.id,
                 nodeId: violation.nodeId,
@@ -522,11 +726,31 @@ export const AppState = {
 export const _stateProxyCache = new WeakMap();
 export const _stateProxyOriginals = new WeakSet();
 
+/**
+ * Обратный маппинг proxy → target. Позволяет получить «сырой» объект из
+ * прокси (_unwrap) за O(1) — нужен горячим read-путям (индекс узлов,
+ * нумерация, сериализация) и set-трапу (в target кладём только raw).
+ * @private
+ */
+export const _stateProxyTargets = new WeakMap();
+
+/**
+ * Флаг: deep-tracking AppState активирован (_wrapStateWithProxy выполнен).
+ * В тестах/на portal-страницах false — read-API отдают raw-узлы как раньше.
+ * @private
+ */
+let _stateTrackingActive = false;
+
+export function _isStateTrackingActive() {
+    return _stateTrackingActive;
+}
+
 export function _isTrackable(value) {
     if (value === null || typeof value !== 'object') return false;
     // Не оборачиваем DOM-узлы, Date, RegExp, Map, Set, Blob — у них собственная
-    // семантика, прокси может сломать поведение.
-    if (value instanceof Node) return false;
+    // семантика, прокси может сломать поведение. typeof-guard: в node-тестах
+    // DOM-глобала Node нет, а _unwrap зовётся на пути индекса узлов.
+    if (typeof Node !== 'undefined' && value instanceof Node) return false;
     if (value instanceof Date || value instanceof RegExp) return false;
     if (value instanceof Map || value instanceof Set || value instanceof WeakMap || value instanceof WeakSet) return false;
     return true;
@@ -581,28 +805,20 @@ export function _wrapDeep(value) {
     const proxy = new Proxy(value, handler);
     _stateProxyCache.set(value, proxy);
     _stateProxyOriginals.add(proxy);
+    _stateProxyTargets.set(proxy, value);
     return proxy;
 }
 
 /**
- * Возвращает «сырой» объект из proxy (для сохранения в БД, JSON.stringify
- * и т.п.). На non-proxy значениях — no-op.
+ * Возвращает «сырой» объект из proxy (для индекса узлов, сериализации,
+ * JSON.stringify и т.п.) через обратный маппинг proxy → target за O(1).
+ * На non-proxy значениях — no-op.
  * @private
  */
 export function _unwrap(value) {
     if (!_isTrackable(value)) return value;
-    if (_stateProxyOriginals.has(value)) {
-        // Это уже proxy — достаём raw через прямой target lookup.
-        // Proxy не хранит target напрямую, но WeakMap-кеш записан target→proxy,
-        // поэтому делаем reverse через обход (для AppState size это OK — деревья
-        // относительно небольшие, а вызов unwrap случается только при set).
-        // На практике в наших сценариях newValue обычно plain literal от других
-        // модулей — то есть proxy сюда почти не приходит. Безопасный fallback:
-        // возвращаем значение как есть (Proxy всё равно прозрачно прокидывает
-        // операции в target).
-        return value;
-    }
-    return value;
+    const target = _stateProxyTargets.get(value);
+    return target !== undefined ? target : value;
 }
 
 /**
@@ -644,6 +860,8 @@ export function _wrapStateWithProxy() {
             configurable: true
         });
     });
+
+    _stateTrackingActive = true;
 
     console.log('State proxy инициализирован (deep-tracking). Отслеживаются:', trackedProperties);
 }

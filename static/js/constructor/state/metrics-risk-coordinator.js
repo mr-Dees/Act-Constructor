@@ -34,17 +34,27 @@
  * 3) Seam для будущей экстракции / юнит-тестов: тесты могут заменять методы
  *    AppState mock'ами и проверять coordinator в изоляции.
  */
-import { AppState } from './state-core.js';
+import { AppState, _unwrap } from './state-core.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export const MetricsRiskCoordinator = {
     /**
-     * Снимает поверхностный snapshot частей дерева, которые могут быть затронуты
-     * каскадом: §5 (главная сводная таблица) и поддеревья 5.X (per-section
-     * сводные). Возвращает функцию rollback(), которая восстанавливает узлы.
+     * Снимает таргетный snapshot ровно того, что каскад способен изменить
+     * (см. metrics-risk-core.js и реализацию каскада в state-content/state-tree):
      *
-     * Используется shallow JSON-копия — каскад модифицирует только children
-     * и table-данные ссылочно, поэтому snapshot небольшой (десятки KB).
+     *  - children-массивы узлов §5-поддерева (unshift/filter сводных таблиц,
+     *    удаление риск-узла на любой глубине) — shallow-slice по ссылкам;
+     *  - label/customLabel узлов §5-поддерева (updateMetricsTableLabel
+     *    переписывает метки сводных);
+     *  - number узлов §5-поддерева (перенумерация generateNumbering; вне §5
+     *    номера каскадом не меняются — структурные правки локализованы в §5);
+     *  - словарь AppState.tables — shallow-копия записей (каскад добавляет
+     *    и удаляет записи, существующие объекты таблиц in-place не мутирует).
+     *
+     * В отличие от прежней полной JSON-копии (§5 целиком + ВСЕ таблицы
+     * поячеечно) — ни одной deep-копии: rollback возвращает исходные объекты
+     * по ссылкам, нетронутые узлы сохраняют ссылочную идентичность
+     * (закреплено tests/js/metrics-risk-rollback.test.mjs).
      * @private
      * @returns {{rollback: function}}
      */
@@ -52,17 +62,95 @@ export const MetricsRiskCoordinator = {
         if (typeof AppState === 'undefined' || !AppState.treeData) {
             return {rollback: () => {}};
         }
-        const node5 = AppState.findNodeById?.('5');
-        const tables5 = node5 ? JSON.parse(JSON.stringify(node5.children || [])) : null;
-        // Сохраняем также таблицы (AppState.tables) — каскад может удалять
-        // metrics-таблицы через delete this.tables[id].
-        const tablesCopy = AppState.tables ? JSON.parse(JSON.stringify(AppState.tables)) : null;
-        return {
-            rollback: () => {
-                if (node5 && tables5) node5.children = tables5;
-                if (tablesCopy) AppState.tables = tablesCopy;
+        const node5 = _unwrap(AppState.findNodeById?.('5'));
+
+        // Пер-узловые shallow-записи §5-поддерева (raw-узлы, без Proxy).
+        const records = [];
+        const collect = (node) => {
+            records.push({
+                node,
+                hasChildren: node.children !== undefined,
+                children: node.children ? node.children.map(c => _unwrap(c)) : null,
+                label: node.label,
+                hasCustomLabel: Object.prototype.hasOwnProperty.call(node, 'customLabel'),
+                customLabel: node.customLabel,
+                hasNumber: Object.prototype.hasOwnProperty.call(node, 'number'),
+                number: node.number,
+            });
+            if (node.children) {
+                for (const child of node.children) collect(_unwrap(child));
             }
         };
+        if (node5) collect(node5);
+
+        const rawTables = _unwrap(AppState.tables);
+        const tablesSnapshot = rawTables ? {...rawTables} : null;
+
+        return {
+            rollback: () => {
+                for (const rec of records) {
+                    const n = rec.node;
+                    if (rec.hasChildren) {
+                        if (!this._sameChildren(n.children, rec.children)) {
+                            n.children = rec.children;
+                        }
+                    } else if (n.children !== undefined) {
+                        delete n.children;
+                    }
+                    if (n.label !== rec.label) n.label = rec.label;
+                    if (rec.hasCustomLabel) {
+                        if (n.customLabel !== rec.customLabel) n.customLabel = rec.customLabel;
+                    } else if ('customLabel' in n) {
+                        delete n.customLabel;
+                    }
+                    if (rec.hasNumber) {
+                        if (n.number !== rec.number) n.number = rec.number;
+                    } else if ('number' in n) {
+                        delete n.number;
+                    }
+                }
+                if (tablesSnapshot && !this._sameTables(_unwrap(AppState.tables), tablesSnapshot)) {
+                    AppState.tables = tablesSnapshot;
+                }
+                // Membership узлов могло поменяться (удалённый риск-узел вернулся,
+                // созданные каскадом сводные выпали) — перестраиваем индекс id→node.
+                AppState._rebuildNodeIndex?.();
+            }
+        };
+    },
+
+    /**
+     * Поэлементное сравнение children с сохранённым slice'ом (по raw-ссылкам).
+     * Совпадение — массив не трогаем (сохраняем ссылочную идентичность).
+     * @private
+     * @param {Array|undefined} current - Текущий children-массив узла.
+     * @param {Array} saved - Сохранённый slice.
+     * @returns {boolean}
+     */
+    _sameChildren(current, saved) {
+        if (!Array.isArray(current) || current.length !== saved.length) return false;
+        for (let i = 0; i < saved.length; i++) {
+            if (_unwrap(current[i]) !== saved[i]) return false;
+        }
+        return true;
+    },
+
+    /**
+     * Сравнение словарей таблиц по составу записей (значения — по ссылкам).
+     * @private
+     * @param {Object|null} current - Текущий AppState.tables (raw).
+     * @param {Object} saved - Снимок словаря.
+     * @returns {boolean}
+     */
+    _sameTables(current, saved) {
+        if (!current) return false;
+        const currentKeys = Object.keys(current);
+        const savedKeys = Object.keys(saved);
+        if (currentKeys.length !== savedKeys.length) return false;
+        for (const key of savedKeys) {
+            if (_unwrap(current[key]) !== saved[key]) return false;
+        }
+        return true;
     },
 
     /**

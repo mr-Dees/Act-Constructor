@@ -340,6 +340,19 @@ export class TreeDragDrop {
             ? this.dropTargetNode.id
             : (AppState.findParentNode(this.dropTargetNode.id)?.id ?? null);
 
+        // Осознанный fallback на полный render дерева: перемещения, способные
+        // затронуть DOM за пределами поддеревьев старого/нового родителя —
+        // каскад metrics↔risk (риски в перемещаемом поддереве) и §5
+        // (computed-бейджи ТБ/фактур по цепочке предков, сводные таблицы).
+        const newParentNode = newParentId ? AppState.findNodeById(newParentId) : null;
+        const needsFullTreeRender =
+            !oldParentId || !newParentId ||
+            oldParentId === 'root' || newParentId === 'root' ||
+            oldParentId === '5' || newParentId === '5' ||
+            this._hasRiskTablesInSubtree(this.draggedNode) ||
+            (oldParent && TreeUtils.isUnderSection5(oldParent)) ||
+            (newParentNode && TreeUtils.isUnderSection5(newParentNode));
+
         const result = await AppState.moveNode(
             this.draggedNode.id,
             this.dropTargetNode.id,
@@ -347,7 +360,7 @@ export class TreeDragDrop {
         );
 
         if (result.valid) {
-            this.manager.render();
+            this._renderTreeAfterDrop(oldParentId, newParentId, needsFullTreeRender);
             PreviewManager.update('previewTrim', 30);
 
             if (AppState.currentStep === 2) {
@@ -369,6 +382,50 @@ export class TreeDragDrop {
         }
 
         this.cleanup();
+    }
+
+    /**
+     * Обновляет дерево после успешного drop: точечная пересборка поддеревьев
+     * старого и нового родителя; если один — предок другого, достаточно
+     * внешнего. Полный render — по флагу needsFullTreeRender (см. handleDrop).
+     * @private
+     * @param {string} oldParentId - ID старого родителя
+     * @param {string} newParentId - ID нового родителя
+     * @param {boolean} needsFullTreeRender - Принудительный полный render
+     */
+    _renderTreeAfterDrop(oldParentId, newParentId, needsFullTreeRender) {
+        const renderer = this.manager.renderer;
+        if (needsFullTreeRender || !renderer?.renderSubtree) {
+            this.manager.render();
+            return;
+        }
+
+        if (oldParentId === newParentId) {
+            renderer.renderSubtree(oldParentId);
+        } else if (this._isAncestorOf(oldParentId, newParentId)) {
+            renderer.renderSubtree(oldParentId);
+        } else if (this._isAncestorOf(newParentId, oldParentId)) {
+            renderer.renderSubtree(newParentId);
+        } else {
+            renderer.renderSubtree(oldParentId);
+            renderer.renderSubtree(newParentId);
+        }
+    }
+
+    /**
+     * Проверяет (по текущему дереву), является ли один узел предком другого.
+     * @private
+     * @param {string} ancestorId - ID предполагаемого предка
+     * @param {string} nodeId - ID узла
+     * @returns {boolean}
+     */
+    _isAncestorOf(ancestorId, nodeId) {
+        let parent = AppState.findParentNode(nodeId);
+        while (parent) {
+            if (parent.id === ancestorId) return true;
+            parent = AppState.findParentNode(parent.id);
+        }
+        return false;
     }
 
     /**

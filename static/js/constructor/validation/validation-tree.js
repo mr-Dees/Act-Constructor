@@ -5,6 +5,7 @@
  * лимиты контента и отношения родитель-потомок.
  * НЕ содержит бизнес-логики акта.
  */
+import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationCore } from './validation-core.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -35,7 +36,7 @@ export const ValidationTree = {
      * @returns {Object} Результат с полями valid, message, isWarning
      */
     canAddSibling(nodeId) {
-        const parent = TreeUtils.findParentNode(nodeId);
+        const parent = AppState.findParentNode(nodeId);
 
         if (parent?.id === 'root') {
             return this._validateFirstLevelSiblingAddition(parent, nodeId);

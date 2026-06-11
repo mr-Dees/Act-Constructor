@@ -5,10 +5,11 @@
  * Обрабатывает различные типы контента: таблицы, текстовые блоки,
  * нарушения и древовидную структуру с учетом вложенности.
  */
+import { decideBlockPatch } from './preview-block-routing.js';
 import { PreviewTableRenderer } from './preview-table-renderer.js';
 import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
-import { AppState } from '../state/state-core.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
 import { PreviewFitScaler } from './preview-fit.js';
@@ -27,6 +28,23 @@ export class PreviewManager {
      * @private
      */
     static _fitScaler = null;
+
+    /**
+     * Индекс блоков inline-превью: 'table:id' | 'textblock:id' | 'violation:id'
+     * → DOM-элемент блока. Заполняется при полном рендере в #preview
+     * (модальное меню индекс не трогает), используется updateBlock для
+     * точечной замены одного блока без полной пересборки.
+     * @private
+     * @type {Map<string, HTMLElement>}
+     */
+    static _blockIndex = new Map();
+
+    /**
+     * Накопитель ключей блоков, ожидающих точечного обновления (RAF-дедуп).
+     * @private
+     */
+    static _pendingBlocks = new Set();
+    static _blockRafPending = false;
 
     /**
      * Обновляет содержимое панели предпросмотра.
@@ -104,6 +122,134 @@ export class PreviewManager {
     }
 
     /**
+     * Накопитель блоков typing-flow: до срабатывания debounce-таймера блоки
+     * копятся, флаш обновляет ВСЕ накопленные (иначе быстрый переход между
+     * полями разных блоков терял бы обновление первого).
+     * @private
+     */
+    static _typingBlocks = new Set();
+
+    /**
+     * Планирует ТОЧЕЧНОЕ обновление одного блока превью с debounce 150 мс —
+     * блочный аналог scheduleTyping для контентных правок (ввод в ячейку,
+     * текстблок, поля нарушения).
+     * @param {string} kind - Тип блока ('table' | 'textblock' | 'violation')
+     * @param {string} id - ID блока в словаре состояния
+     */
+    static scheduleTypingBlock(kind, id) {
+        this._typingBlocks.add(`${kind}:${id}`);
+        clearTimeout(this._typingTimer);
+        this._typingTimer = setTimeout(() => {
+            this._typingTimer = null;
+            const keys = [...this._typingBlocks];
+            this._typingBlocks.clear();
+            for (const key of keys) {
+                const sep = key.indexOf(':');
+                this.updateBlock(key.slice(0, sep), key.slice(sep + 1));
+            }
+        }, this._TYPING_DEBOUNCE_MS);
+    }
+
+    /**
+     * Точечное обновление ОДНОГО блока превью (контентная правка): замена
+     * элемента блока по индексу без полной пересборки листа. Структурные
+     * операции (add/delete/move/rename/каскад) по-прежнему идут через update().
+     *
+     * RAF-дедуп: подряд идущие вызовы в одном кадре накапливаются и
+     * выполняются одним флашем. Промах индекса / появление-исчезновение
+     * блока — fallback на полный update().
+     *
+     * @param {string} kind - Тип блока ('table' | 'textblock' | 'violation')
+     * @param {string} id - ID блока в словаре состояния
+     */
+    static updateBlock(kind, id) {
+        if (!kind || id == null) return this.update();
+
+        this._pendingBlocks.add(`${kind}:${id}`);
+        if (this._blockRafPending) return;
+        this._blockRafPending = true;
+
+        requestAnimationFrame(() => {
+            this._blockRafPending = false;
+            const keys = [...this._pendingBlocks];
+            this._pendingBlocks.clear();
+
+            // Параллельно запланирован полный рендер — он перекроет блочные патчи.
+            if (this._pendingUpdate) return;
+
+            // Кеш замечаний инвалидируется ДО патча (state уже изменён):
+            // рамки и колокольчик пересчитают свежий снимок.
+            invalidateTableWarningsCache();
+
+            for (const key of keys) {
+                if (!this._patchBlock(key)) {
+                    // Fallback: сложный случай — полная пересборка (внутри —
+                    // своя инвалидация кеша и emit).
+                    this.update();
+                    return;
+                }
+            }
+
+            const sheet = document.querySelector('#preview .preview-sheet');
+            if (sheet) this._applyTableOutlines(sheet);
+            this._emitContentChanged();
+        });
+    }
+
+    /**
+     * Выполняет точечную замену элемента блока по ключу индекса.
+     * @private
+     * @param {string} key - Ключ вида 'kind:id'
+     * @returns {boolean} true — патч выполнен (или DOM не требует правки),
+     *   false — нужен полный рендер
+     */
+    static _patchBlock(key) {
+        const sep = key.indexOf(':');
+        const kind = key.slice(0, sep);
+        const id = key.slice(sep + 1);
+        const el = this._blockIndex.get(key);
+        const hasElement = !!el && el.isConnected;
+        const trim = AppConfig.preview.defaultTrimLength;
+
+        if (kind === 'table') {
+            const table = _unwrap(AppState.tables)[id];
+            if (decideBlockPatch(kind, {hasElement, hasData: !!table}) !== 'patch') return false;
+            const fresh = PreviewTableRenderer.create(table, trim, { tableId: id });
+            el.replaceWith(fresh);
+            this._blockIndex.set(key, fresh);
+            return true;
+        }
+
+        if (kind === 'textblock') {
+            const block = _unwrap(AppState.textBlocks)[id];
+            const decision = decideBlockPatch(kind, {
+                hasElement,
+                hasData: !!block,
+                hasContent: !!this._hasContent(block),
+            });
+            if (decision === 'skip') return true;
+            if (decision !== 'patch') return false;
+            const fresh = PreviewTextBlockRenderer.create(block);
+            el.replaceWith(fresh);
+            this._blockIndex.set(key, fresh);
+            this._attachPreviewTooltips(fresh);
+            return true;
+        }
+
+        if (kind === 'violation') {
+            const violation = _unwrap(AppState.violations)[id];
+            if (decideBlockPatch(kind, {hasElement, hasData: !!violation}) !== 'patch') return false;
+            const fresh = PreviewViolationRenderer.create(violation, trim);
+            el.replaceWith(fresh);
+            this._blockIndex.set(key, fresh);
+            this._attachPreviewTooltips(fresh);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Выполняет обновление предпросмотра
      * @private
      * @param {number} previewTrim - Максимальная длина текста
@@ -117,7 +263,15 @@ export class PreviewManager {
 
         // Единая сборка документа (лист + sizer + индикатор зума) — общая для
         // inline-панели и модального меню, исключает расхождение их рендера.
-        this.renderDocumentInto(preview, { previewTrim });
+        // Индекс блоков ведётся ТОЛЬКО для inline-панели (#preview) — точечный
+        // updateBlock работает по ней; модальное меню индекс не трогает.
+        this._blockIndex.clear();
+        this._indexBlocks = true;
+        try {
+            this.renderDocumentInto(preview, { previewTrim });
+        } finally {
+            this._indexBlocks = false;
+        }
 
         // Fit-to-width: масштабирует лист под ширину панели. attach идемпотентен —
         // на перерендере наблюдаем ту же #preview и просто перепланируем расчёт.
@@ -212,7 +366,8 @@ export class PreviewManager {
      * @param {number} previewTrim - Максимальная длина текста
      */
     static _renderTree(container, previewTrim) {
-        this.renderNode(AppState.treeData, container, 1, previewTrim);
+        // Read-only обход — по raw-дереву (без Proxy get-трапов).
+        this.renderNode(_unwrap(AppState.treeData), container, 1, previewTrim);
     }
 
     /**
@@ -261,10 +416,12 @@ export class PreviewManager {
             container.appendChild(tableTitle);
         }
 
-        const tableData = AppState.tables[child.tableId];
+        // Read-only: raw-таблица (рендерер ячеек только читает grid).
+        const tableData = _unwrap(AppState.tables)[child.tableId];
         if (tableData) {
             const table = PreviewTableRenderer.create(tableData, previewTrim, { tableId: child.tableId });
             container.appendChild(table);
+            if (this._indexBlocks) this._blockIndex.set(`table:${child.tableId}`, table);
         }
     }
 
@@ -273,11 +430,12 @@ export class PreviewManager {
      * @private
      */
     static _renderTextBlockNode(child, container, level, previewTrim) {
-        const textBlock = AppState.textBlocks[child.textBlockId];
+        const textBlock = _unwrap(AppState.textBlocks)[child.textBlockId];
 
         if (this._hasContent(textBlock)) {
             const element = PreviewTextBlockRenderer.create(textBlock);
             container.appendChild(element);
+            if (this._indexBlocks) this._blockIndex.set(`textblock:${child.textBlockId}`, element);
         }
     }
 
@@ -286,11 +444,12 @@ export class PreviewManager {
      * @private
      */
     static _renderViolationNode(child, container, level, previewTrim) {
-        const violation = AppState.violations[child.violationId];
+        const violation = _unwrap(AppState.violations)[child.violationId];
 
         if (violation) {
             const element = PreviewViolationRenderer.create(violation, previewTrim);
             container.appendChild(element);
+            if (this._indexBlocks) this._blockIndex.set(`violation:${child.violationId}`, element);
         }
     }
 

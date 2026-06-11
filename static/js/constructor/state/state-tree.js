@@ -8,7 +8,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
-import { AppState } from './state-core.js';
+import { AppState, _unwrap } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
@@ -27,87 +27,46 @@ Object.assign(AppState, {
      * @param {string} [prefix=''] - Префикс нумерации
      */
     generateNumbering(node = this.treeData, prefix = '') {
-        if (!node.children) return;
+        // Горячий read-путь: обход по raw-узлам (без Proxy get-трапов).
+        // Записываются только производные поля (number; метки сводных — через
+        // updateMetricsTableLabel → findNodeById, т.е. через tracked-узел).
+        // Каждый вызов сопровождает структурную мутацию, уже пометившую
+        // состояние dirty, поэтому raw-запись number трекинг не теряет.
+        node = _unwrap(node);
+        if (!node?.children) return;
 
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        node.children.forEach((child, index) => {
+        // Один проход с локальными счётчиками по типам — вместо
+        // filter().indexOf() на каждом ребёнке (квадратичная стоимость).
+        // Результат байт-в-байт совпадает со старым алгоритмом
+        // (закреплено tests/js/generate-numbering.test.mjs).
+        const {TABLE, TEXTBLOCK, VIOLATION, ITEM} = AppConfig.nodeTypes;
+        let tableCount = 0;
+        let textBlockCount = 0;
+        let violationCount = 0;
+        let itemCount = 0;
+
+        for (const child of node.children) {
             if (child.type === TABLE) {
-                this._numberTable(child, node);
+                child.number = `Таблица ${++tableCount}`;
             } else if (child.type === TEXTBLOCK) {
-                this._numberTextBlock(child, node);
+                child.number = `Текстовый блок ${++textBlockCount}`;
             } else if (child.type === VIOLATION) {
-                this._numberViolation(child, node);
-            } else {
-                this._numberItem(child, node, prefix, index);
+                child.number = `Нарушение ${++violationCount}`;
+            } else if (!child.type || child.type === ITEM) {
+                const number = prefix ? `${prefix}.${++itemCount}` : `${++itemCount}`;
+                child.number = number;
+
+                // Обновляем метки таблиц метрик для узлов под пунктом 5
+                if (node.id === '5' && number.startsWith('5.')) {
+                    this.updateMetricsTableLabel(child.id);
+                }
+
+                // Рекурсивная нумерация дочерних элементов
+                if (child.children?.length > 0) {
+                    this.generateNumbering(child, number);
+                }
             }
-        });
-    },
-
-    /**
-     * Нумерует таблицу в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел таблицы
-     * @param {Object} parent - Родительский узел
-     */
-    _numberTable(child, parent) {
-        const parentTables = parent.children.filter(c => c.type === AppConfig.nodeTypes.TABLE);
-        const tableIndex = parentTables.indexOf(child) + 1;
-
-        child.number = `Таблица ${tableIndex}`;
-    },
-
-    /**
-     * Нумерует текстовый блок в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел текстового блока
-     * @param {Object} parent - Родительский узел
-     */
-    _numberTextBlock(child, parent) {
-        const parentTextBlocks = parent.children.filter(c => c.type === AppConfig.nodeTypes.TEXTBLOCK);
-        const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
-
-        child.number = `Текстовый блок ${textBlockIndex}`;
-    },
-
-    /**
-     * Нумерует нарушение в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел нарушения
-     * @param {Object} parent - Родительский узел
-     */
-    _numberViolation(child, parent) {
-        const parentViolations = parent.children.filter(c => c.type === AppConfig.nodeTypes.VIOLATION);
-        const violationIndex = parentViolations.indexOf(child) + 1;
-
-        child.number = `Нарушение ${violationIndex}`;
-    },
-
-    /**
-     * Нумерует обычный пункт с иерархической структурой
-     * @private
-     * @param {Object} child - Узел пункта
-     * @param {Object} parent - Родительский узел
-     * @param {string} prefix - Префикс нумерации
-     * @param {number} index - Индекс среди siblings
-     */
-    _numberItem(child, parent, prefix, index) {
-        const itemChildren = parent.children.filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
-        const itemIndex = itemChildren.indexOf(child);
-
-        if (itemIndex === -1) return;
-
-        const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
-
-        child.number = number;
-
-        // Обновляем метки таблиц метрик для узлов под пунктом 5
-        if (parent.id === '5' && number.startsWith('5.')) {
-            this.updateMetricsTableLabel(child.id);
-        }
-
-        // Рекурсивная нумерация дочерних элементов
-        if (child.children?.length > 0) {
-            this.generateNumbering(child, number);
+            // Узлы прочих типов номера не получают (поведение старого алгоритма).
         }
     },
 
@@ -206,6 +165,7 @@ Object.assign(AppState, {
     _addAsChild(parent, newNode) {
         if (!parent.children) parent.children = [];
         parent.children.push(newNode);
+        this._indexNodeAdded(newNode, parent);
     },
 
     /**
@@ -220,6 +180,7 @@ Object.assign(AppState, {
         if (grandParent?.children) {
             const index = grandParent.children.findIndex(n => n.id === siblingId);
             grandParent.children.splice(index + 1, 0, newNode);
+            this._indexNodeAdded(newNode, grandParent);
         }
     },
 
@@ -347,7 +308,9 @@ Object.assign(AppState, {
         const parent = this.findParentNode(nodeId);
 
         if (parent?.children) {
+            const removed = parent.children.find(child => child.id === nodeId);
             parent.children = parent.children.filter(child => child.id !== nodeId);
+            if (removed) this._unindexNodeRemoved(removed);
         }
     },
 
@@ -542,6 +505,7 @@ Object.assign(AppState, {
             node.children = node.children.filter(
                 child => child.id !== metricsTableNode.id
             );
+            this._unindexNodeRemoved(metricsTableNode);
         }
     },
 
@@ -749,6 +713,9 @@ Object.assign(AppState, {
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }
+
+        // Membership поддерева не изменился — обновляем только запись родителя.
+        this._reindexNodeMoved(draggedNode, newParent);
     },
 
     /**

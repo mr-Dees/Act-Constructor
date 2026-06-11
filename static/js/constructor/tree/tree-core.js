@@ -374,8 +374,8 @@ export class TreeManager {
                     const label = li.querySelector(':scope > .tree-label');
                     if (label && !li.classList.contains('protected') && typeof ItemsTitleEditing !== 'undefined') {
                         const nodeId = li.dataset.nodeId;
-                        const node = (typeof TreeUtils !== 'undefined')
-                            ? TreeUtils.findNodeById(nodeId)
+                        const node = (typeof AppState !== 'undefined')
+                            ? AppState.findNodeById(nodeId)
                             : null;
                         if (node) {
                             const editTarget = label.querySelector('.tree-node-text') || label;
@@ -440,6 +440,8 @@ export class TreeManager {
             const icons = AppConfig.tree.interaction.toggleIcons;
             toggle.textContent = expanded ? icons.expanded : icons.collapsed;
         }
+        // Персист свёрнутости per-act (M.24) — симметрично клику по toggle-иконке.
+        this.renderer?.persistCollapsed?.(li.dataset.nodeId, !expanded);
     }
 
     /**

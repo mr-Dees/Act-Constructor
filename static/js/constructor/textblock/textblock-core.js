@@ -61,7 +61,8 @@ export class TextBlockManager {
         const textBlock = this.getTextBlock(textBlockId);
         if (textBlock) {
             textBlock.content = content;
-            PreviewManager.update();
+            // Контентная правка одного блока → точечный патч превью.
+            PreviewManager.updateBlock('textblock', textBlockId);
         }
     }
 

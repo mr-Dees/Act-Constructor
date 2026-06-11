@@ -51,7 +51,7 @@ Object.assign(ViolationManager.prototype, {
                 this.cursorInsertPosition = null;
             }
 
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         const checkboxLabel = document.createElement('label');
@@ -254,7 +254,7 @@ Object.assign(ViolationManager.prototype, {
             this.currentActiveContainer = container;
         }
 
-        PreviewManager.update();
+        PreviewManager.updateBlock('violation', violation.id);
     },
 
     /**
