@@ -71,12 +71,43 @@ export class StorageManager {
     static _isSyncedWithDB = true;
 
     /**
-     * Флаг блокировки автоматического отслеживания
-     * Используется для предотвращения ложных срабатываний Proxy
+     * Счётчик глубины блокировки автоматического отслеживания (M.11).
+     * disableTracking() инкрементирует, enableTracking() декрементирует
+     * (с полом 0); отслеживание выключено, пока счётчик > 0. Счётчик (а не
+     * boolean) нужен, чтобы вложенные/перекрывающиеся пары disable/enable
+     * композировались, а не затирали друг друга.
+     * @private
+     * @type {number}
+     */
+    static _trackingDepth = 0;
+
+    /**
+     * Серверный updated_at акта на момент последней успешной синхронизации
+     * с БД (из ответа GET-контента или PUT-сохранения). Пишется в метаданные
+     * снимка localStorage (baseUpdatedAt) и используется решением о
+     * восстановлении черновика (H3): восстановление предлагается только
+     * если акт с момента снимка никто не менял.
+     * @private
+     * @type {string|null}
+     */
+    static _baseUpdatedAt = null;
+
+    /**
+     * Флаг «о сбое сохранения в БД уже предупреждали» (§9 offline).
+     * Не даёт спамить предупреждением на каждый периодический тик;
+     * сбрасывается при первой успешной синхронизации (markAsSyncedWithDB).
      * @private
      * @type {boolean}
      */
-    static _trackingDisabled = false;
+    static _dbSaveFailureNotified = false;
+
+    /**
+     * Обработчик window 'online' для немедленного повторного сохранения
+     * в БД после восстановления соединения. null = не подписан.
+     * @private
+     * @type {Function|null}
+     */
+    static _onlineRetryHandler = null;
 
     /**
      * Флаг программного выхода со страницы
@@ -182,10 +213,67 @@ export class StorageManager {
                 try {
                     await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
                 } catch (err) {
+                    // §9 offline: ошибку не глотаем — предупреждаем (один раз
+                    // до успеха) и подписываемся на восстановление соединения.
                     console.error('Периодическое сохранение в БД не удалось:', err);
+                    this._notifyDbSaveFailure();
                 }
             }
         }, AppConfig.localStorage.periodicSaveInterval);
+    }
+
+    /**
+     * Обрабатывает сбой фонового сохранения в БД (§9 offline).
+     *
+     * Показывает предупреждение один раз (без спама на каждый периодический
+     * тик; повторное предупреждение возможно только после успешной
+     * синхронизации) и подписывается на window 'online' для немедленного
+     * повторного сохранения при восстановлении соединения.
+     * @private
+     */
+    static _notifyDbSaveFailure() {
+        if (!this._dbSaveFailureNotified) {
+            this._dbSaveFailureNotified = true;
+            Notifications.warning(
+                'Не удалось сохранить изменения в базу данных. ' +
+                'Правки сохранены локально; повторная попытка — автоматически.'
+            );
+        }
+        if (!this._onlineRetryHandler) {
+            this._onlineRetryHandler = () => {
+                this._retryDbSave();
+            };
+            window.addEventListener('online', this._onlineRetryHandler);
+        }
+    }
+
+    /**
+     * Немедленный повторный save в БД после восстановления соединения.
+     * При новой неудаче уведомление не дублируется (_dbSaveFailureNotified
+     * ещё взведён), подписка на 'online' сохраняется до успеха.
+     * @private
+     */
+    static async _retryDbSave() {
+        if (AppState._dragInProgress) return;
+        if (!this.hasUnsyncedChanges() || !window.currentActId) return;
+        try {
+            await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
+        } catch (err) {
+            console.error('Повторное сохранение после восстановления сети не удалось:', err);
+        }
+    }
+
+    /**
+     * Снимает подписку на 'online' и сбрасывает флаг показанного
+     * предупреждения о сбое сохранения в БД.
+     * @private
+     */
+    static _resetDbSaveFailureState() {
+        this._dbSaveFailureNotified = false;
+        if (this._onlineRetryHandler) {
+            window.removeEventListener('online', this._onlineRetryHandler);
+            this._onlineRetryHandler = null;
+        }
     }
 
     /**
@@ -314,7 +402,7 @@ export class StorageManager {
      * Игнорируется если отслеживание временно отключено.
      */
     static markAsUnsaved() {
-        if (this._trackingDisabled) {
+        if (this._trackingDepth > 0) {
             return;
         }
         this._setState('unsaved');
@@ -337,10 +425,34 @@ export class StorageManager {
     }
 
     /**
-     * Помечает состояние как синхронизированное с БД
+     * Помечает состояние как синхронизированное с БД.
+     * Заодно сбрасывает offline-машинерию (предупреждение о сбое сохранения
+     * можно показывать снова, подписка на 'online' больше не нужна).
      */
     static markAsSyncedWithDB() {
         this._setState('saved');
+        this._resetDbSaveFailureState();
+    }
+
+    /**
+     * Запоминает серверный updated_at акта (база для метаданных снимка).
+     * Вызывается после успешного GET-контента и успешного PUT-сохранения.
+     *
+     * @param {string|null} updatedAt ISO-строка серверного updated_at
+     */
+    static setBaseUpdatedAt(updatedAt) {
+        this._baseUpdatedAt = updatedAt || null;
+    }
+
+    /**
+     * Помечает восстановленный из localStorage черновик как
+     * несинхронизированный с БД и переписывает снимок свежими метаданными.
+     * Вызывается из loadActContent после включения трекинга — итоговое
+     * состояние 'local-only' (жёлтый): данные есть локально, но не в БД.
+     */
+    static applyRestoredDraftState() {
+        this._setState('unsaved');
+        this.saveState(true);
     }
 
     /**
@@ -358,15 +470,42 @@ export class StorageManager {
     }
 
     /**
-     * Сохраняет текущее состояние в localStorage
+     * Сохраняет снимок-черновик текущего акта в localStorage (M.8, pfe-1).
      *
-     * @param {boolean} [silent=false] - Не показывать уведомление о сохранении
-     * @returns {boolean} true если сохранение успешно
+     * Снимок = ОДИН вызов AppState.exportData() (тот же сериализатор, что и
+     * body PUT /content — никаких расхождений форматов и сырых Proxy-объектов)
+     * + метаданные для восстановления (H3): actId, savedAt, baseUpdatedAt.
+     *
+     * Ключ — per-act (`audit_workstation_state:{actId}`), снимки других актов
+     * при записи удаляются (живёт только снимок текущего акта). Снимок пишется
+     * только при наличии несинхронизированных изменений и удаляется после
+     * успешного PUT в БД — «снимок есть» означает «есть несохранённые правки».
+     *
+     * @param {boolean} [silent=false] - Не показывать лог о сохранении
+     * @returns {boolean} true если сохранение успешно (или сохранять нечего)
      */
     static saveState(silent = false) {
         try {
-            const stateToSave = this._prepareStateForSaving();
-            const stateJson = JSON.stringify(stateToSave);
+            const actId = window.currentActId || null;
+            if (!actId) {
+                console.warn('saveState: нет открытого акта — снимок не записан');
+                return false;
+            }
+
+            // Всё синхронизировано с БД — несинхронизированных правок нет,
+            // снимок не нужен (и не должен породить ложный диалог восстановления).
+            if (this._state === 'saved') {
+                return true;
+            }
+
+            const snapshot = {
+                actId,
+                savedAt: new Date().toISOString(),
+                baseUpdatedAt: this._baseUpdatedAt,
+                version: 2,
+                data: AppState.exportData()
+            };
+            const stateJson = JSON.stringify(snapshot);
 
             // Проверка размера данных
             if (stateJson.length > AppConfig.localStorage.maxStorageSize) {
@@ -375,12 +514,9 @@ export class StorageManager {
                 return false;
             }
 
-            // Сохранение данных
-            localStorage.setItem(AppConfig.localStorage.stateKey, stateJson);
-
-            // Сохранение временной метки
-            const timestamp = new Date().toISOString();
-            localStorage.setItem(AppConfig.localStorage.timestampKey, timestamp);
+            // Сохранение данных + чистка снимков других актов и legacy-ключей
+            localStorage.setItem(this._snapshotKey(actId), stateJson);
+            this._purgeForeignSnapshots(actId);
 
             // 🔧При сохранении в localStorage меняем ТОЛЬКО флаг несохраненных изменений
             // Флаг синхронизации с БД НЕ трогаем
@@ -406,41 +542,71 @@ export class StorageManager {
     }
 
     /**
-     * Подготавливает состояние для сохранения
+     * Ключ localStorage для снимка акта.
      * @private
-     * @returns {Object} Подготовленное состояние
+     * @param {number|string} actId ID акта
+     * @returns {string}
      */
-    static _prepareStateForSaving() {
-        return {
-            actId: window.currentActId || null,
-            tree: AppState.treeData,
-            tables: AppState.tables,
-            textBlocks: AppState.textBlocks,
-            violations: AppState.violations,
-            currentStep: AppState.currentStep,
-            selectedNodeId: AppState.selectedNode?.id || null,
-            selectedFormats: this._getSelectedFormats(),
-            version: '1.0.0',
-            savedAt: new Date().toISOString()
-        };
+    static _snapshotKey(actId) {
+        return `${AppConfig.localStorage.stateKeyPrefix}:${actId}`;
     }
 
     /**
-     * Получает текущие выбранные форматы из UI
-     * @private
-     * @returns {string[]} Массив выбранных форматов
+     * Читает снимок-черновик акта из localStorage.
+     * Повреждённый (не-JSON) снимок удаляется, возвращается null.
+     *
+     * @param {number|string} actId ID акта
+     * @returns {Object|null} Снимок {actId, savedAt, baseUpdatedAt, version, data} или null
      */
-    static _getSelectedFormats() {
-        const formatCheckboxes = document.querySelectorAll('.format-option input[type="checkbox"]');
-        const selectedFormats = [];
+    static readSnapshot(actId) {
+        const key = this._snapshotKey(actId);
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.error('Повреждённый снимок в localStorage — удаляем:', error);
+            try {
+                localStorage.removeItem(key);
+            } catch { /* ignore */ }
+            return null;
+        }
+    }
 
-        formatCheckboxes.forEach(checkbox => {
-            if (checkbox.checked) {
-                selectedFormats.push(checkbox.value);
+    /**
+     * Удаляет снимок-черновик акта из localStorage.
+     * Вызывается после успешной синхронизации с БД, при отказе от
+     * восстановления и для устаревших снимков.
+     *
+     * @param {number|string} actId ID акта
+     */
+    static removeSnapshot(actId) {
+        try {
+            localStorage.removeItem(this._snapshotKey(actId));
+        } catch (error) {
+            console.error('Ошибка удаления снимка из localStorage:', error);
+        }
+    }
+
+    /**
+     * Удаляет снимки других актов и legacy-ключи старого формата.
+     * Политика: localStorage не резиновый — живёт только снимок текущего акта.
+     * @private
+     * @param {number|string} currentActId ID текущего акта
+     */
+    static _purgeForeignSnapshots(currentActId) {
+        const prefix = `${AppConfig.localStorage.stateKeyPrefix}:`;
+        const currentKey = this._snapshotKey(currentActId);
+        const toRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(prefix) && key !== currentKey) {
+                toRemove.push(key);
             }
-        });
-
-        return selectedFormats;
+        }
+        // Legacy-ключи единого снимка (формат до per-act ключей).
+        toRemove.push('audit_workstation_state', 'audit_workstation_timestamp');
+        toRemove.forEach(key => localStorage.removeItem(key));
     }
 
     /**
@@ -485,7 +651,7 @@ export class StorageManager {
     static async forceSaveAsync() {
         return new Promise((resolve) => {
             // Блокируем отслеживание на время сохранения и последующих операций
-            this._trackingDisabled = true;
+            this.disableTracking();
 
             requestAnimationFrame(() => {
                 const result = this.forceSave();
@@ -493,7 +659,7 @@ export class StorageManager {
                 // Небольшая задержка для завершения всех операций
                 setTimeout(() => {
                     // Разблокируем отслеживание
-                    this._trackingDisabled = false;
+                    this.enableTracking();
                     resolve(result);
                 }, AppConfig.timings.enableTrackingAfterSave);
             });
@@ -501,20 +667,22 @@ export class StorageManager {
     }
 
     /**
-     * Временно отключает отслеживание изменений
+     * Временно отключает отслеживание изменений (инкремент глубины, M.11).
      *
      * Используется для операций, которые модифицируют состояние,
-     * но не должны помечать его как несохраненное.
+     * но не должны помечать его как несохраненное. Вложенные пары
+     * disable/enable композируются: отслеживание включится обратно
+     * только когда КАЖДЫЙ disable получит свой enable.
      */
     static disableTracking() {
-        this._trackingDisabled = true;
+        this._trackingDepth++;
     }
 
     /**
-     * Включает отслеживание изменений обратно
+     * Включает отслеживание изменений обратно (декремент глубины, пол 0).
      */
     static enableTracking() {
-        this._trackingDisabled = false;
+        this._trackingDepth = Math.max(0, this._trackingDepth - 1);
     }
 
     /**
@@ -533,11 +701,11 @@ export class StorageManager {
      * @returns {*} Результат выполнения функции
      */
     static withoutTracking(fn) {
-        this._trackingDisabled = true;
+        this.disableTracking();
         try {
             return fn();
         } finally {
-            this._trackingDisabled = false;
+            this.enableTracking();
         }
     }
 
@@ -550,12 +718,12 @@ export class StorageManager {
     }
 
     /**
-     * Очищает сохраненное состояние из localStorage
+     * Очищает сохраненные снимки актов из localStorage
+     * (все per-act снимки + legacy-ключи старого формата)
      */
     static clearStorage() {
         try {
-            localStorage.removeItem(AppConfig.localStorage.stateKey);
-            localStorage.removeItem(AppConfig.localStorage.timestampKey);
+            this._clearStorage();
 
             // При очистке возвращаемся в чистое состояние.
             this._setState('saved');
@@ -571,19 +739,28 @@ export class StorageManager {
      */
     static _clearStorage() {
         try {
-            localStorage.removeItem(AppConfig.localStorage.stateKey);
-            localStorage.removeItem(AppConfig.localStorage.timestampKey);
+            const prefix = `${AppConfig.localStorage.stateKeyPrefix}:`;
+            const toRemove = ['audit_workstation_state', 'audit_workstation_timestamp'];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    toRemove.push(key);
+                }
+            }
+            toRemove.forEach(key => localStorage.removeItem(key));
         } catch (error) {
             console.error('Ошибка очистки localStorage:', error);
         }
     }
 
     /**
-     * Получает временную метку последнего сохранения
+     * Получает временную метку последнего сохранения снимка текущего акта
      * @returns {string|null} ISO строка времени или null
      */
     static getLastSaveTimestamp() {
-        return localStorage.getItem(AppConfig.localStorage.timestampKey);
+        const actId = window.currentActId || null;
+        if (!actId) return null;
+        return this.readSnapshot(actId)?.savedAt ?? null;
     }
 
     /**
@@ -709,6 +886,8 @@ export class StorageManager {
             clearInterval(this._periodicDbSaveInterval);
             this._periodicDbSaveInterval = null;
         }
+
+        this._resetDbSaveFailureState();
     }
 
     /**

@@ -12,6 +12,8 @@ import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
 import { formatValidationDetail } from './api-errors.js';
 import { reconcileTableFlags } from '../constructor/state/flags.js';
+import { sanitizeActContent } from '../constructor/state/act-content-sanitizer.js';
+import { shouldOfferRestore } from '../constructor/state/draft-restore.js';
 import { normalizePinnedOrder } from '../constructor/table/table-kind.js';
 
 // Constructor-зона: lazy-доступ через window.
@@ -382,6 +384,30 @@ export class APIClient {
             console.log('Загружены метаданные акта:', window.actMetadata);
             console.log('Тип проверки:', isProcessBased ? 'процессная' : 'непроцессная');
 
+            // H3: запоминаем серверный updated_at — базу метаданных снимка
+            // черновика (baseUpdatedAt). Обновляется при каждой успешной
+            // синхронизации (GET здесь, PUT в saveActContent).
+            const serverUpdatedAt = content.metadata?.updated_at ?? null;
+            window.StorageManager.setBaseUpdatedAt(serverUpdatedAt);
+
+            // H3: восстановление несинхронизированного черновика из localStorage.
+            // Предлагается ТОЛЬКО если акт с момента снимка никто не менял
+            // (baseUpdatedAt снимка совпадает с серверным updated_at);
+            // устаревший снимок молча удаляется.
+            let draftRestored = false;
+            if (!AppConfig.readOnlyMode.isReadOnly) {
+                draftRestored = await this._maybeRestoreDraft(actId, content, serverUpdatedAt);
+            }
+
+            // M.13-фронт: последний рубеж от несогласованных данных (сироты
+            // словарей, висячие ссылки узлов). Новые бэкенд не пропускает,
+            // но в БД могли остаться исторически испорченные записи.
+            const sanitizeReport = sanitizeActContent(content);
+            if (sanitizeReport.changed) {
+                console.warn('Несогласованные данные акта исправлены при загрузке:', sanitizeReport);
+                Notifications.warning('Обнаружены и исправлены несогласованные данные акта');
+            }
+
             // Отключаем tracking на время загрузки
             window.StorageManager.disableTracking();
 
@@ -464,12 +490,17 @@ export class APIClient {
                 window.PreviewManager.update();
             }
 
-            // Сохраняем в localStorage для локальной работы
-            window.StorageManager.saveState(true);
-
-            // Включаем tracking обратно с задержкой
+            // Включаем tracking обратно с задержкой.
+            // Снимок в localStorage здесь НЕ пишется: снимок существует только
+            // при несинхронизированных правках (см. StorageManager.saveState).
             setTimeout(() => {
                 window.StorageManager.enableTracking();
+                if (draftRestored) {
+                    // Восстановленный черновик ещё не в БД — помечаем как
+                    // несинхронизированный ПОСЛЕ bootstrap-вызовов
+                    // markAsSyncedWithDB вызывающих сторон (acts-menu/app).
+                    window.StorageManager.applyRestoredDraftState();
+                }
             }, AppConfig.timings.enableTrackingAfterLoad);
 
             // Показываем баннер и применяем режим просмотра если нет прав на редактирование
@@ -493,6 +524,60 @@ export class APIClient {
     }
 
     /**
+     * Предлагает восстановить несинхронизированный черновик акта (H3).
+     *
+     * Решение принимает чистый предикат shouldOfferRestore: восстановление
+     * предлагается только если акт с момента снимка никто не менял
+     * (baseUpdatedAt снимка == серверный updated_at). Устаревший или
+     * повреждённый снимок молча удаляется; при отказе пользователя — тоже.
+     * При согласии данные снимка подставляются в content и дальше идут
+     * штатным путём загрузки (reconcile/normalize/нумерация/рендер).
+     *
+     * @private
+     * @param {number} actId ID акта
+     * @param {Object} content Контент акта из GET (мутируется при восстановлении)
+     * @param {string|null} serverUpdatedAt Серверный updated_at акта
+     * @returns {Promise<boolean>} true если черновик восстановлен
+     */
+    static async _maybeRestoreDraft(actId, content, serverUpdatedAt) {
+        const snapshot = window.StorageManager.readSnapshot(actId);
+        const verdict = shouldOfferRestore(snapshot, serverUpdatedAt);
+
+        if (verdict === 'discard') {
+            window.StorageManager.removeSnapshot(actId);
+            return false;
+        }
+        if (verdict !== 'restore') {
+            return false;
+        }
+
+        const savedAtDate = new Date(snapshot.savedAt);
+        const savedAtText = Number.isFinite(savedAtDate.getTime())
+            ? savedAtDate.toLocaleString('ru-RU')
+            : snapshot.savedAt;
+
+        const confirmed = await DialogManager.show({
+            title: 'Несохранённый черновик',
+            message: `Найден несохранённый черновик от ${savedAtText}. Восстановить?`,
+            icon: '📝',
+            confirmText: 'Восстановить',
+            cancelText: 'Отклонить'
+        });
+
+        if (!confirmed) {
+            window.StorageManager.removeSnapshot(actId);
+            return false;
+        }
+
+        content.tree = snapshot.data.tree;
+        content.tables = snapshot.data.tables || {};
+        content.textBlocks = snapshot.data.textBlocks || {};
+        content.violations = snapshot.data.violations || {};
+        console.log('Черновик акта восстановлен из localStorage (снимок от', snapshot.savedAt, ')');
+        return true;
+    }
+
+    /**
      * Сохраняет дефолтную структуру в БД (без уведомлений)
      * @private
      */
@@ -512,6 +597,13 @@ export class APIClient {
                 const error = await resp.text();
                 console.error('Ошибка сохранения дефолтной структуры:', error);
                 throw new Error('Ошибка сохранения дефолтной структуры');
+            }
+
+            // H3: PUT бампит updated_at на сервере — фиксируем новую базу
+            // для метаданных снимка черновика.
+            const result = await resp.json().catch(() => null);
+            if (result?.updated_at) {
+                window.StorageManager.setBaseUpdatedAt(result.updated_at);
             }
 
         } catch (err) {
@@ -603,8 +695,17 @@ export class APIClient {
             const result = await resp.json();
             console.log('Акт сохранен в БД:', result);
 
+            // H3: фиксируем новый серверный updated_at (бэкенд бампит его при
+            // каждом сохранении) — база для метаданных будущих снимков.
+            if (result?.updated_at) {
+                window.StorageManager.setBaseUpdatedAt(result.updated_at);
+            }
+
             // Помечаем как синхронизированное с БД
             window.StorageManager.markAsSyncedWithDB();
+
+            // Содержимое теперь в БД — снимок-черновик больше не нужен.
+            window.StorageManager.removeSnapshot(actId);
 
             Notifications.success('Акт сохранен в базу данных');
 
@@ -612,7 +713,10 @@ export class APIClient {
             console.error('Ошибка сохранения акта в БД:', err);
             // Для LockLostError не показываем toast — вызывающая сторона сделает
             // редирект на список с плашкой autoExit (одинаковый UX с фоновым autoExit'ом).
-            if (!(err instanceof LockLostError)) {
+            // Для периодического (фонового) сохранения toast на каждый тик не
+            // показываем — дедуплицированное предупреждение и ретрай по 'online'
+            // делает StorageManager (§9 offline).
+            if (!(err instanceof LockLostError) && saveType !== 'periodic') {
                 Notifications.error(`Не удалось сохранить акт: ${err.message}`);
             }
             throw err;

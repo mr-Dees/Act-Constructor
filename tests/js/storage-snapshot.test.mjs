@@ -1,0 +1,164 @@
+/**
+ * Тесты формы и жизненного цикла снимка-черновика в localStorage (M.8, pfe-1, H3).
+ *
+ * Гарантии:
+ *  - снимок пишется под per-act ключом `audit_workstation_state:{actId}`;
+ *  - форма снимка: {actId, savedAt, baseUpdatedAt, version, data},
+ *    data = результат ЕДИНОГО AppState.exportData() (тот же сериализатор,
+ *    что и body PUT /content);
+ *  - при записи удаляются снимки других актов и legacy-ключи старого формата;
+ *  - в состоянии 'saved' (всё синхронизировано) снимок не пишется;
+ *  - повреждённый снимок при чтении удаляется;
+ *  - applyRestoredDraftState помечает восстановленный черновик
+ *    несинхронизированным и переписывает снимок.
+ */
+import './_browser-stub.mjs';
+import { test, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { StorageManager } from '../../static/js/constructor/storage-manager.js';
+import { AppState } from '../../static/js/constructor/state/state-core.js';
+
+/** Функциональная замена localStorage-стаба (стаб из _browser-stub — no-op). */
+function makeFakeLocalStorage() {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+    key: (i) => [...map.keys()][i] ?? null,
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+  };
+}
+
+beforeEach(() => {
+  globalThis.localStorage = makeFakeLocalStorage();
+  globalThis.currentActId = 7;
+  AppState.treeData = { id: 'root', label: 'Акт', type: 'item', children: [] };
+  AppState.tables = {};
+  AppState.textBlocks = {};
+  AppState.violations = {};
+  StorageManager.setBaseUpdatedAt('2026-06-11T10:00:00.123456');
+  StorageManager._setState('unsaved');
+});
+
+afterEach(() => {
+  StorageManager.destroy();
+  StorageManager._setState('saved');
+  StorageManager.setBaseUpdatedAt(null);
+  globalThis.currentActId = null;
+});
+
+test('saveState пишет снимок под per-act ключом с полной формой envelope', () => {
+  const ok = StorageManager.saveState(true);
+
+  assert.equal(ok, true);
+  const raw = localStorage.getItem('audit_workstation_state:7');
+  assert.ok(raw, 'снимок должен лежать под ключом audit_workstation_state:7');
+
+  const snapshot = JSON.parse(raw);
+  assert.equal(snapshot.actId, 7);
+  assert.equal(snapshot.version, 2);
+  assert.equal(snapshot.baseUpdatedAt, '2026-06-11T10:00:00.123456');
+  assert.ok(Number.isFinite(Date.parse(snapshot.savedAt)), 'savedAt — валидная ISO-метка');
+
+  // data — результат exportData(): тот же сериализатор, что и body PUT
+  assert.deepEqual(
+    Object.keys(snapshot.data).sort(),
+    ['invoiceNodeIds', 'tables', 'textBlocks', 'tree', 'violations']
+  );
+  assert.equal(snapshot.data.tree.id, 'root');
+  assert.deepEqual(snapshot.data, AppState.exportData());
+});
+
+test('запись снимка акта N удаляет снимки других актов и legacy-ключи', () => {
+  localStorage.setItem('audit_workstation_state:5', '{"actId":5}');
+  localStorage.setItem('audit_workstation_state:6', '{"actId":6}');
+  localStorage.setItem('audit_workstation_state', '{"legacy":true}');
+  localStorage.setItem('audit_workstation_timestamp', '2026-01-01T00:00:00Z');
+  localStorage.setItem('посторонний_ключ', 'не трогать');
+
+  StorageManager.saveState(true);
+
+  assert.equal(localStorage.getItem('audit_workstation_state:5'), null);
+  assert.equal(localStorage.getItem('audit_workstation_state:6'), null);
+  assert.equal(localStorage.getItem('audit_workstation_state'), null);
+  assert.equal(localStorage.getItem('audit_workstation_timestamp'), null);
+  assert.ok(localStorage.getItem('audit_workstation_state:7'));
+  assert.equal(localStorage.getItem('посторонний_ключ'), 'не трогать');
+});
+
+test('в состоянии saved (всё синхронизировано) снимок не пишется', () => {
+  StorageManager._setState('saved');
+
+  const ok = StorageManager.saveState(true);
+
+  assert.equal(ok, true);
+  assert.equal(localStorage.getItem('audit_workstation_state:7'), null);
+});
+
+test('без открытого акта снимок не пишется', () => {
+  globalThis.currentActId = null;
+
+  const ok = StorageManager.saveState(true);
+
+  assert.equal(ok, false);
+  assert.equal(localStorage.length, 0);
+});
+
+test('readSnapshot возвращает снимок, повреждённый JSON удаляет и отдаёт null', () => {
+  StorageManager.saveState(true);
+  const snap = StorageManager.readSnapshot(7);
+  assert.equal(snap.actId, 7);
+
+  localStorage.setItem('audit_workstation_state:7', '{битый json');
+  assert.equal(StorageManager.readSnapshot(7), null);
+  assert.equal(localStorage.getItem('audit_workstation_state:7'), null, 'битый снимок удалён');
+});
+
+test('removeSnapshot удаляет снимок акта', () => {
+  StorageManager.saveState(true);
+  StorageManager.removeSnapshot(7);
+  assert.equal(localStorage.getItem('audit_workstation_state:7'), null);
+});
+
+test('saveState после удаления → состояние local-only (жёлтый)', () => {
+  StorageManager.saveState(true);
+  assert.equal(StorageManager._state, 'local-only');
+  assert.equal(StorageManager.hasUnsavedChanges(), false);
+  assert.equal(StorageManager.hasUnsyncedChanges(), true);
+});
+
+test('applyRestoredDraftState помечает черновик несинхронизированным и пишет снимок', () => {
+  StorageManager._setState('saved'); // bootstrap-вызовы markAsSyncedWithDB уже прошли
+
+  StorageManager.applyRestoredDraftState();
+
+  assert.equal(StorageManager._state, 'local-only');
+  assert.equal(StorageManager.hasUnsyncedChanges(), true);
+  const snap = StorageManager.readSnapshot(7);
+  assert.ok(snap, 'снимок переписан свежими метаданными');
+  assert.equal(snap.baseUpdatedAt, '2026-06-11T10:00:00.123456');
+});
+
+test('getLastSaveTimestamp читает savedAt снимка текущего акта', () => {
+  assert.equal(StorageManager.getLastSaveTimestamp(), null);
+  StorageManager.saveState(true);
+  const snap = StorageManager.readSnapshot(7);
+  assert.equal(StorageManager.getLastSaveTimestamp(), snap.savedAt);
+});
+
+test('clearStorage удаляет все per-act снимки и legacy-ключи', () => {
+  StorageManager.saveState(true);
+  localStorage.setItem('audit_workstation_state', '{"legacy":true}');
+  localStorage.setItem('audit_workstation_timestamp', 'x');
+
+  StorageManager.clearStorage();
+
+  assert.equal(localStorage.getItem('audit_workstation_state:7'), null);
+  assert.equal(localStorage.getItem('audit_workstation_state'), null);
+  assert.equal(localStorage.getItem('audit_workstation_timestamp'), null);
+  assert.equal(StorageManager._state, 'saved');
+});
