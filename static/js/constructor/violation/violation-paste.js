@@ -6,6 +6,11 @@
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from './violation-content-item.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -99,7 +104,7 @@ Object.assign(ViolationManager.prototype, {
                         const extension = file.type.split('/')[1] || 'png';
                         const filename = `pasted_image_${timestamp}.${extension}`;
 
-                        this.addContentItemAtPosition(violation, 'image', targetContainer, insertIndex, {
+                        this.addContentItemAtPosition(violation, CONTENT_TYPE_IMAGE, targetContainer, insertIndex, {
                             url: event.target.result,
                             filename: filename
                         });
@@ -129,7 +134,7 @@ Object.assign(ViolationManager.prototype, {
                     let type, content, message;
 
                     if (startsWithCase) {
-                        type = 'case';
+                        type = CONTENT_TYPE_CASE;
                         // Убираем "кейс" (4 символа) и затем номер с разделителем
                         content = textContent
                             .substring(4)
@@ -137,7 +142,7 @@ Object.assign(ViolationManager.prototype, {
                             .trim();
                         message = 'Кейс добавлен из буфера обмена';
                     } else {
-                        type = 'freeText';
+                        type = CONTENT_TYPE_FREE_TEXT;
                         content = textContent;
                         message = 'Текст добавлен из буфера обмена';
                     }

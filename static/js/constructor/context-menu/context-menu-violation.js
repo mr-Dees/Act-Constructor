@@ -3,6 +3,11 @@
  */
 import { ContextMenuManager } from './context-menu-core.js';
 import { PreviewManager } from '../preview/preview.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from '../violation/violation-content-item.js';
 
 export class ViolationContextMenu {
     constructor() {
@@ -48,10 +53,12 @@ export class ViolationContextMenu {
             font-family: inherit;
         `;
 
+        // action — тип элемента из violation-content-item.js (один источник,
+        // без ручного маппинга 'text' → 'freeText').
         const addItems = [
-            {label: '📝 Добавить кейс', action: 'case'},
-            {label: '🖼️ Добавить изображение', action: 'image'},
-            {label: '📄 Добавить текст', action: 'text'}
+            {label: '📝 Добавить кейс', action: CONTENT_TYPE_CASE},
+            {label: '🖼️ Добавить изображение', action: CONTENT_TYPE_IMAGE},
+            {label: '📄 Добавить текст', action: CONTENT_TYPE_FREE_TEXT}
         ];
 
         addItems.forEach(item => {
@@ -116,25 +123,25 @@ export class ViolationContextMenu {
         if (!violation || !contentContainer) return;
 
         const actions = {
-            case: () => {
+            [CONTENT_TYPE_CASE]: () => {
                 violationManager?.addContentItemAtPosition?.(
                     violation,
-                    'case',
+                    CONTENT_TYPE_CASE,
                     contentContainer,
                     insertPosition
                 );
             },
-            image: () => {
+            [CONTENT_TYPE_IMAGE]: () => {
                 violationManager?.triggerImageUploadAtPosition?.(
                     violation,
                     contentContainer,
                     insertPosition
                 );
             },
-            text: () => {
+            [CONTENT_TYPE_FREE_TEXT]: () => {
                 violationManager?.addContentItemAtPosition?.(
                     violation,
-                    'freeText',
+                    CONTENT_TYPE_FREE_TEXT,
                     contentContainer,
                     insertPosition
                 );

@@ -8,6 +8,11 @@
  */
 import { SafeHTML } from '../../shared/sanitize.js';
 import { getImageLimits } from '../violation/violation-image-validator.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from '../violation/violation-content-item.js';
 
 /** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
 const SHEET_HEIGHT_MM = 297;
@@ -38,15 +43,15 @@ export function collectViolationLines(violation) {
         let caseNumber = 1;
         let textNumber = 1;
         for (const item of violation.additionalContent.items || []) {
-            if (item.type === 'case') {
+            if (item.type === CONTENT_TYPE_CASE) {
                 if (item.content?.trim()) {
                     lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content });
                     caseNumber++;
                 }
-            } else if (item.type === 'image') {
+            } else if (item.type === CONTENT_TYPE_IMAGE) {
                 lines.push({ type: 'image', item });
                 caseNumber = 1;
-            } else if (item.type === 'freeText') {
+            } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
                 if (item.content?.trim()) {
                     lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content });
                     textNumber++;

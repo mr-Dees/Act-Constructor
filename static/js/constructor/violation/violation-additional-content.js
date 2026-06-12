@@ -13,6 +13,7 @@ import {
     loadImageLimits,
     validateImageFile,
 } from './violation-image-validator.js';
+import { createContentItem } from './violation-content-item.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -222,17 +223,9 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} extraData - Дополнительные данные элемента
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
-        const newItem = {
-            id: `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: type,
-            content: extraData.content || '',
-            url: extraData.url || '',
-            caption: '',
-            filename: extraData.filename || '',
-            order: insertIndex,
-            // Ширина картинки, % полезной ширины листа (0 — авто, Б-1.4).
-            width: extraData.width || 0
-        };
+        // Фабрика создаёт только релевантные типу поля (violation-3):
+        // кейс/текст — content; картинка — url/caption/filename/width.
+        const newItem = createContentItem(type, insertIndex, extraData);
 
         // Вставляем элемент в нужную позицию
         violation.additionalContent.items.splice(insertIndex, 0, newItem);
