@@ -84,7 +84,10 @@ Object.assign(TextBlockManager.prototype, {
             return;
         }
 
-        const existing = cfg.find(selection.anchorNode);
+        // Ищем существующий маркер от НАЧАЛА выделения: при обратном выделении
+        // (снизу вверх / справа налево) anchorNode — это конец выделения, и
+        // маркер в начале не находился (создавался вложенный дубль).
+        const existing = cfg.find(selection.getRangeAt(0).startContainer);
         const isEditing = !!existing;
         const currentValue = existing ? existing.getAttribute(cfg.valueAttr) : '';
 
