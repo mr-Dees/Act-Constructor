@@ -79,8 +79,10 @@ export class CellContextMenu {
         const unmergeItem = this.menu.querySelector('[data-action="unmerge-cell"]');
         if (unmergeItem) {
             if (selectedCount === 1 && !isProtectedTable) {
-                const cell = tableManager.selectedCells[0];
-                const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
+                // Объединение определяем по grid-модели (как ядро операций),
+                // а не по DOM-свойствам td: DOM-узел в selectedCells может
+                // быть detached/устаревшим относительно модели.
+                const isMerged = this._isMergedInGrid(tableManager.selectedCells[0]);
                 unmergeItem.classList.toggle('disabled', !isMerged);
             } else {
                 unmergeItem.classList.add('disabled');
@@ -179,8 +181,8 @@ export class CellContextMenu {
                     Notifications.error('Выберите одну ячейку для разъединения');
                     return;
                 }
-                const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
-                if (!isMerged) {
+                // По grid-модели — единый предикат с updateMenuState и ядром.
+                if (!this._isMergedInGrid(cell)) {
                     Notifications.info('Ячейка не объединена');
                     return;
                 }
@@ -655,6 +657,21 @@ export class CellContextMenu {
             }
         }
         return insertColIndex;
+    }
+
+    /**
+     * Проверяет по grid-модели, является ли выбранная DOM-ячейка ведущей
+     * ячейкой объединения. Ядро операций (TableCellsOperations) работает
+     * только по grid — меню обязано использовать тот же источник истины,
+     * иначе detached/устаревший DOM даёт рассинхрон доступности unmerge.
+     * @param {HTMLElement} cell - DOM-элемент выбранной ячейки
+     * @returns {boolean} true если в grid у ячейки colSpan>1 или rowSpan>1
+     */
+    _isMergedInGrid(cell) {
+        const table = AppState.tables[cell.dataset.tableId];
+        const cellData = table?.grid?.[parseInt(cell.dataset.row)]?.[parseInt(cell.dataset.col)];
+        if (!cellData || cellData.isSpanned) return false;
+        return (cellData.colSpan || 1) > 1 || (cellData.rowSpan || 1) > 1;
     }
 
     /**
