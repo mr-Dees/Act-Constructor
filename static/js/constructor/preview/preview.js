@@ -502,15 +502,6 @@ export class PreviewManager {
     }
 
     /**
-     * Создает HTML-таблицу для предпросмотра
-     * @deprecated Используйте PreviewTableRenderer.create()
-     */
-    static createPreviewTable(tableData, previewTrim) {
-        console.warn('PreviewManager.createPreviewTable устарел, используйте PreviewTableRenderer.create()');
-        return PreviewTableRenderer.create(tableData, previewTrim);
-    }
-
-    /**
      * Принудительное обновление предпросмотра
      * Используется после загрузки акта или изменения структуры
      */
