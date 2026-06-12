@@ -76,6 +76,23 @@ test('исключение в collectFn → get() отдаёт [] и не про
   assert.equal(calls, 1);
 });
 
+test('исключение в collectFn логируется через console.warn с контекстом', () => {
+  const warns = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warns.push(args); };
+  try {
+    const cache = makeWarningsCache(() => { throw new Error('boom-log'); });
+    cache.get();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warns.length, 1);
+  // Сообщение содержит контекст и саму ошибку — не молчаливое проглатывание.
+  assert.match(String(warns[0][0]), /замечан/i);
+  assert.match(String(warns[0][1]), /boom-log/);
+});
+
 test('invalidate() сбрасывает кеш, накопивший []-фолбэк после ошибки', () => {
   let calls = 0;
   const cache = makeWarningsCache(() => {
