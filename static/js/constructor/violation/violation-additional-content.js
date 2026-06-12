@@ -48,8 +48,7 @@ Object.assign(ViolationManager.prototype, {
 
             // Если выключаем - сбрасываем активный контейнер
             if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
-                this.currentActiveContainer = null;
-                this.cursorInsertPosition = null;
+                this._resetActiveZone();
             }
 
             PreviewManager.updateBlock('violation', violation.id);
@@ -77,18 +76,18 @@ Object.assign(ViolationManager.prototype, {
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
 
-        // Отслеживаем вход мыши в contentContainer
+        // Отслеживаем вход мыши в contentContainer.
+        // Активация зоны регистрирует сброс по ESC в EscapeStack (violation-5).
         contentContainer.addEventListener('mouseenter', () => {
             if (violation.additionalContent.enabled) {
-                this.currentActiveContainer = contentContainer;
+                this._setActiveZone(contentContainer);
             }
         });
 
         // Отслеживаем выход мыши из contentContainer
         contentContainer.addEventListener('mouseleave', () => {
             if (this.currentActiveContainer === contentContainer) {
-                this.currentActiveContainer = null;
-                this.cursorInsertPosition = null;
+                this._resetActiveZone();
                 // Удаляем индикатор при выходе мыши
                 const indicators = itemsContainer.querySelectorAll('.insert-indicator');
                 indicators.forEach(ind => ind.remove());

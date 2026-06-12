@@ -15,21 +15,6 @@ import {
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**
-     * Настраивает обработчик клавиши Escape для сброса активной зоны
-     */
-    setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                if (this.currentActiveContainer) {
-                    this.currentActiveContainer = null;
-                    this.cursorInsertPosition = null;
-                    Notifications.info('Активная зона сброшена');
-                }
-            }
-        });
-    },
-
-    /**
      * Настраивает глобальный обработчик вставки изображений и текста из буфера обмена
      */
     setupPasteHandler() {
