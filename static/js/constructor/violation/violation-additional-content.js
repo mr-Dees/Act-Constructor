@@ -13,7 +13,8 @@ import {
     loadImageLimits,
     validateImageFile,
 } from './violation-image-validator.js';
-import { createContentItem } from './violation-content-item.js';
+import { CONTENT_TYPE_IMAGE, createContentItem } from './violation-content-item.js';
+import { readFilesInOrder } from './violation-file-reading.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -284,6 +285,49 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
+     * Вставляет пачку картинок в детерминированном порядке выбора файлов
+     * (violation-4): файлы читаются параллельно, но вставка идёт строго
+     * по порядку списка после завершения всех чтений. Нечитаемые файлы
+     * пропускаются с Notifications.error, порядок остальных сохраняется.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первой картинки
+     * @param {File[]} files - Прошедшие валидацию файлы в порядке выбора
+     */
+    async insertImageFilesInOrder(violation, container, insertIndex, files) {
+        const results = await readFilesInOrder(files);
+
+        let addedCount = 0;
+        for (const result of results) {
+            if (!result.ok) {
+                console.error('Ошибка при чтении файла:', result.file.name, result.error);
+                Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                continue;
+            }
+
+            this.addContentItemAtPosition(
+                violation,
+                CONTENT_TYPE_IMAGE,
+                container,
+                insertIndex + addedCount,
+                {
+                    url: result.url,
+                    filename: result.file.name,
+                },
+            );
+            addedCount++;
+        }
+
+        if (addedCount > 0) {
+            const message = addedCount === 1
+                ? 'Изображение добавлено'
+                : `Добавлено изображений: ${addedCount}`;
+            Notifications.success(message);
+        }
+    },
+
+    /**
      * Инициирует выбор файлов изображений с указанием позиции
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
@@ -303,38 +347,8 @@ Object.assign(ViolationManager.prototype, {
             const files = this.filterAcceptedImageFiles(Array.from(e.target.files), violation);
             if (files.length === 0) return;
 
-            let addedCount = 0;
-
-            // Обрабатываем каждый файл
-            files.forEach((file, idx) => {
-                const reader = new FileReader();
-
-                reader.onload = (event) => {
-                    // Добавляем изображения последовательно с увеличением позиции
-                    this.addContentItemAtPosition(violation, 'image', container, insertIndex + idx, {
-                        url: event.target.result,
-                        filename: file.name
-                    });
-
-                    addedCount++;
-
-                    // Показываем уведомление после последнего файла
-                    if (addedCount === files.length) {
-                        const message = files.length === 1
-                            ? 'Изображение добавлено'
-                            : `Добавлено изображений: ${files.length}`;
-
-                        Notifications.success(message);
-                    }
-                };
-
-                reader.onerror = (error) => {
-                    console.error('Error reading file:', file.name, error);
-                    Notifications.error(`Ошибка при чтении ${file.name}`);
-                };
-
-                reader.readAsDataURL(file);
-            });
+            // Вставка в порядке выбора файлов (violation-4).
+            this.insertImageFilesInOrder(violation, container, insertIndex, files);
         });
 
         document.body.appendChild(fileInput);

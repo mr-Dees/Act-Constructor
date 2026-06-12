@@ -124,7 +124,6 @@ Object.assign(ViolationManager.prototype, {
             this.cursorInsertPosition = null;
 
             // Обрабатываем каждый файл
-            let addedCount = 0;
             const imageFiles = [];
 
             // Сначала фильтруем только изображения
@@ -146,36 +145,8 @@ Object.assign(ViolationManager.prototype, {
             const acceptedFiles = this.filterAcceptedImageFiles(imageFiles, violation);
             if (acceptedFiles.length === 0) return;
 
-            // Теперь обрабатываем все изображения
-            acceptedFiles.forEach((file, idx) => {
-                const reader = new FileReader();
-
-                reader.onload = (event) => {
-                    // Добавляем изображение в рассчитанную позицию
-                    this.addContentItemAtPosition(violation, 'image', contentContainer, insertPosition + idx, {
-                        url: event.target.result,
-                        filename: file.name
-                    });
-
-                    addedCount++;
-
-                    // Показываем уведомление для последнего файла
-                    if (addedCount === acceptedFiles.length) {
-                        const message = addedCount === 1
-                            ? 'Изображение добавлено'
-                            : `Добавлено изображений: ${addedCount}`;
-
-                        Notifications.success(message);
-                    }
-                };
-
-                reader.onerror = (error) => {
-                    console.error('Error reading file:', file.name, error);
-                    Notifications.error(`Ошибка при чтении ${file.name}`);
-                };
-
-                reader.readAsDataURL(file);
-            });
+            // Вставка строго в порядке перетащенных файлов (violation-4).
+            this.insertImageFilesInOrder(violation, contentContainer, insertPosition, acceptedFiles);
         });
 
         // Дополнительная защита: сбрасываем состояние при любом завершении drag
