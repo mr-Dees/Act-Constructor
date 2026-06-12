@@ -13,7 +13,7 @@ import { AppState, _unwrap } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
-import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -84,9 +84,13 @@ Object.assign(AppState, {
         );
 
         if (metricsTableNode && node.number) {
-            const newLabel = `Объем выявленных отклонений (В метриках) по ${node.number}`;
-            metricsTableNode.label = newLabel;
-            metricsTableNode.customLabel = newLabel;
+            // Обновляем только автогенерируемую метку (пустую или с каноническим
+            // префиксом). Пользовательский customLabel перенумерация не затирает.
+            if (isAutoMetricsTableLabel(metricsTableNode.customLabel)) {
+                const newLabel = buildMetricsTableLabel(node.number);
+                metricsTableNode.label = newLabel;
+                metricsTableNode.customLabel = newLabel;
+            }
         }
     },
 

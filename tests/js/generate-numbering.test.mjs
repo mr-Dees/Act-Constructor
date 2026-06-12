@@ -73,7 +73,14 @@ test('смешанные дети: независимые счётчики по 
 });
 
 test('под §5 обновляется метка metrics-таблицы при перенумерации', () => {
-    const metricsNode = { ...tableN(), kind: 'metrics', customLabel: 'устаревшая метка' };
+    // Сид — устаревшая АВТОгенерируемая метка (канонический префикс + старый
+    // номер): перенумерация обновляет только такие; пользовательский customLabel
+    // не затирается (tree-10, см. metrics-tables-invariants.test.mjs).
+    const metricsNode = {
+        ...tableN(),
+        kind: 'metrics',
+        customLabel: 'Объем выявленных отклонений (В метриках) по 5.9',
+    };
     const p1 = item('Будет удалён');
     const p2 = item('Сместится на 5.1');
     p2.children = [metricsNode];
