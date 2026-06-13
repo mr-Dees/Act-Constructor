@@ -114,6 +114,16 @@ Object.assign(TextBlockManager.prototype, {
     handleEditorBlur(editor, textBlock) {
         textBlock.content = editor.innerHTML;
 
+        // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
+        // успеть сработать, и превью оставалось бы с устаревшим текстом до
+        // следующего ввода. Сбрасываем висящий save-таймер — он бы повторил
+        // ту же работу. Тот же узкий патч, что у saveContent (updateBlock).
+        if (editor.saveTimeout) {
+            clearTimeout(editor.saveTimeout);
+            editor.saveTimeout = null;
+        }
+        PreviewManager.updateBlock('textblock', textBlock.id);
+
         setTimeout(() => {
             if (document.activeElement !== editor &&
                 !this.globalToolbar?.contains(document.activeElement)) {
