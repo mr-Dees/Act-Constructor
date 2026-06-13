@@ -11,9 +11,6 @@
  * (tests/js/preview-block-routing.test.mjs).
  */
 
-/** Типы блоков превью, поддерживающие точечный патч. */
-export const PATCHABLE_BLOCK_KINDS = Object.freeze(['table', 'textblock', 'violation']);
-
 /**
  * Решение по точечному обновлению блока превью.
  *

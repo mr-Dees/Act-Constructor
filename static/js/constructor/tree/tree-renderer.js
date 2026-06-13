@@ -6,6 +6,7 @@
  * Все константы вынесены в AppConfig для централизованного управления.
  */
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { isLeafBlockType } from '../block-types.js';
 import { ItemsTitleEditing } from '../items/items-title-editing.js';
 import { AppState, _unwrap } from '../state/state-core.js';
 import { loadCollapsedSet, saveCollapsedSet, pruneCollapsedSet } from './tree-collapsed-store.js';
@@ -114,7 +115,11 @@ export class TreeRenderer {
         oldLi.parentNode.replaceChild(newLi, oldLi);
 
         this._restoreSelection();
-        this.refreshNumbers();
+        // Инвариант: renderSubtree пересобирает поддерево от структурного
+        // родителя, поэтому все узлы с изменившейся нумерацией лежат внутри
+        // newLi. Сужаем сверку текста до этого поддерева (O(поддерево))
+        // вместо полного обхода _domIndex (O(всех узлов)).
+        this._refreshNumbersIn(newLi);
 
         // Roving tabindex/фокус: если «нулевой» элемент был внутри заменённого
         // поддерева — возвращаем его (предпочтительно на тот же узел).
@@ -160,6 +165,24 @@ export class TreeRenderer {
     }
 
     /**
+     * Точечно обновляет номера/подписи только в пределах одного поддерева.
+     * Применяется из renderSubtree: переименование/перенумерация после
+     * add/delete/move затрагивает лишь узлы внутри пересобранного rootLi,
+     * поэтому обход сужен до него (O(поддерево)) вместо полного _domIndex.
+     * @param {HTMLLIElement} rootLi - Корневой li пересобранного поддерева
+     */
+    _refreshNumbersIn(rootLi) {
+        if (!rootLi) return;
+        const apply = (li) => {
+            const nodeId = li.dataset.nodeId;
+            const node = nodeId ? AppState._nodeIndex?.get(nodeId) : null;
+            if (node) this._updateLiLabelText(li, node);
+        };
+        apply(rootLi);
+        rootLi.querySelectorAll('li.tree-item').forEach(apply);
+    }
+
+    /**
      * Обновляет текст подписи li из узла: номер + заголовок (item-узлы)
      * или единый текст (content-типы). Бейджи ТБ/фактуры не трогает.
      * @private
@@ -170,7 +193,7 @@ export class TreeRenderer {
         const label = li.querySelector(':scope > .tree-label');
         if (!label) return;
 
-        const isContentType = ['table', 'textblock', 'violation'].includes(node.type);
+        const isContentType = isLeafBlockType(node.type);
         if (isContentType) {
             const text = node.customLabel || node.number || node.label;
             if (label.textContent !== text) label.textContent = text;
@@ -419,6 +442,9 @@ export class TreeRenderer {
             if (li.hasAttribute('aria-expanded')) {
                 li.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             }
+            // Сворачивание — class-toggle (без childList-мутации), поэтому
+            // MutationObserver видимых узлов его не ловит: инвалидируем кеш явно.
+            this.manager._invalidateVisibleItemsCache?.();
             // Персист свёрнутости per-act (M.24).
             this.persistCollapsed(node.id, collapsed);
         });
@@ -437,7 +463,7 @@ export class TreeRenderer {
         label.className = 'tree-label';
         label.contentEditable = false;
 
-        const isContentType = ['table', 'textblock', 'violation'].includes(node.type);
+        const isContentType = isLeafBlockType(node.type);
 
         if (isContentType) {
             // Для content-типов: один span с customLabel или number

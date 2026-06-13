@@ -2,6 +2,7 @@
  * Модуль для редактирования заголовков элементов документа.
  * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц и узлов дерева.
  */
+import { isLeafBlockType } from '../block-types.js';
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { ItemsRenderer } from './items-renderer.js';
 import { PreviewManager } from '../preview/preview.js';
@@ -189,7 +190,7 @@ export class ItemsTitleEditing {
         treeManager.editingElement = labelElement;
 
         const originalLabel = node.label;
-        const isSpecialType = ['table', 'textblock', 'violation'].includes(node.type);
+        const isSpecialType = isLeafBlockType(node.type);
 
         // Для специальных типов используем customLabel
         if (isSpecialType) {

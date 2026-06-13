@@ -13,7 +13,41 @@ import assert from 'node:assert/strict';
 import {
     collectViolationLines,
     imagePresentationStyle,
+    PreviewViolationRenderer,
 } from '../../static/js/constructor/preview/preview-violation-renderer.js';
+
+/**
+ * Рендерит нарушение с одним image-элементом и возвращает применённый
+ * inline-стиль картинки. Перехватывает document.createElement, чтобы достать
+ * созданный <img> (appendChild в стабе — no-op).
+ *
+ * @param {Object} imageItem Элемент additionalContent типа image.
+ * @returns {{width: (string|undefined), maxHeight: (string|undefined)}}
+ */
+function renderImageStyle(imageItem) {
+    const origCreate = document.createElement;
+    let imgStyle = null;
+    document.createElement = (tag) => {
+        const el = origCreate(tag);
+        if (tag === 'img') imgStyle = el.style;
+        return el;
+    };
+    try {
+        PreviewViolationRenderer.create({
+            violated: '—',
+            established: '—',
+            descriptionList: { enabled: false, items: [] },
+            additionalContent: { enabled: true, items: [imageItem] },
+            reasons: { enabled: false, content: '' },
+            consequences: { enabled: false, content: '' },
+            responsible: { enabled: false, content: '' },
+            recommendations: { enabled: false, content: '' },
+        });
+    } finally {
+        document.createElement = origCreate;
+    }
+    return imgStyle || {};
+}
 
 const LONG = 'Очень длинный текст нарушения, который раньше обрезался превью до пары десятков символов. '.repeat(20);
 
@@ -148,4 +182,24 @@ test('кастомный preview_max_height_percent учитывается', () 
 test('нулевой/отсутствующий процент высоты → дефолт 40', () => {
     assert.equal(imagePresentationStyle({}, 0).maxHeight, '118.8mm');
     assert.equal(imagePresentationStyle({}, undefined).maxHeight, '118.8mm');
+});
+
+// --- применённый стиль <img> (FINDING 6 / Б-1.6): явная ширина = как DOCX ---
+
+test('явная ширина → задаётся только width, без потолка высоты (паритет DOCX)', () => {
+    const style = renderImageStyle({ type: 'image', url: 'data:image/png;base64,AAAA', width: 50, filename: 'x.png' });
+    assert.equal(style.width, '50%');
+    assert.equal(style.maxHeight, undefined, 'explicit-width картинка не должна получать maxHeight');
+});
+
+test('авторазмер (width=0) → задаётся maxHeight, ширина не фиксируется', () => {
+    const style = renderImageStyle({ type: 'image', url: 'data:image/png;base64,AAAA', width: 0, filename: 'x.png' });
+    assert.equal(style.width, undefined, 'auto-size картинка не должна получать width');
+    assert.equal(style.maxHeight, '118.8mm', 'auto-size картинка ограничивает высоту (защита скролла, Б-1.6)');
+});
+
+test('width отсутствует (старые акты) → авторазмер с maxHeight', () => {
+    const style = renderImageStyle({ type: 'image', url: 'data:image/png;base64,AAAA', filename: 'x.png' });
+    assert.equal(style.width, undefined);
+    assert.equal(style.maxHeight, '118.8mm');
 });

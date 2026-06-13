@@ -204,7 +204,9 @@ export class TableCellsOperations {
         let rowIndex = parseInt(cell.dataset.row);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[0] в _checkGridColumnsConsistent был бы undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Лимит размера таблицы (H8)
         if (!this._checkRowLimit(table)) return;
@@ -295,7 +297,9 @@ export class TableCellsOperations {
         let rowIndex = parseInt(cell.dataset.row);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[0] в _checkGridColumnsConsistent был бы undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Лимит размера таблицы (H8)
         if (!this._checkRowLimit(table)) return;
@@ -386,7 +390,9 @@ export class TableCellsOperations {
         let colIndex = parseInt(cell.dataset.col);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[0] в _checkColumnLimit был бы undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Проверка protected
         if (table.protected === true) {
@@ -466,7 +472,9 @@ export class TableCellsOperations {
         let colIndex = parseInt(cell.dataset.col);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[0] в _checkColumnLimit был бы undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Проверка protected
         if (table.protected === true) {
@@ -635,7 +643,9 @@ export class TableCellsOperations {
         const colIndex = parseInt(cell.dataset.col);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[0].length ниже был бы чтением undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Проверка protected
         if (table.protected === true) {

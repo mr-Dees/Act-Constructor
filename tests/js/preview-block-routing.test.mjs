@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideBlockPatch, PATCHABLE_BLOCK_KINDS } from '../../static/js/constructor/preview/preview-block-routing.js';
+import { decideBlockPatch } from '../../static/js/constructor/preview/preview-block-routing.js';
 
 test('table/violation: патч только при наличии элемента и данных', () => {
     for (const kind of ['table', 'violation']) {
@@ -46,8 +46,4 @@ test('textblock: пустой и скрытый — skip (DOM не трогае�
 test('textblock без данных и неизвестный тип — full', () => {
     assert.equal(decideBlockPatch('textblock', {hasElement: true, hasData: false}), 'full');
     assert.equal(decideBlockPatch('chart', {hasElement: true, hasData: true}), 'full');
-});
-
-test('перечень патчабельных типов зафиксирован', () => {
-    assert.deepEqual([...PATCHABLE_BLOCK_KINDS], ['table', 'textblock', 'violation']);
 });

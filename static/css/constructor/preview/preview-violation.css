@@ -62,7 +62,6 @@
 
 .preview-violation-image {
     max-width: 100%;
-    object-fit: contain;
 }
 
 /* Подпись картинки: курсив, по центру (как в DOCX, Б-1.5) */

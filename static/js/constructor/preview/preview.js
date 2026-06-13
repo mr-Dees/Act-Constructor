@@ -178,9 +178,15 @@ export class PreviewManager {
             // Параллельно запланирован полный рендер — он перекроет блочные патчи.
             if (this._pendingUpdate) return;
 
+            // Замечания таблиц зависят ИСКЛЮЧИТЕЛЬНО от AppState.tables, поэтому
+            // правки текстблоков/нарушений не могут изменить рамки таблиц и
+            // колокольчик — инвалидируем кеш и перекрашиваем рамки только когда
+            // в пачке есть правка таблицы (ключи формата `${kind}:${id}`).
+            const hasTableEdit = keys.some(k => k.startsWith('table:'));
+
             // Кеш замечаний инвалидируется ДО патча (state уже изменён):
             // рамки и колокольчик пересчитают свежий снимок.
-            invalidateTableWarningsCache();
+            if (hasTableEdit) invalidateTableWarningsCache();
 
             for (const key of keys) {
                 if (!this._patchBlock(key)) {
@@ -191,8 +197,10 @@ export class PreviewManager {
                 }
             }
 
-            const sheet = document.querySelector('#preview .preview-sheet');
-            if (sheet) this._applyTableOutlines(sheet);
+            if (hasTableEdit) {
+                const sheet = document.querySelector('#preview .preview-sheet');
+                if (sheet) this._applyTableOutlines(sheet);
+            }
             this._emitContentChanged();
         });
     }

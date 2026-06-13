@@ -172,8 +172,14 @@ export class PreviewViolationRenderer {
         img.className = 'preview-violation-image';
         img.alt = item.caption || item.filename || '';
         const style = imagePresentationStyle(item, getImageLimits().previewMaxHeightPercent);
-        if (style.width) img.style.width = style.width;
-        img.style.maxHeight = style.maxHeight;
+        // Явная ширина — рендерим ровно как DOCX (_scale_picture задаёт только
+        // ширину, без потолка высоты). Авторазмер (width=0) — ограничиваем
+        // высоту долей листа, чтобы огромная картинка не разнесла скролл (Б-1.6).
+        if (style.width) {
+            img.style.width = style.width;
+        } else {
+            img.style.maxHeight = style.maxHeight;
+        }
         img.onerror = () => {
             const placeholder = document.createElement('div');
             placeholder.className = 'preview-violation-line';

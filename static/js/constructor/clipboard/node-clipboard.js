@@ -35,10 +35,8 @@ import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import {
     estimateActImageBytes,
-    estimateDataUrlBytes,
     getImageLimits,
 } from '../violation/violation-image-validator.js';
-import { CONTENT_TYPE_IMAGE } from '../violation/violation-content-item.js';
 
 /** Версия формата буфера. Несовпадение → буфер игнорируется. */
 export const CLIPBOARD_FORMAT_VERSION = 1;
@@ -198,27 +196,6 @@ export function regenerateIds(payload, gens) {
 }
 
 /**
- * Суммарный размер картинок (inline data-URL) в записях словаря violations
- * вставляемого поддерева. Зеркалит estimateActImageBytes, но для произвольного
- * набора нарушений (а не всего AppState.violations).
- *
- * @param {Object} violationsDict - Словарь нарушений {id: violation}
- * @returns {number} Размер в байтах
- */
-export function estimatePastedImageBytes(violationsDict) {
-    let total = 0;
-    for (const violation of Object.values(violationsDict || {})) {
-        const items = violation?.additionalContent?.items || [];
-        for (const item of items) {
-            if (item && item.type === CONTENT_TYPE_IMAGE && item.url) {
-                total += estimateDataUrlBytes(item.url);
-            }
-        }
-    }
-    return total;
-}
-
-/**
  * Проверяет, не превысит ли вставка лимит суммарного размера картинок акта
  * (КП-5). Чистая функция.
  *
@@ -237,6 +214,21 @@ export function checkImageLimits(existingBytes, pastedBytes, maxTotalBytes) {
         };
     }
     return { ok: true, reason: '' };
+}
+
+/**
+ * Ошибка переполнения квоты localStorage. Браузеры кидают её по-разному:
+ * code 22 (большинство), code 1014 (Firefox), либо по имени исключения.
+ * @param {*} e - Перехваченное исключение
+ * @returns {boolean}
+ */
+function isQuotaExceededError(e) {
+    return e instanceof DOMException && (
+        e.code === 22
+        || e.code === 1014
+        || e.name === 'QuotaExceededError'
+        || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+    );
 }
 
 export const NodeClipboard = {
@@ -274,10 +266,29 @@ export const NodeClipboard = {
         };
         const payload = serializeSubtree(rawNode, rawDicts, window.currentActId ?? null);
 
+        // КП-5: картинки (inline base64) копируются как есть. Если их суммарный
+        // размер уже превышает лимит акта — вставка всё равно была бы отклонена,
+        // да и буфер вряд ли вместит. Отсекаем заранее с точным сообщением про
+        // размер картинок (а не про абстрактное «переполнение буфера»).
+        const limits = getImageLimits();
+        const imgBytes = estimateActImageBytes(payload.dicts.violations || {});
+        if (imgBytes > limits.maxTotalSizePerAct) {
+            const fmt = (b) => (b / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
+            Notifications.error(
+                `Картинки скопированного фрагмента слишком большие для копирования `
+                + `(лимит ${fmt(limits.maxTotalSizePerAct)} МБ)`
+            );
+            return false;
+        }
+
         try {
             localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(payload));
-        } catch (_) {
-            Notifications.error('Не удалось скопировать: переполнен буфер браузера');
+        } catch (e) {
+            if (isQuotaExceededError(e)) {
+                Notifications.error('Фрагмент слишком большой и не помещается в буфер браузера');
+            } else {
+                Notifications.error('Не удалось скопировать');
+            }
             return false;
         }
 
@@ -380,7 +391,7 @@ export const NodeClipboard = {
         // КП-5: лимит суммарного размера картинок целевого акта.
         const limits = getImageLimits();
         const existingBytes = estimateActImageBytes(_unwrap(AppState.violations) || {});
-        const pastedBytes = estimatePastedImageBytes(regenerated.dicts.violations || {});
+        const pastedBytes = estimateActImageBytes(regenerated.dicts.violations || {});
         const imgCheck = checkImageLimits(existingBytes, pastedBytes, limits.maxTotalSizePerAct);
         if (!imgCheck.ok) {
             Notifications.error(imgCheck.reason);
