@@ -90,8 +90,7 @@ Object.assign(ViolationManager.prototype, {
             if (this.currentActiveContainer === contentContainer) {
                 this._resetActiveZone();
                 // Удаляем индикатор при выходе мыши
-                const indicators = itemsContainer.querySelectorAll('.insert-indicator');
-                indicators.forEach(ind => ind.remove());
+                this.removeInsertIndicators(itemsContainer);
             }
         });
 
@@ -102,8 +101,13 @@ Object.assign(ViolationManager.prototype, {
                 const position = this.calculateCursorPosition(e, itemsContainer);
                 this.cursorInsertPosition = position;
 
-                // Визуализируем позицию вставки
-                this.updateInsertIndicator(itemsContainer, position);
+                // Визуализируем позицию вставки. В пустом контейнере при
+                // простом наведении индикатор не показываем (не прячем
+                // подсказку «ПКМ...»); при файловом drag его рисует dragover
+                // в violation-file-upload.js — mousemove во время drag не приходит.
+                if (itemsContainer.querySelector('.content-item-wrapper')) {
+                    this.updateInsertIndicator(itemsContainer, position);
+                }
             }
         });
 
@@ -189,29 +193,30 @@ Object.assign(ViolationManager.prototype, {
      */
     updateInsertIndicator(container, position) {
         // Удаляем предыдущие индикаторы
-        const oldIndicators = container.querySelectorAll('.insert-indicator');
-        oldIndicators.forEach(ind => ind.remove());
+        this.removeInsertIndicators(container);
 
         const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
-
-        if (wrappers.length === 0) {
-            return;
-        }
 
         // Создаем индикатор
         const indicator = document.createElement('div');
         indicator.className = 'insert-indicator';
 
-        if (position === 0) {
-            // Вставка в начало
-            container.insertBefore(indicator, wrappers[0]);
-        } else if (position >= wrappers.length) {
-            // Вставка в конец
+        if (wrappers.length === 0 || position >= wrappers.length) {
+            // Пустой контейнер или вставка в конец
             container.appendChild(indicator);
         } else {
-            // Вставка между элементами
+            // Вставка в начало или между элементами
             container.insertBefore(indicator, wrappers[position]);
         }
+    },
+
+    /**
+     * Удаляет все индикаторы позиции вставки из контейнера
+     * @param {HTMLElement} container - Контейнер с элементами
+     */
+    removeInsertIndicators(container) {
+        const indicators = container.querySelectorAll('.insert-indicator');
+        indicators.forEach(ind => ind.remove());
     },
 
     /**

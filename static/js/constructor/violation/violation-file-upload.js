@@ -70,6 +70,10 @@ Object.assign(ViolationManager.prototype, {
                 // Вычисляем позицию для вставки файлов
                 const position = this.calculateCursorPosition(e, itemsContainer);
                 this.cursorInsertPosition = position;
+
+                // Показываем индикатор позиции вставки — в т.ч. для пустого
+                // контейнера (violation-6): mousemove во время drag не приходит.
+                this.updateInsertIndicator(itemsContainer, position);
             }
         });
 
@@ -94,6 +98,7 @@ Object.assign(ViolationManager.prototype, {
                     itemsContainer.classList.remove('drag-over-file');
                     isFileDragActive = false;
                     this.cursorInsertPosition = null;
+                    this.removeInsertIndicators(itemsContainer);
                 }
             }
         });
@@ -122,6 +127,7 @@ Object.assign(ViolationManager.prototype, {
             isFileDragActive = false;
             itemsContainer.classList.remove('drag-over-file');
             this.cursorInsertPosition = null;
+            this.removeInsertIndicators(itemsContainer);
 
             // Обрабатываем каждый файл
             const imageFiles = [];
@@ -156,6 +162,7 @@ Object.assign(ViolationManager.prototype, {
                 isFileDragActive = false;
                 itemsContainer.classList.remove('drag-over-file');
                 this.cursorInsertPosition = null;
+                this.removeInsertIndicators(itemsContainer);
             }
         };
 

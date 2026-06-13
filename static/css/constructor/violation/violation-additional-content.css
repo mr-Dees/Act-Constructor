@@ -56,6 +56,16 @@
     white-space: nowrap;
 }
 
+/* Индикатор позиции вставки (mousemove по контейнеру / файловый drag),
+   показывается и в пустом контейнере (violation-6) */
+.additional-content-items .insert-indicator {
+    height: var(--tree-drop-indicator-height, 3px);
+    background: var(--insert-indicator-gradient);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
 /* Подсказка для пустого контейнера */
 .additional-content-items:empty::after {
     content: 'ПКМ для добавления контента';
