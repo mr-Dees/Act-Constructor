@@ -13,6 +13,7 @@ from datetime import date, datetime
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.db.utils.json_db_utils import JSONDBUtils
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,6 +379,12 @@ class ActAuditLogRepository(BaseRepository):
 
         Сравнивает текущее состояние в БД с входящими данными.
 
+        Для полей-коллекций нарушения (descriptionList/additionalContent)
+        в diff пишется только компактная сводка
+        ``{"changed": True, "old_items": N, "new_items": M}`` — содержимое
+        элементов не сохраняется, т.к. additionalContent может содержать
+        base64-картинки на мегабайты.
+
         Args:
             act_id: ID акта
             data: ActDataSchema с входящими данными
@@ -447,13 +454,22 @@ class ActAuditLogRepository(BaseRepository):
                 f"SELECT violation_id, "
                 f"COALESCE(violated, '') AS violated, "
                 f"COALESCE(established, '') AS established, "
-                f"reasons, consequences, responsible, recommendations "
+                f"reasons, consequences, responsible, recommendations, "
+                f"description_list, additional_content "
                 f"FROM {self._violations} WHERE act_id = $1",
                 act_id,
             )
             db_viol_map = {r["violation_id"]: dict(r) for r in db_viols}
 
             viol_fields = ("violated", "established", "reasons", "consequences", "responsible", "recommendations")
+            # Поля-коллекции diff'ятся отдельно компактной сводкой (см. ниже):
+            # additional_content может содержать base64-картинки на мегабайты —
+            # их содержимое в аудит-лог попадать не должно.
+            collection_fields = (
+                ("descriptionList", "description_list"),
+                ("additionalContent", "additional_content"),
+            )
+            empty_collection = {"enabled": False, "items": []}
             for viol_id, new_viol in data.violations.items():
                 if processed >= max_elements:
                     break
@@ -466,16 +482,27 @@ class ActAuditLogRepository(BaseRepository):
                     new_attr = getattr(new_viol, field, None)
                     if hasattr(new_attr, "content"):
                         new_val = new_attr.content or ""
-                        # JSONB-поля — извлекаем content для сравнения
-                        if isinstance(old_val, dict):
-                            old_val = old_val.get("content", "")
-                        else:
-                            old_val = old_val or ""
+                        # JSONB-поля asyncpg отдаёт строкой — приводим к dict
+                        # и извлекаем content для сравнения
+                        old_dict = JSONDBUtils.ensure_dict(old_val)
+                        old_val = (old_dict or {}).get("content", "") or ""
                     else:
                         new_val = new_attr or ""
                         old_val = old_val or ""
                     if old_val != new_val:
                         changed_fields[field] = {"changed": True}
+                for attr_name, col_name in collection_fields:
+                    old_coll = JSONDBUtils.ensure_dict(old.get(col_name)) or empty_collection
+                    new_obj = getattr(new_viol, attr_name, None)
+                    new_coll = new_obj.model_dump() if new_obj is not None else empty_collection
+                    if old_coll != new_coll:
+                        # Компактное представление: факт изменения + число
+                        # элементов до/после, без содержимого элементов
+                        changed_fields[attr_name] = {
+                            "changed": True,
+                            "old_items": len(old_coll.get("items") or []),
+                            "new_items": len(new_coll.get("items") or []),
+                        }
                 if changed_fields:
                     result[viol_id] = {
                         "type": "violation",
