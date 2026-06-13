@@ -335,40 +335,113 @@ test('read-only: откат недоступен', () => {
 
 // ── Каскад metrics↔risk (§5-кластер) ────────────────────────────────────────
 
-test('удаление риск-таблицы: риск и обе сводные восстанавливаются вместе', () => {
+test('удаление риск-таблицы: риск восстановлен, сводные пересобраны каскадом', () => {
     AppState.initializeTree(true);
-    const { riskNode, metricsNode, mainNode } = buildSection5Cluster();
-    const before = snapshotState();
+    const { n51, riskNode, metricsNode, mainNode } = buildSection5Cluster();
+    const riskTableId = riskNode.tableId;
 
     assert.ok(AppState.deleteNode(riskNode.id));
     // Каскад снёс сводные.
     assert.equal(AppState.findNodeById(riskNode.id), null);
     assert.equal(AppState.findNodeById(metricsNode.id), null, 'per-point сводная снесена каскадом');
     assert.equal(AppState.findNodeById(mainNode.id), null, 'главная сводная снесена каскадом');
+    assert.equal(AppState.tables[riskTableId], undefined, 'запись риск-таблицы снесена');
 
     assert.ok(UndoDeleteManager.undoLast());
 
-    assert.ok(AppState.findNodeById(riskNode.id), 'риск-таблица восстановлена');
-    assert.ok(AppState.findNodeById(metricsNode.id), 'per-point сводная восстановлена');
-    assert.ok(AppState.findNodeById(mainNode.id), 'главная сводная восстановлена');
-    assert.deepEqual(snapshotState(), before, '§5-кластер и словари после отката не совпали со снимком');
+    // Удалённый риск-узел возвращается ПОД СВОИМ id (восстановление, не пересоздание).
+    const restoredRisk = AppState.findNodeById(riskNode.id);
+    assert.ok(restoredRisk, 'риск-таблица восстановлена под исходным id');
+    assert.ok(AppState.tables[riskTableId], 'запись риск-таблицы восстановлена');
+
+    // Сводные пересобраны каскадом (id новые — auto-derived, важно лишь наличие).
+    const metricsBack = n51.children.find(c => c.kind === 'metrics');
+    const mainBack = AppState.findNodeById('5').children.find(c => c.kind === 'mainMetrics');
+    assert.ok(metricsBack, 'per-point сводная пересобрана каскадом');
+    assert.ok(mainBack, 'главная сводная пересобрана каскадом');
+
     assertIndexConsistent('каскад undo');
     assertNoIndexMiss();
 });
 
-test('удаление item-поддерева с риск-таблицей: восстановление через §5-кластер', () => {
+test('удаление item-поддерева с риск-таблицей: восстановление + пересборка сводных', () => {
     AppState.initializeTree(true);
-    const { n511 } = buildSection5Cluster();
-    const before = snapshotState();
+    const { n51, n511, riskNode } = buildSection5Cluster();
+    const riskTableId = riskNode.tableId;
 
     // Удаляем 5.1.1 целиком (риск внутри) — каскад снесёт сводные.
     assert.ok(AppState.deleteNode(n511.id));
     assert.equal(AppState.findNodeById(n511.id), null);
+    assert.equal(AppState.tables[riskTableId], undefined, 'запись риск-таблицы снесена с поддеревом');
 
     assert.ok(UndoDeleteManager.undoLast());
 
-    assert.deepEqual(snapshotState(), before);
+    // Поддерево с риском вернулось под своими id.
+    assert.ok(AppState.findNodeById(n511.id), 'подпункт 5.1.1 восстановлен');
+    assert.ok(AppState.findNodeById(riskNode.id), 'риск-таблица восстановлена под исходным id');
+    assert.ok(AppState.tables[riskTableId], 'запись риск-таблицы восстановлена');
+
+    // Сводные пересобраны каскадом.
+    assert.ok(n51.children.find(c => c.kind === 'metrics'), 'per-point сводная пересобрана');
+    assert.ok(AppState.findNodeById('5').children.find(c => c.kind === 'mainMetrics'), 'главная сводная пересобрана');
+
     assertIndexConsistent('каскад item undo');
+    assertNoIndexMiss();
+});
+
+// ── Регрессия FINDINGS 1+4: правки соседних §5-таблиц переживают откат ────────
+
+test('правки соседней §5-таблицы НЕ откатываются при undo удаления риск-таблицы', () => {
+    AppState.initializeTree(true);
+    // Первый §5-кластер (5.1 → 5.1.1 с риском + сводные).
+    const { riskNode } = buildSection5Cluster();
+
+    // Соседняя §5-ветка 5.2 → 5.2.1 со своей риск-таблицей и своими сводными.
+    const n52 = addItem('5', 'Пункт 5.2');
+    const n521 = addItem(n52.id, 'Подпункт 5.2.1');
+    AppState.generateNumbering();
+    assert.ok(AppState._createRegularRiskTable(n521.id).valid);
+    AppState.generateNumbering();
+    assert.ok(MetricsRiskCoordinator.onRiskTableAdded(n521.id));
+
+    const survivorRisk = n521.children.find(c => c.kind === 'regularRisk');
+    assert.ok(survivorRisk, 'риск-таблица соседней ветки создана');
+    const survivorTableId = survivorRisk.tableId;
+
+    // Удаляем риск-таблицу ПЕРВОЙ ветки (это снесёт её сводные каскадом).
+    assert.ok(AppState.deleteNode(riskNode.id));
+    assert.equal(AppState.findNodeById(riskNode.id), null);
+
+    // МЕЖДУ удалением и откатом редактируем СОСЕДНЮЮ (выжившую) §5-таблицу:
+    //  - структурная правка узла (метка),
+    //  - правка содержимого словаря (ячейка грида).
+    const survivorNode = AppState.findNodeById(survivorRisk.id);
+    survivorNode.label = 'ОТРЕДАКТИРОВАНО метка';
+    AppState.tables[survivorTableId].grid[0][0].content = 'ОТРЕДАКТИРОВАНО ячейка';
+
+    // Откатываем удаление риск-таблицы первой ветки.
+    assert.ok(UndoDeleteManager.undoLast());
+
+    // Правки соседней §5-таблицы СОХРАНЕНЫ (не откачены вместе с undo).
+    assert.equal(
+        AppState.findNodeById(survivorRisk.id).label,
+        'ОТРЕДАКТИРОВАНО метка',
+        'структурная правка соседней §5-таблицы должна сохраниться'
+    );
+    assert.equal(
+        AppState.tables[survivorTableId].grid[0][0].content,
+        'ОТРЕДАКТИРОВАНО ячейка',
+        'правка содержимого соседней §5-таблицы должна сохраниться'
+    );
+
+    // Удалённый риск вернулся, сводные на месте.
+    assert.ok(AppState.findNodeById(riskNode.id), 'риск первой ветки восстановлен');
+    assert.ok(AppState.findNodeById('5').children.find(c => c.kind === 'mainMetrics'), 'главная сводная на месте');
+
+    // Raw-lookup'ы резолвят все восстановленные id, индекс консистентен.
+    assert.ok(AppState._findNodeRaw(riskNode.id), 'raw-lookup риск-узла');
+    assert.ok(AppState._findNodeRaw(survivorRisk.id), 'raw-lookup выжившего риск-узла');
+    assertIndexConsistent('соседняя §5 после undo');
     assertNoIndexMiss();
 });
 

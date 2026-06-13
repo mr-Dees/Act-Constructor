@@ -13,16 +13,16 @@
  *    (rollback фасада), commit не вызывается — стек не засоряется;
  *  - undoLast() восстанавливает последний удалённый блок.
  *
- * Два вида снимков:
- *  - 'node' — обычный узел: deep-копия поддерева + индекс в родителе +
- *    записи словарей (tables/textBlocks/violations) всех листьев поддерева
- *    (обход по реестру block-types: idProp/dictName);
- *  - 'section5' — удаление затрагивает риск-таблицы под разделом 5:
- *    каскад может снести сводные таблицы в ДРУГИХ узлах §5, поэтому
- *    снимается полный кластер — deep-копия children узла «5» + записи
- *    словарей всего §5-поддерева. Восстановление возвращает риск и
- *    сводные атомарно, без повторного запуска каскада (состояние до
- *    удаления уже консистентно).
+ * Единый вид снимка ('node') для ЛЮБОГО удаления, включая риск-таблицы §5:
+ *  - deep-копия поддерева + индекс в родителе + записи словарей
+ *    (tables/textBlocks/violations) всех листьев поддерева (обход по реестру
+ *    block-types: idProp/dictName);
+ *  - удаление риск-таблицы каскадом сносит сводные (metrics) таблицы в §5.
+ *    При откате восстанавливается ТОЛЬКО удалённое поддерево, а сводные
+ *    пересобирает живой каскад (MetricsRiskCoordinator.onRiskTableAdded) из
+ *    текущего §5 — ровно как при создании риск-таблицы. Снимок НЕ захватывает
+ *    весь §5: правки, внесённые в ДРУГИЕ §5-таблицы между удалением и откатом,
+ *    сохраняются (сводные авто-выводимы, их пересоздание данных не теряет).
  *
  * Решение «родитель удалён»: ОТКАЗ с понятным уведомлением (снимок
  * выбрасывается). LIFO-порядок сам по себе восстанавливает родителя
@@ -94,19 +94,21 @@ export function collectDictEntries(rawNode, rawDicts) {
 /**
  * Строит снимок удаления (чистое ядро, без побочных эффектов).
  *
+ * Снимок захватывает ТОЛЬКО удаляемое поддерево (узел + словари его листьев),
+ * даже для риск-таблиц §5: сводные (metrics) таблицы при откате пересобирает
+ * живой каскад из текущего §5, поэтому их захватывать не нужно (это разрушило
+ * бы правки соседних §5-таблиц).
+ *
  * @param {Object} params - Параметры снимка
  * @param {Object} params.rawNode - Raw-узел, который будет удалён (с поддеревом)
  * @param {string} params.parentId - ID родителя
  * @param {number} params.index - Индекс узла в children родителя
  * @param {Object} params.rawDicts - Сырые словари {tables, textBlocks, violations}
- * @param {Object|null} [params.rawNode5] - Raw-узел «5», если удаление затрагивает
- *        риск-таблицы под §5 (включает каскадный снос сводных) — снимается
- *        полный §5-кластер
  * @returns {Object} Снимок для стека отката
  */
-export function buildDeletionSnapshot({rawNode, parentId, index, rawDicts, rawNode5 = null}) {
-    const snapshot = {
-        kind: rawNode5 ? 'section5' : 'node',
+export function buildDeletionSnapshot({rawNode, parentId, index, rawDicts}) {
+    return {
+        kind: 'node',
         nodeId: rawNode.id,
         label: rawNode.label || '',
         parentId,
@@ -114,15 +116,6 @@ export function buildDeletionSnapshot({rawNode, parentId, index, rawDicts, rawNo
         node: deepCopy(rawNode),
         dicts: collectDictEntries(rawNode, rawDicts),
     };
-
-    if (rawNode5) {
-        // Каскад способен снести сводные таблицы в других узлах §5 —
-        // снимаем кластер целиком (children узла «5» + словари §5-поддерева).
-        snapshot.section5Children = (rawNode5.children || []).map(c => deepCopy(_unwrap(c)));
-        snapshot.dicts = collectDictEntries(rawNode5, rawDicts);
-    }
-
-    return snapshot;
 }
 
 export const UndoDeleteManager = {
@@ -173,13 +166,7 @@ export const UndoDeleteManager = {
             violations: _unwrap(AppState.violations) || {},
         };
 
-        // Удаление риск-таблицы (или поддерева с риск-таблицами) запускает
-        // каскад, способный снести сводные в других узлах §5 — снимаем
-        // полный §5-кластер.
-        const touchesRisk = TreeUtils.findRiskTables(rawNode, {firstOnly: true}).length > 0;
-        const rawNode5 = touchesRisk ? AppState._findNodeRaw?.('5') : null;
-
-        return buildDeletionSnapshot({rawNode, parentId: rawParent.id, index, rawDicts, rawNode5});
+        return buildDeletionSnapshot({rawNode, parentId: rawParent.id, index, rawDicts});
     },
 
     /**
@@ -217,9 +204,7 @@ export const UndoDeleteManager = {
             return false;
         }
 
-        const restored = snapshot.kind === 'section5'
-            ? this._restoreSection5(snapshot)
-            : this._restoreNode(snapshot);
+        const restored = this._restoreNode(snapshot);
 
         if (!restored) return false;
 
@@ -235,7 +220,10 @@ export const UndoDeleteManager = {
     },
 
     /**
-     * Восстанавливает обычный узел через официальный мутатор insertNodeAt.
+     * Восстанавливает удалённое поддерево через официальный мутатор insertNodeAt.
+     * Единый путь для ЛЮБОГО узла, включая риск-таблицы §5: восстанавливается
+     * ТОЛЬКО удалённое поддерево, а сводные (metrics) таблицы пересобирает живой
+     * каскад из текущего §5 — соседние §5-таблицы и их правки не затрагиваются.
      * @private
      * @param {Object} snapshot - Снимок вида 'node'
      * @returns {boolean}
@@ -255,38 +243,16 @@ export const UndoDeleteManager = {
             return false;
         }
 
-        // Защитная реконсиляция каскада: если в восстановленном поддереве
-        // есть риск-таблицы (в норме такие удаления идут через 'section5'),
-        // сводные пересчитываются фасадом — как при создании риск-таблиц.
+        // Если в восстановленном поддереве есть риск-таблицы — пересобираем
+        // сводные (metrics) фасадом из ТЕКУЩЕГО §5, как при создании риск-таблиц.
+        // Сводные авто-выводимы: их пересоздание (с новыми id) данных не теряет,
+        // а правки соседних §5-таблиц остаются нетронутыми.
         if (TreeUtils.findRiskTables(snapshot.node, {firstOnly: true}).length > 0) {
             MetricsRiskCoordinator.onRiskTableAdded(snapshot.node.id);
+            // Каскад заменил/добавил сводные узлы — гарантируем консистентность
+            // индекса id→node полным rebuild'ом (дёшево, редкая операция).
+            AppState._rebuildNodeIndex?.();
         }
-
-        return true;
-    },
-
-    /**
-     * Восстанавливает §5-кластер целиком: children узла «5» заменяются
-     * снимком (риск + сводные возвращаются атомарно), недостающие записи
-     * словарей возвращаются. Повторный каскад не нужен — снимок снят до
-     * удаления, состояние уже консистентно.
-     * @private
-     * @param {Object} snapshot - Снимок вида 'section5'
-     * @returns {boolean}
-     */
-    _restoreSection5(snapshot) {
-        const node5 = AppState.findNodeById('5');
-        if (!node5) {
-            Notifications.error('Не удалось отменить удаление: раздел 5 не найден');
-            return false;
-        }
-
-        this._restoreDictEntries(snapshot.dicts);
-
-        // Замена через tracked-узел — dirty-tracking ловит присваивание.
-        node5.children = snapshot.section5Children;
-        // Membership §5 сменился по ссылкам целиком — полный rebuild индекса.
-        AppState._rebuildNodeIndex?.();
 
         return true;
     },
