@@ -705,12 +705,19 @@ export class ActsMenuManager {
         if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
 
         try {
-            // Сначала загружаем контент - это установит readOnlyMode на основе прав пользователя
-            await APIClient.loadActContent(actId);
-
-            // Инициализируем LockManager только после загрузки контента
-            // В режиме read-only блокировка будет пропущена
+            // §3.4: загрузку акта разбиваем на две фазы, чтобы диалог
+            // восстановления черновика показывался ПОСЛЕ захвата лока (когда
+            // уже известно, занят ли акт другим пользователем).
+            // 1) Сеть: получаем content.
+            const content = await APIClient._fetchActContent(actId);
+            // 2) Права: устанавливаем readOnlyMode из content ДО лока, чтобы
+            //    LockManager.init корректно пропустил лок для read-only.
+            APIClient._applyUserPermission(content);
+            // 3) Лок: захватываем (в read-only пропускается внутри init).
             if (LockManager?.init) await LockManager.init(actId);
+            // 4) Применение: метаданные/дерево/рендер + диалог черновика —
+            //    уже после лока.
+            await APIClient._applyActContent(actId, content);
 
             // Сохраняем дефолтную структуру ПОСЛЕ блокировки (для новых актов)
             if (APIClient._pendingDefaultStructureSave) {
