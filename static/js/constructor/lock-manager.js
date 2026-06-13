@@ -25,6 +25,11 @@ export class LockManager {
     static _isExiting = false;
     static _exitPromise = null;
     static _manualUnlockTriggered = false;
+    // Счётчик подряд-неудач продления лока (pfe-11). Объявлен статически,
+    // чтобы значение было корректным (0) с момента загрузки класса, а не
+    // только после первого _resetState. _resetState обнуляет его на старте
+    // каждой сессии (см. ниже).
+    static _extendConsecutiveFailures = 0;
     static _beforeUnloadHandler = null;
     // Слежение за бездействием (activity-листенеры, idle-таймер, visibilitychange)
     // вынесено в InactivityWatchdog; LockManager использует его композицией.
