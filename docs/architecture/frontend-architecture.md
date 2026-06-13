@@ -177,6 +177,8 @@ CSS повторяет тройное разделение — см. главу 
 | `constructor/items/items-renderer.js` | `ItemsRenderer` |
 | `constructor/preview/preview.js` | `PreviewManager` |
 | `constructor/lock-manager.js` | `LockManager` |
+| `constructor/inactivity-watchdog.js` | `InactivityWatchdog` (instance-класс; слежение за бездействием, вынесено из `LockManager`) |
+| `constructor/clipboard/node-clipboard.js` | `NodeClipboard` (copy-paste узлов между актами; `installHotkey`/`installMenuItems` зовутся в bootstrap после `App.init`) |
 | `constructor/storage-manager.js` | `StorageManager` |
 | `constructor/changelog-tracker.js` | `ChangelogTracker` |
 | `constructor/lifecycle-helper.js` | `LifecycleHelper` |
@@ -315,16 +317,19 @@ static timings = {
 
 В дереве конструктора некоторые таблицы **закреплены** вверху children-массива:
 
-- Metrics-таблицы: флаги `isMetricsTable`, `isMainMetricsTable` (на node).
-- Risk-таблицы: флаги `isRegularRiskTable`, `isOperationalRiskTable`, `isTaxRiskTable`, `isOtherRiskTable` (на node).
+Подвид таблицы — единое enum-поле `node.kind` (`table-kind.js`, 7 значений), а не набор boolean-флагов `is*Table` (убраны в kind-рефакторе):
+
+- Metrics-таблицы: `kind='metrics'` (метрики пункта `5.X`), `kind='mainMetrics'` (сводная раздела 5).
+- Risk-таблицы: `kind ∈ {'regularRisk', 'operationalRisk', 'taxRisk', 'otherRisk'}`.
+- `kind='regular'` (или отсутствие поля) — обычная таблица, не закреплена.
 
 API:
 
 | Метод | Где | Что делает |
 |---|---|---|
-| `TreeUtils.isPinnedTable(node)` | `tree/tree-utils.js:309-322` | Учитывает все 6 флагов |
+| `TreeUtils.isPinnedTable(node)` | `tree/tree-utils.js:313-315` | Делегирует `table-kind.js`: `node.type==='table' && node.kind !== 'regular'` |
 | `AppState._getFirstNonPinnedIndex(parent)` | `state/state-tree.js:739-745` | Возвращает индекс первого нон-pinned ребёнка (точка вставки) |
-| `TreeUtils.findRiskTables(node, {firstOnly})` | `tree/tree-utils.js:335-357` | Единая утилита; **other-таблицы НЕ считаются риском** для metrics-risk-coordinator |
+| `TreeUtils.findRiskTables(node, {firstOnly})` | `tree/tree-utils.js:330-351` | Единая утилита; учитывает **все 4 риск-подвида** (`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`) через `table-kind.js::isRiskTable` — все полноправные риски (формируют/удерживают сводные, блокируются от перемещения за §5) |
 
 **Защита от drag:** `tree-drag-drop.js:106-111` — при `dragstart` если `_hasRiskTablesInSubtree(node) && !isUnderSection5(node)` → `e.preventDefault()` + Notification. Drop **перед** pinned заблокирован (`tree-drag-drop.js:234-247`).
 
@@ -435,7 +440,7 @@ API: `registerBeforeUnload(name, handler)`, `unregister(name)`, `list()`. Исп
 
 ## 6. `LockManager` и inactivity
 
-`constructor/lock-manager.js` (761 строка) — клиентская часть оптимистичного блока актов. На бэке три поля на `acts`: `locked_by`, `locked_at`, `lock_expires_at`. На фронте:
+`constructor/lock-manager.js` (646 строк) — клиентская часть оптимистичного блока актов. Слежение за бездействием вынесено в `InactivityWatchdog` (`constructor/inactivity-watchdog.js`), `LockManager` использует его композицией (§6.1). На бэке три поля на `acts`: `locked_by`, `locked_at`, `lock_expires_at`. На фронте:
 
 | Цикл | Что делает |
 |---|---|
@@ -528,7 +533,7 @@ static async _initiateExit(action) {
 
 `constructor/navigation-manager.js` (223 строки) — только step-кнопки + save+export pipeline. `_handleSaveAndExport` ловит `LockLostError` из `APIClient.saveActContent` (409 → custom Error subclass из `shared/api.js`) → ставит **`sessionStorage['sessionLockLost']`** (НЕ `sessionAutoExited`: save вернул 409, изменения в БД не записаны — плашка autoExit'а врала бы «сохранено») и делает жёсткий редирект на `/acts`. Локальный черновик при этом НЕ чистится (`allowUnload()` лишь снимает beforeunload-страж). Honest-плашку выбирает чистый `pickSessionExitNotice` (`portal/acts-manager/session-exit-notice.js`).
 
-**Восстановление черновика на повторном входе:** `APIClient.loadActContent` всегда грузит контент из БД и перезаписывает локальный черновик через `saveState(true)` — автоматического prompt'а «восстановить локальные правки» нет. Поэтому при потере лока правки физически остаются в `localStorage` до следующего открытия акта, но не восстанавливаются автоматически; honest-плашка сообщает именно это (не обещает авто-восстановление).
+**Восстановление черновика на повторном входе:** загрузка акта — `APIClient.loadActContent` = `_fetchActContent` (сеть) + `_applyActContent` (применение); при автозагрузке в конструкторе (`acts-menu.js::_autoLoadAct`) между ними захватывается лок, чтобы условный prompt восстановления показывался уже после захвата (§3.4 — когда известно, занят ли акт). Prompt восстановления локального черновика (`_maybeRestoreDraft`) показывается **только** если акт с момента снимка никто не менял (серверный `updated_at` совпадает с базой снимка); иначе устаревший снимок молча удаляется, контент из БД перезаписывает черновик через `saveState(true)`. В сценарии потери лока (см. выше) honest-редирект уходит на `/acts` без перезагрузки акта — правки физически остаются в `localStorage`, но в этот момент не применяются; honest-плашка сообщает именно это.
 
 `beforeunload` и `confirmNavigation` — у `StorageManager`, не у NavigationManager.
 
@@ -565,9 +570,9 @@ static async _initiateExit(action) {
 | `findNodeById(id, node?)` | Поиск узла, default root = `AppState.treeData` |
 | `findParentNode(id)` | Родитель узла |
 | `isUnderSection5(node)` | Проверка попадания узла под §5 (через путь номеров) |
-| `isPinnedTable(node)` (`:309-322`) | Проверка по 6 флагам metrics/risk |
+| `isPinnedTable(node)` (`:313-315`) | Делегирует `table-kind.js`: `kind !== 'regular'` |
 | `isTbLeaf(node)` | Узел может иметь чекбокс TB |
-| `findRiskTables(node, {firstOnly})` (`:335-357`) | Единая утилита, **other-таблицы не считаются риском** для metrics-risk-coordinator |
+| `findRiskTables(node, {firstOnly})` (`:330-351`) | Единая утилита; учитывает **все 4 риск-подвида** (включая `otherRisk`) через `table-kind.js::isRiskTable` |
 
 ### 7.4 ItemsRenderer и `_domIndex`
 
@@ -734,7 +739,8 @@ const ok = await DialogManager.show({
 
 | Диалог | File | LOC | Особенности |
 |---|---|---|---|
-| `InvoiceDialog` | `constructor/dialog/dialog-invoice.js` | 1302 | Кеши справочников (метрики, процессы, БП-таблицы), TTL 15min, AJAX-валидация |
+| `InvoiceDialog` | `constructor/dialog/dialog-invoice.js` | 773 | Кеши справочников (метрики, процессы, БП-таблицы), TTL 15min, AJAX-валидация. Виджет автодополнения вынесен в `InvoiceAutocomplete` |
+| `InvoiceAutocomplete` | `constructor/dialog/invoice-autocomplete.js` | 359 | Вынесен из `InvoiceDialog` (§6 п.8 аудита): 4 searchable-dropdown (таблицы/метрики/процессы/подразделения). Состояние остаётся в `InvoiceDialog`, передаётся параметром — без generic-абстракции |
 | `HelpManager` | `constructor/dialog/dialog-help.js` | 229 | extends DialogBase; параллельная иерархия (см. техдолги). Init на `DOMContentLoaded` (`:227-229`) — без него кнопка help не привяжется |
 
 ### 9.4 Крупные диалоги portal
@@ -855,18 +861,20 @@ window.SafeHTML = { set, sanitize, escapeHtml };
 
 Defense in depth: на бэке HTML-поля акта проходят повторную санитизацию через `bleach.clean` (whitelist тегов/атрибутов) перед записью в БД — даже если фронтовый SafeHTML обойдут, script-tag не сохранится. Детали — `app/domains/acts/services/act_content_service.py::ActContentService._sanitize_html_fields` и dev-guide.
 
-### 11.3 Security headers (CSP report-only)
+### 11.3 Security headers (CSP enforce + nonce)
 
-Класс `SecurityHeadersMiddleware` в `app/core/middleware.py` (единый модуль, не директория) подключает 5 заголовков в **report-only** режиме + 6-й (`Strict-Transport-Security`) условно при HTTPS:
+Класс `SecurityHeadersMiddleware` в `app/core/middleware.py` (единый модуль, не директория) подключает 5 заголовков в **enforce-режиме** (`csp_report_only=False`) + 6-й (`Strict-Transport-Security`) условно при HTTPS:
 
-- `Content-Security-Policy-Report-Only`
+- `Content-Security-Policy` — enforce. `script-src 'self' 'nonce-{nonce}'` **без** `'unsafe-inline'`: на каждый http-запрос middleware генерит свежий `secrets.token_urlsafe(16)`, кладёт в `scope["state"]["csp_nonce"]` (шаблоны читают через `request.state.csp_nonce`) и подставляет в плейсхолдер `{nonce}` директивы `script-src` при сборке заголовка. Один и тот же nonce уходит в заголовок и в state → совпадение по построению. Инъектированные inline-скрипты блокируются, легитимные init-блоки с верным `nonce`-атрибутом исполняются.
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Permissions-Policy: ...`
 - `X-Frame-Options: SAMEORIGIN`
 - `Strict-Transport-Security` — только при HTTPS-соединении (условный 6-й).
 
-Путь к enforce: убрать все inline `onclick=` из templates (уже сделано — `Grep onclick` по `templates/` даёт 0 совпадений) и протестировать неделю в report-only режиме на стейдже.
+**Inline-скрипты под nonce** — единственные исполняемые inline-блоки: init-`<script type="module">` в 5 шаблонах (`base_constructor.html`, `acts_manager.html`, `admin.html`, `_ck_layout.html`, `landing.html`), каждый импортирует page-модуль через `url_for(...) | versioned`. Подход «nonce, а не вынос в .js» выбран сознательно — сохраняет proxy-aware версионируемые import-пути под JupyterHub-proxy (вынос потерял бы версионирование и рискнул бы 404). Внешние `<script src>` (DOMPurify, entry-модули) покрыты `'self'` — nonce не требуют. Inline-обработчиков `onclick/onchange` в шаблонах нет (0).
+
+**`style-src 'self' 'unsafe-inline'` оставлен осознанно** — вынос inline-стилей отдельный несоизмеримый объём (follow-up). Деталь решения — `docs/reports/2026-06-12-constructor-backlog-решения-тимлида.md` (раздел CSP).
 
 ### 11.4 Error boundary
 
