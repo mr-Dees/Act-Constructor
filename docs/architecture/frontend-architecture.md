@@ -452,12 +452,12 @@ API: `registerBeforeUnload(name, handler)`, `unregister(name)`, `list()`. Исп
 |---|---|
 | `_actId` | Текущий заблокированный акт |
 | `_config` | Полученный с бэка `{lockDurationMinutes, inactivityTimeoutMinutes, inactivityCheckIntervalSeconds, minExtensionIntervalMinutes, inactivityDialogTimeoutSeconds}` |
-| `_inactivityCheckInterval`, `_extensionInterval`, `_countdownInterval` | Таймеры |
-| `_lastActivity`, `_lastExtensionAt` | timestamp'ы для оценки idle |
+| `_extensionInterval`, `_countdownInterval` | Таймеры |
+| `_lastExtensionAt` | timestamp последнего продления |
+| `_watchdog` | Экземпляр `InactivityWatchdog` (`constructor/inactivity-watchdog.js`): activity-листенеры (`mousedown`/`keydown`/`scroll`/`touchstart`), idle-таймер, visibilitychange; `destroy()` делегирует `watchdog.stop()` |
 | `_isExiting`, `_exitPromise` | Идемпотентность `_initiateExit` |
 | `_manualUnlockTriggered` | Блокирует sendBeacon |
-| `_beforeUnloadHandler`, `_activityHandler`, `_visibilityHandler` | Bound-handler'ы для корректного `removeEventListener` |
-| `_activityEvents` | `['mousedown', 'keydown', 'scroll', 'touchstart']` |
+| `_beforeUnloadHandler` | Bound-handler для корректного `removeEventListener` |
 | `_inactivityDialogDeadline` | `Date.now() + timeoutSeconds*1000`, null если диалог не показан |
 | `_inactivityDialogClose` | Программный close активного inactivity-диалога |
 

@@ -155,7 +155,8 @@ test.describe('Lock listeners cleanup @smoke', () => {
     });
 
     // _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart']
-    // + visibilitychange (bound-обработчик, см. lock-manager.js _visibilityHandler)
+    // + visibilitychange (bound-обработчик, см. inactivity-watchdog.js _visibilityHandler;
+    // LockManager.destroy() делегирует уборку watchdog.stop())
     expect(removed).toEqual(
       ['keydown', 'mousedown', 'scroll', 'touchstart', 'visibilitychange']
     );
