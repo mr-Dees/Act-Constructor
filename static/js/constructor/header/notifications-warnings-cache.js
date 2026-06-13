@@ -14,7 +14,7 @@
  * `invalidate()`. Цель — один обход дерева за обновление предпросмотра,
  * переиспользуемый и рамками таблиц (_applyTableOutlines), и колокольчиком
  * (collectTableItems), и между poll-тиками. Исключение из `collectFn`
- * проглатывается и кешируется как `[]` (поведение fail-safe).
+ * кешируется как `[]` (поведение fail-safe) и логируется через console.warn.
  *
  * @param {() => Array} collectFn Источник замечаний (обход дерева).
  * @returns {{ get: () => Array, invalidate: () => void }}
@@ -27,6 +27,9 @@ export function makeWarningsCache(collectFn) {
         try {
           cache = collectFn();
         } catch (e) {
+          // Fail-safe: колокольчик/рамки таблиц важнее упавшего обхода,
+          // но молча глотать ошибку нельзя — теряется сигнал о баге обхода.
+          console.warn('Сбор замечаний по таблицам упал, кеш заполнен []:', e);
           cache = [];
         }
       }

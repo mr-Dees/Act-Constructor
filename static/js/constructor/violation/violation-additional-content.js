@@ -13,6 +13,8 @@ import {
     loadImageLimits,
     validateImageFile,
 } from './violation-image-validator.js';
+import { CONTENT_TYPE_IMAGE, createContentItem } from './violation-content-item.js';
+import { readFilesInOrder } from './violation-file-reading.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -47,8 +49,7 @@ Object.assign(ViolationManager.prototype, {
 
             // Если выключаем - сбрасываем активный контейнер
             if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
-                this.currentActiveContainer = null;
-                this.cursorInsertPosition = null;
+                this._resetActiveZone();
             }
 
             PreviewManager.updateBlock('violation', violation.id);
@@ -76,21 +77,20 @@ Object.assign(ViolationManager.prototype, {
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
 
-        // Отслеживаем вход мыши в contentContainer
+        // Отслеживаем вход мыши в contentContainer.
+        // Активация зоны регистрирует сброс по ESC в EscapeStack (violation-5).
         contentContainer.addEventListener('mouseenter', () => {
             if (violation.additionalContent.enabled) {
-                this.currentActiveContainer = contentContainer;
+                this._setActiveZone(contentContainer);
             }
         });
 
         // Отслеживаем выход мыши из contentContainer
         contentContainer.addEventListener('mouseleave', () => {
             if (this.currentActiveContainer === contentContainer) {
-                this.currentActiveContainer = null;
-                this.cursorInsertPosition = null;
+                this._resetActiveZone();
                 // Удаляем индикатор при выходе мыши
-                const indicators = itemsContainer.querySelectorAll('.insert-indicator');
-                indicators.forEach(ind => ind.remove());
+                this.removeInsertIndicators(itemsContainer);
             }
         });
 
@@ -101,8 +101,13 @@ Object.assign(ViolationManager.prototype, {
                 const position = this.calculateCursorPosition(e, itemsContainer);
                 this.cursorInsertPosition = position;
 
-                // Визуализируем позицию вставки
-                this.updateInsertIndicator(itemsContainer, position);
+                // Визуализируем позицию вставки. В пустом контейнере при
+                // простом наведении индикатор не показываем (не прячем
+                // подсказку «ПКМ...»); при файловом drag его рисует dragover
+                // в violation-file-upload.js — mousemove во время drag не приходит.
+                if (itemsContainer.querySelector('.content-item-wrapper')) {
+                    this.updateInsertIndicator(itemsContainer, position);
+                }
             }
         });
 
@@ -188,29 +193,30 @@ Object.assign(ViolationManager.prototype, {
      */
     updateInsertIndicator(container, position) {
         // Удаляем предыдущие индикаторы
-        const oldIndicators = container.querySelectorAll('.insert-indicator');
-        oldIndicators.forEach(ind => ind.remove());
+        this.removeInsertIndicators(container);
 
         const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
-
-        if (wrappers.length === 0) {
-            return;
-        }
 
         // Создаем индикатор
         const indicator = document.createElement('div');
         indicator.className = 'insert-indicator';
 
-        if (position === 0) {
-            // Вставка в начало
-            container.insertBefore(indicator, wrappers[0]);
-        } else if (position >= wrappers.length) {
-            // Вставка в конец
+        if (wrappers.length === 0 || position >= wrappers.length) {
+            // Пустой контейнер или вставка в конец
             container.appendChild(indicator);
         } else {
-            // Вставка между элементами
+            // Вставка в начало или между элементами
             container.insertBefore(indicator, wrappers[position]);
         }
+    },
+
+    /**
+     * Удаляет все индикаторы позиции вставки из контейнера
+     * @param {HTMLElement} container - Контейнер с элементами
+     */
+    removeInsertIndicators(container) {
+        const indicators = container.querySelectorAll('.insert-indicator');
+        indicators.forEach(ind => ind.remove());
     },
 
     /**
@@ -222,17 +228,9 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} extraData - Дополнительные данные элемента
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
-        const newItem = {
-            id: `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: type,
-            content: extraData.content || '',
-            url: extraData.url || '',
-            caption: '',
-            filename: extraData.filename || '',
-            order: insertIndex,
-            // Ширина картинки, % полезной ширины листа (0 — авто, Б-1.4).
-            width: extraData.width || 0
-        };
+        // Фабрика создаёт только релевантные типу поля (violation-3):
+        // кейс/текст — content; картинка — url/caption/filename/width.
+        const newItem = createContentItem(type, insertIndex, extraData);
 
         // Вставляем элемент в нужную позицию
         violation.additionalContent.items.splice(insertIndex, 0, newItem);
@@ -292,6 +290,49 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
+     * Вставляет пачку картинок в детерминированном порядке выбора файлов
+     * (violation-4): файлы читаются параллельно, но вставка идёт строго
+     * по порядку списка после завершения всех чтений. Нечитаемые файлы
+     * пропускаются с Notifications.error, порядок остальных сохраняется.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первой картинки
+     * @param {File[]} files - Прошедшие валидацию файлы в порядке выбора
+     */
+    async insertImageFilesInOrder(violation, container, insertIndex, files) {
+        const results = await readFilesInOrder(files);
+
+        let addedCount = 0;
+        for (const result of results) {
+            if (!result.ok) {
+                console.error('Ошибка при чтении файла:', result.file.name, result.error);
+                Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                continue;
+            }
+
+            this.addContentItemAtPosition(
+                violation,
+                CONTENT_TYPE_IMAGE,
+                container,
+                insertIndex + addedCount,
+                {
+                    url: result.url,
+                    filename: result.file.name,
+                },
+            );
+            addedCount++;
+        }
+
+        if (addedCount > 0) {
+            const message = addedCount === 1
+                ? 'Изображение добавлено'
+                : `Добавлено изображений: ${addedCount}`;
+            Notifications.success(message);
+        }
+    },
+
+    /**
      * Инициирует выбор файлов изображений с указанием позиции
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
@@ -311,38 +352,8 @@ Object.assign(ViolationManager.prototype, {
             const files = this.filterAcceptedImageFiles(Array.from(e.target.files), violation);
             if (files.length === 0) return;
 
-            let addedCount = 0;
-
-            // Обрабатываем каждый файл
-            files.forEach((file, idx) => {
-                const reader = new FileReader();
-
-                reader.onload = (event) => {
-                    // Добавляем изображения последовательно с увеличением позиции
-                    this.addContentItemAtPosition(violation, 'image', container, insertIndex + idx, {
-                        url: event.target.result,
-                        filename: file.name
-                    });
-
-                    addedCount++;
-
-                    // Показываем уведомление после последнего файла
-                    if (addedCount === files.length) {
-                        const message = files.length === 1
-                            ? 'Изображение добавлено'
-                            : `Добавлено изображений: ${files.length}`;
-
-                        Notifications.success(message);
-                    }
-                };
-
-                reader.onerror = (error) => {
-                    console.error('Error reading file:', file.name, error);
-                    Notifications.error(`Ошибка при чтении ${file.name}`);
-                };
-
-                reader.readAsDataURL(file);
-            });
+            // Вставка в порядке выбора файлов (violation-4).
+            this.insertImageFilesInOrder(violation, container, insertIndex, files);
         });
 
         document.body.appendChild(fileInput);

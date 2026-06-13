@@ -7,6 +7,11 @@ import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from './violation-content-item.js';
 
 /**
  * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
@@ -37,14 +42,14 @@ Object.assign(ViolationManager.prototype, {
         violation.additionalContent.items.forEach((item, index) => {
             let itemElement;
 
-            if (item.type === 'case') {
+            if (item.type === CONTENT_TYPE_CASE) {
                 const caseNumber = itemsWithNumbers[index];
                 itemElement = this.createCaseElement(violation, item, index, caseNumber);
-            } else if (item.type === 'image') {
-                const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'image', index);
+            } else if (item.type === CONTENT_TYPE_IMAGE) {
+                const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_IMAGE, index);
                 itemElement = this.createImageElement(violation, item, index, imageNumber);
-            } else if (item.type === 'freeText') {
-                const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'freeText', index);
+            } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
+                const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_FREE_TEXT, index);
                 itemElement = this.createFreeTextElement(violation, item, index, textNumber);
             }
 
@@ -102,7 +107,7 @@ Object.assign(ViolationManager.prototype, {
         let currentCaseNumber = 1;
 
         items.forEach((item, index) => {
-            if (item.type === 'case') {
+            if (item.type === CONTENT_TYPE_CASE) {
                 numbers[index] = currentCaseNumber;
                 currentCaseNumber++;
             } else {

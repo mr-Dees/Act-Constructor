@@ -6,6 +6,8 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { Notifications } from '../../shared/notifications.js';
 
 export class ViolationManager {
     constructor() {
@@ -26,6 +28,9 @@ export class ViolationManager {
         this.currentActiveContainer = null;
         // Позиция курсора для вставки (null означает конец списка)
         this.cursorInsertPosition = null;
+        // Unsubscribe ESC-хэндлера активной зоны в EscapeStack
+        // (push в _setActiveZone, снятие в _resetActiveZone/destroy).
+        this._escapeZoneUnsub = null;
     }
 
     /**
@@ -35,8 +40,37 @@ export class ViolationManager {
     initialize() {
         // Настраиваем глобальный обработчик вставки
         this.setupPasteHandler();
-        // Настраиваем обработчик ESC для сброса активной зоны
-        this.setupEscapeHandler();
+    }
+
+    /**
+     * Активирует зону вставки (мышь внутри контейнера дополнительного
+     * контента) и регистрирует сброс зоны по ESC через EscapeStack —
+     * вместо прежнего собственного document-listener'а в обход стека.
+     * Идемпотентен: повторная активация не плодит хэндлеры.
+     * @param {HTMLElement} container - Контейнер дополнительного контента
+     */
+    _setActiveZone(container) {
+        this.currentActiveContainer = container;
+        if (!this._escapeZoneUnsub) {
+            this._escapeZoneUnsub = EscapeStack.push(() => {
+                this._resetActiveZone();
+                Notifications.info('Активная зона сброшена');
+            });
+        }
+    }
+
+    /**
+     * Сбрасывает активную зону вставки и снимает ESC-хэндлер со стека.
+     * Идемпотентен.
+     */
+    _resetActiveZone() {
+        this.currentActiveContainer = null;
+        this.cursorInsertPosition = null;
+        if (this._escapeZoneUnsub) {
+            const unsub = this._escapeZoneUnsub;
+            this._escapeZoneUnsub = null;
+            unsub();
+        }
     }
 
     /**
@@ -62,8 +96,7 @@ export class ViolationManager {
         this.activeViolations.clear();
         this._fileDropControllers.forEach(controller => controller.abort());
         this._fileDropControllers.clear();
-        this.currentActiveContainer = null;
-        this.cursorInsertPosition = null;
+        this._resetActiveZone();
         this.selectedViolation = null;
         this.lastDragOverIndex = null;
     }
