@@ -30,7 +30,7 @@
     <!-- Инициализация actMetadata + window.__authReady.
          Конвертирована в ESM-модуль, чтобы импортировать AuthManager.
          Все init-обработчики await'ят window.__authReady перед getCurrentUser(). -->
-    <script type="module">
+    <script type="module" nonce="{{ request.state.csp_nonce }}">
         import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
 
         window.actMetadata = null;
