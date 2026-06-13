@@ -118,6 +118,31 @@ export class StorageManager {
     static _programmaticExit = false;
 
     /**
+     * Сохранённый обработчик document 'click' (перехват навигации по ссылкам).
+     * Храним, чтобы снять его в _teardownEventHandlers (pfe-10/12). null = не подписан.
+     * @private
+     * @type {Function|null}
+     */
+    static _navClickHandler = null;
+
+    /**
+     * Сохранённый обработчик window 'popstate' (перехват back/forward).
+     * Храним, чтобы снять его в _teardownEventHandlers (pfe-10/12). null = не подписан.
+     * @private
+     * @type {Function|null}
+     */
+    static _navPopstateHandler = null;
+
+    /**
+     * Lock «идёт сохранение снимка» (pfe-3). Взводится на время saveState и
+     * сбрасывается в finally. Не даёт периодическому и явному save пересечься
+     * на одном снимке (re-entrant вызов пропускается).
+     * @private
+     * @type {boolean}
+     */
+    static _saveInProgress = false;
+
+    /**
      * Инициализация менеджера хранилища
      *
      * НЕ восстанавливает состояние автоматически.
@@ -156,6 +181,11 @@ export class StorageManager {
      * @private
      */
     static _setupEventHandlers() {
+        // pfe-12: повторный init должен быть идемпотентным — гасим прежние
+        // интервалы и навигационные слушатели ДО создания новых, иначе
+        // накапливаются двойные таймеры и PUT-каналы.
+        this._teardownEventHandlers();
+
         // Предупреждение при попытке закрыть страницу с несохраненными данными.
         // Регистрируется через общий реестр beforeunload-обработчиков LifecycleHelper,
         // чтобы можно было централизованно снять обработчик при destroy/teardown.
@@ -293,8 +323,10 @@ export class StorageManager {
         // popstate-страж: при back/forward с unsynced правками показываем
         // кастомный confirm. Если юзер подтверждает уход — пускаем; иначе
         // pushState восстанавливает URL.
+        // Хендлеры храним в полях (стрелки сохраняют this=класс), чтобы снять
+        // их в _teardownEventHandlers (pfe-10/12).
         history.replaceState({_lockNavGuard: true}, '', window.location.href);
-        window.addEventListener('popstate', async (event) => {
+        this._navPopstateHandler = async (event) => {
             if (window._allowNavigation) return;
             if (!this.hasUnsyncedChanges()) return;
 
@@ -313,10 +345,11 @@ export class StorageManager {
                 window._allowNavigation = true;
                 history.back();
             }
-        });
+        };
+        window.addEventListener('popstate', this._navPopstateHandler);
 
         // Перехватываем клики по ссылкам
-        document.addEventListener('click', async (e) => {
+        this._navClickHandler = async (e) => {
             // Игнорируем если навигация разрешена
             if (window._allowNavigation) return;
 
@@ -370,7 +403,38 @@ export class StorageManager {
                 window._allowNavigation = true;
                 window.location.href = link.href;
             }
-        });
+        };
+        document.addEventListener('click', this._navClickHandler);
+    }
+
+    /**
+     * Снимает все слушатели и гасит таймеры StorageManager (pfe-10/12).
+     *
+     * Идемпотентно: безопасно вызывать повторно (поля занулены, unregister/
+     * removeEventListener — no-op для отсутствующих). Используется и при
+     * повторном init (_setupEventHandlers), и при destroy.
+     * @private
+     */
+    static _teardownEventHandlers() {
+        if (this._periodicSaveInterval) {
+            clearInterval(this._periodicSaveInterval);
+            this._periodicSaveInterval = null;
+        }
+        if (this._periodicDbSaveInterval) {
+            clearInterval(this._periodicDbSaveInterval);
+            this._periodicDbSaveInterval = null;
+        }
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.unregister('storage:unsaved-warning');
+        }
+        if (this._navPopstateHandler) {
+            window.removeEventListener('popstate', this._navPopstateHandler);
+            this._navPopstateHandler = null;
+        }
+        if (this._navClickHandler) {
+            document.removeEventListener('click', this._navClickHandler);
+            this._navClickHandler = null;
+        }
     }
 
     /**
@@ -485,6 +549,13 @@ export class StorageManager {
      * @returns {boolean} true если сохранение успешно (или сохранять нечего)
      */
     static saveState(silent = false) {
+        // pfe-3: re-entrancy guard. Если запись снимка уже идёт (периодический
+        // тик прилетел во время явного save или наоборот) — пропускаем повтор,
+        // чтобы два сохранения не пересеклись на одном снимке.
+        if (this._saveInProgress) {
+            return false;
+        }
+        this._saveInProgress = true;
         try {
             const actId = window.currentActId || null;
             if (!actId) {
@@ -538,6 +609,9 @@ export class StorageManager {
             }
 
             return false;
+        } finally {
+            // pfe-3: lock снимается всегда — даже при раннем return или ошибке.
+            this._saveInProgress = false;
         }
     }
 
@@ -869,7 +943,9 @@ export class StorageManager {
     }
 
     /**
-     * Очищает все таймеры при уничтожении
+     * Очищает все таймеры и снимает слушатели при уничтожении.
+     * pfe-10: помимо таймеров снимает beforeunload/click/popstate, иначе
+     * после destroy старые обработчики продолжали висеть на window/document.
      */
     static destroy() {
         if (this._saveTimeout) {
@@ -877,15 +953,8 @@ export class StorageManager {
             this._saveTimeout = null;
         }
 
-        if (this._periodicSaveInterval) {
-            clearInterval(this._periodicSaveInterval);
-            this._periodicSaveInterval = null;
-        }
-
-        if (this._periodicDbSaveInterval) {
-            clearInterval(this._periodicDbSaveInterval);
-            this._periodicDbSaveInterval = null;
-        }
+        // Гасит периодические интервалы + снимает beforeunload/click/popstate.
+        this._teardownEventHandlers();
 
         this._resetDbSaveFailureState();
     }
