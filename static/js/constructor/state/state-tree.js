@@ -10,7 +10,6 @@ import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { UndoDeleteManager } from './undo-delete.js';
 import { AppState, _unwrap } from './state-core.js';
-import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
@@ -910,9 +909,9 @@ Object.assign(AppState, {
             ChangelogTracker.record('tb_change', nodeId, node.label, {abbr, checked});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: узел получен через findNodeById
+        // (tracked-Proxy), мутации node.tb помечают dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer/ItemsRenderer) о per-node изменении.
         // ChatEventBus задействован как ad-hoc общий event-bus; optional chaining
@@ -951,9 +950,9 @@ Object.assign(AppState, {
             ChangelogTracker.record(action, nodeId, node.label, {});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: запись/удаление node.invoice идёт через
+        // tracked-Proxy (findNodeById) и помечает dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer) о per-node изменении фактуры.
         window.ChatEventBus?.emit?.('node:invoice-changed', {nodeId, attached: !!invoiceData});

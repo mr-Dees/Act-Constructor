@@ -95,6 +95,20 @@ export const ValidationTree = {
         const existsCheck = ValidationCore.validateNodeExists(node);
         if (!existsCheck.valid) return existsCheck;
 
+        // Проверка глубины (как в canAddChild). Контент-узлы (таблица/текстблок/
+        // нарушение) не создают нового уровня иерархии, поэтому порог — глубина
+        // самого узла > maxDepth (без +1). Узел вне дерева (depth -1) — отказ.
+        const depth = TreeUtils.getNodeDepth(node.id);
+        const maxDepth = AppConfig.tree.maxDepth;
+        if (depth === -1) {
+            return ValidationCore.failure(AppConfig.tree.validation.nodeNotFound);
+        }
+        if (depth > maxDepth) {
+            return ValidationCore.failure(
+                AppConfig.tree.validation.maxDepthExceeded(maxDepth)
+            );
+        }
+
         // Проверка типа узла
         const typeCheck = this._validateNodeType(node, contentType);
         if (!typeCheck.valid) return typeCheck;
