@@ -68,6 +68,9 @@ import '../constructor/state/state-content.js';
 import '../constructor/state/metrics-risk-coordinator.js';
 import '../constructor/state/undo-delete.js';
 
+// Clipboard (copy-paste узлов между актами и внутри акта)
+import '../constructor/clipboard/node-clipboard.js';
+
 // Tree
 import '../constructor/tree/tree-drag-drop.js';
 import '../constructor/tree/tree-renderer.js';
@@ -129,6 +132,7 @@ import { registerTablesSource } from '../constructor/header/notifications-source
 import { App } from '../constructor/app.js';
 import { _initStateTracking } from '../constructor/state/state-core.js';
 import { UndoDeleteManager } from '../constructor/state/undo-delete.js';
+import { NodeClipboard } from '../constructor/clipboard/node-clipboard.js';
 
 /**
  * Инициализирует shared-центр уведомлений в конструкторе и регистрирует
@@ -141,16 +145,19 @@ function _initNotificationCenter() {
     window.notificationCenter = center;
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        App.init();
-        setTimeout(_initStateTracking, 0);
-        _initNotificationCenter();
-        UndoDeleteManager.installHotkey();
-    });
-} else {
+function _bootstrap() {
     App.init();
     setTimeout(_initStateTracking, 0);
     _initNotificationCenter();
     UndoDeleteManager.installHotkey();
+    // Copy-paste: шорткаты Ctrl+C/Ctrl+V и пункты меню «Копировать»/«Вставить».
+    // installMenuItems — после App.init (там ContextMenuManager.init рендерит #contextMenu).
+    NodeClipboard.installHotkey();
+    NodeClipboard.installMenuItems();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bootstrap);
+} else {
+    _bootstrap();
 }
