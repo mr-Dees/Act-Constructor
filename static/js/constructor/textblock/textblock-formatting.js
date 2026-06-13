@@ -84,20 +84,23 @@ Object.assign(TextBlockManager.prototype, {
         // Ищем предыдущий span с форматированием
         while (prevNode) {
             if (prevNode.nodeType === 1 && prevNode.tagName === 'SPAN' && prevNode.style.length > 0) {
-                // Копируем стили от предыдущего элемента
-                const styles = window.getComputedStyle(prevNode);
+                // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
+                // computed: computed резолвит унаследованные/дефолтные значения
+                // (например fontWeight '400'), которые иначе жёстко прибились бы
+                // к маркеру как inline и раздули разметку.
+                const inline = prevNode.style;
 
-                if (styles.fontSize && !element.style.fontSize) {
-                    element.style.fontSize = styles.fontSize;
+                if (inline.fontSize && !element.style.fontSize) {
+                    element.style.fontSize = inline.fontSize;
                 }
-                if (styles.fontWeight && !element.style.fontWeight) {
-                    element.style.fontWeight = styles.fontWeight;
+                if (inline.fontWeight && !element.style.fontWeight) {
+                    element.style.fontWeight = inline.fontWeight;
                 }
-                if (styles.fontStyle && !element.style.fontStyle) {
-                    element.style.fontStyle = styles.fontStyle;
+                if (inline.fontStyle && !element.style.fontStyle) {
+                    element.style.fontStyle = inline.fontStyle;
                 }
-                if (styles.textDecoration && !element.style.textDecoration) {
-                    element.style.textDecoration = styles.textDecoration;
+                if (inline.textDecoration && !element.style.textDecoration) {
+                    element.style.textDecoration = inline.textDecoration;
                 }
 
                 break;

@@ -56,7 +56,14 @@ export class TableCellsOperations {
         cellEl.appendChild(textarea);
         textarea.focus();
 
+        let finished = false;
         const finishEditing = (cancel = false) => {
+            // Guard от повторного входа: установка cellEl.textContent ниже
+            // удаляет textarea из DOM и может повторно эмитнуть blur (→ второй
+            // finishEditing с уже пустым/изменённым значением). Завершаем ровно раз.
+            if (finished) return;
+            finished = true;
+
             if (cancel) {
                 cellEl.textContent = originalContent;
             } else {
@@ -170,6 +177,22 @@ export class TableCellsOperations {
     }
 
     /**
+     * tables-7: проверяет, что сетка прямоугольная (все строки одной ширины),
+     * прежде чем строить новый ряд по ширине grid[0]. На рваной сетке вставка
+     * молча создала бы ряд с несовместимым числом колонок (бэк ответит 422
+     * при сохранении) — отказываем с понятной ошибкой ДО мутации grid.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {boolean} true если вставка разрешена; false — показана ошибка
+     */
+    _checkGridColumnsConsistent(table) {
+        const numCols = table.grid[0].length;
+        if (table.grid.every(row => row.length === numCols)) return true;
+        Notifications.error('Структура таблицы повреждена: строки содержат разное число колонок. Вставка строки отменена.');
+        return false;
+    }
+
+    /**
      * Вставляет новую строку выше выбранной ячейки.
      * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
      */
@@ -185,6 +208,9 @@ export class TableCellsOperations {
 
         // Лимит размера таблицы (H8)
         if (!this._checkRowLimit(table)) return;
+
+        // Валидация числа колонок нового ряда (tables-7)
+        if (!this._checkGridColumnsConsistent(table)) return;
 
         // КРИТИЧЕСКАЯ ПРОВЕРКА: запрещаем вставку выше заголовка
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
@@ -273,6 +299,9 @@ export class TableCellsOperations {
 
         // Лимит размера таблицы (H8)
         if (!this._checkRowLimit(table)) return;
+
+        // Валидация числа колонок нового ряда (tables-7)
+        if (!this._checkGridColumnsConsistent(table)) return;
 
         let insertRowIndex = rowIndex + 1;
         for (let c = 0; c < table.grid[rowIndex].length; c++) {

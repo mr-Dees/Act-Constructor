@@ -156,11 +156,21 @@ Object.assign(TextBlockManager.prototype, {
                 }
             });
 
+            // Запоминаем font[size="7"], уже существовавшие ДО операции (юзер
+            // мог раньше явно выставить word-размер 7) — execCommand добавит
+            // новые такие теги только для текущего выделения. Преобразуем только
+            // их, чужие не трогаем.
+            const preExistingFont7 = new Set(
+                this.activeEditor.querySelectorAll('font[size="7"]')
+            );
+
             // Применяем к обычному тексту через execCommand
             this.execCommand('fontSize', '7');
 
-            // Заменяем font tags на span с точным размером, сохраняя выделение
-            const fontTags = [...this.activeEditor.querySelectorAll('font[size="7"]')];
+            // Заменяем font tags на span с точным размером, сохраняя выделение.
+            // Берём только теги, созданные текущим execCommand (не пред-существующие).
+            const fontTags = [...this.activeEditor.querySelectorAll('font[size="7"]')]
+                .filter(font => !preExistingFont7.has(font));
             const newSpans = [];
             fontTags.forEach(font => {
                 const span = document.createElement('span');
