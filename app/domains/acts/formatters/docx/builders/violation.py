@@ -11,9 +11,10 @@
 - картинки (data:image-URL) встраиваются inline shape'ом: отдельный абзац
   по центру, подпись курсивом по центру ниже (Б-1.5). Ширина — поле
   `width` (% полезной ширины страницы); 0/не задана — натуральный размер,
-  но не шире полезной ширины (Б-1.4). Битый/пустой url или формат,
-  который python-docx не умеет (webp), → текстовый плейсхолдер
-  «Изображение: {filename}» (паритет с MD/TXT).
+  но не шире полезной ширины (Б-1.4). Допустимые форматы — png/jpeg/gif
+  (whitelist IMAGE_DATA_URL_PATTERN из act_content, тот же, что и у валидатора
+  url). Битый/пустой url или формат вне whitelist (webp/svg) → текстовый
+  плейсхолдер «Изображение: {filename}» (паритет с MD/TXT).
 """
 import base64
 import binascii
@@ -26,6 +27,7 @@ from docx.shared import Pt, Twips
 
 from app.domains.acts.formatters.docx.styles import Fonts, Margins, Page, Sizes
 from app.domains.acts.schemas.act_content import (
+    IMAGE_DATA_URL_PATTERN,
     ViolationContentItemSchema,
     ViolationSchema,
 )
@@ -33,9 +35,13 @@ from app.domains.acts.schemas.act_content import (
 # Полезная ширина страницы (A4 минус поля) в твипах — потолок ширины картинок.
 _USABLE_WIDTH_TWIPS = Page.width_twips - Margins.left - Margins.right
 
-# data:image-URL: формат уже отвалидирован схемой (png/jpeg/gif/webp, base64),
-# здесь только выделяем base64-payload.
-_DATA_URL_RE = re.compile(r"^data:image/[a-z.+-]+;base64,(?P<payload>.+)$", re.IGNORECASE | re.DOTALL)
+# data:image-URL: формат уже отвалидирован схемой (png/jpeg/gif, base64) — тем же
+# IMAGE_DATA_URL_PATTERN, что и валидатор url. Здесь только довешиваем выделение
+# base64-payload. Единый источник whitelist'а форматов — паттерн из act_content.
+_DATA_URL_RE = re.compile(
+    "^" + IMAGE_DATA_URL_PATTERN + r"(?P<payload>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def build_violation(doc: Document, violation: ViolationSchema) -> None:
@@ -95,7 +101,7 @@ def _add_image(doc: Document, item: ViolationContentItemSchema) -> None:
         try:
             shape = run.add_picture(io.BytesIO(data))
         except Exception:
-            # Байты не распознаны как картинка (обрезанный файл, webp и т.п.) —
+            # Байты не распознаны как картинка (обрезанный файл и т.п.) —
             # убираем пустой абзац и откатываемся к плейсхолдеру. Экспорт не
             # должен падать из-за одной битой картинки.
             para._p.getparent().remove(para._p)

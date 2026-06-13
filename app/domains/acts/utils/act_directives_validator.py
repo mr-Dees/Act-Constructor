@@ -5,6 +5,7 @@
 import logging
 from typing import Iterable
 
+from app.domains.acts.block_types import LEAF_BLOCK_TYPES
 from app.domains.acts.schemas.act_metadata import ActDirective
 
 logger = logging.getLogger("audit_workstation.domains.acts.utils.validator")
@@ -79,7 +80,7 @@ class ActDirectivesValidator:
 
         def _walk(node: dict) -> None:
             node_type = node.get('type', 'item')
-            if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+            if node_type == 'item' or node_type not in LEAF_BLOCK_TYPES:
                 audit_point_id = node.get('auditPointId')
                 if audit_point_id:
                     result[node.get('id')] = audit_point_id

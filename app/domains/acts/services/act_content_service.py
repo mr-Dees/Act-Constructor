@@ -107,6 +107,11 @@ class ActContentService:
         # перед записью в БД. Whitelist в utils/html_sanitizer.py.
         self._sanitize_html_fields(data)
 
+        # Мягкая чистка рассогласования дерево ↔ словари (решение «lenient»,
+        # обе стороны). Висячие ссылки узлов снимаются ДО diff/сохранения —
+        # сохраняемое дерево не должно ссылаться на отсутствующую запись.
+        stripped_refs = self._strip_dangling_refs(data)
+
         async with self.conn.transaction():
             # Вычисляем diff ДО сохранения
             diff = await self._audit.compute_content_diff(act_id, data)
@@ -123,7 +128,8 @@ class ActContentService:
             if field_changes:
                 diff["field_changes"] = field_changes
 
-            # Сохраняем содержимое
+            # Сохраняем содержимое; репозиторий возвращает число записей
+            # словарей, отброшенных orphan-фильтром (нет узла-владельца).
             result = await self._content.save_content(act_id, data, username)
 
             # Записываем в аудит-лог
@@ -142,7 +148,57 @@ class ActContentService:
                     max_versions=self.acts_settings.audit_log.max_content_versions,
                 )
 
+        # Одно предупреждение, если что-то вычищено в любую из сторон:
+        # stripped_refs — снятые висячие ссылки узлов, dropped_orphans —
+        # записи словарей без узла-владельца. null, если чистить было нечего.
+        dropped_orphans = result.pop("dropped_orphans", 0)
+        result["warning"] = self._build_cleanup_warning(stripped_refs, dropped_orphans)
+
         return result
+
+    def _strip_dangling_refs(self, data: ActDataSchema) -> int:
+        """Снимает с узлов дерева висячие ссылки на отсутствующие записи словарей.
+
+        Узел, ссылающийся (tableId/textBlockId/violationId) на запись, которой
+        нет в соответствующем словаре, лишается этого поля-ссылки — так
+        сохраняемое дерево не ссылается на потерянный контент. Возвращает число
+        снятых ссылок (для warning'а пользователю).
+        """
+        dangling = data.collect_dangling_refs()
+        if not dangling:
+            return 0
+
+        # Группируем по (node_id, ref_field) → набор «висячих» значений ссылок.
+        to_strip: dict[tuple[str | None, str], set[str]] = {}
+        for node_id, ref_field, ref in dangling:
+            to_strip.setdefault((node_id, ref_field), set()).add(ref)
+
+        stripped = 0
+        stack = [data.tree] if data.tree else []
+        while stack:
+            node = stack.pop()
+            node_id = node.get("id")
+            for (target_id, ref_field), refs in to_strip.items():
+                if node_id == target_id and node.get(ref_field) in refs:
+                    node.pop(ref_field, None)
+                    stripped += 1
+            stack.extend(node.get("children") or [])
+        return stripped
+
+    @staticmethod
+    def _build_cleanup_warning(stripped_refs: int, dropped_orphans: int) -> str | None:
+        """Собирает одно русскоязычное предупреждение о вычищенных рассогласованиях.
+
+        null, если ничего не чистилось. Нулевую половину опускаем.
+        """
+        if not stripped_refs and not dropped_orphans:
+            return None
+        parts: list[str] = []
+        if stripped_refs:
+            parts.append(f"висячих ссылок: {stripped_refs}")
+        if dropped_orphans:
+            parts.append(f"записей без узла: {dropped_orphans}")
+        return "Очищено рассогласование дерево ↔ словари (" + ", ".join(parts) + ")"
 
     def _sanitize_html_fields(self, data: ActDataSchema) -> None:
         """

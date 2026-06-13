@@ -5,6 +5,7 @@ from docx.shared import Emu, Twips
 
 from app.domains.acts.formatters.docx.builders.violation import (
     _USABLE_WIDTH_TWIPS,
+    _decode_data_url,
     _scale_picture,
     build_violation,
 )
@@ -160,6 +161,24 @@ def test_undecodable_image_bytes_render_placeholder(doc):
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "Изображение: screen.png" in text
     assert len(doc.inline_shapes) == 0
+
+
+# --- Whitelist форматов builder'а = whitelist схемы (единый IMAGE_DATA_URL_PATTERN) ---
+
+def test_decode_rejects_webp_and_svg():
+    """Builder отбрасывает форматы вне whitelist (webp/svg) — единый источник
+    с валидатором url схемы (IMAGE_DATA_URL_PATTERN)."""
+    # Валидный base64-payload (PNG), но MIME вне whitelist → None (плейсхолдер).
+    assert _decode_data_url(f"data:image/webp;base64,{_PNG_1PX_B64}") is None
+    assert _decode_data_url(f"data:image/svg+xml;base64,{_PNG_1PX_B64}") is None
+
+
+def test_decode_accepts_png_jpeg_gif():
+    """Builder принимает png/jpeg/gif и возвращает декодированные байты."""
+    for subtype in ("png", "jpeg", "jpg", "gif"):
+        data = _decode_data_url(f"data:image/{subtype};base64,{_PNG_1PX_B64}")
+        assert data is not None, f"формат {subtype} должен приниматься builder'ом"
+        assert isinstance(data, bytes)
 
 
 def test_image_width_50_percent_is_half_usable_width(doc):

@@ -2,6 +2,8 @@
 Утилиты обхода дерева структуры акта.
 """
 
+from app.domains.acts.block_types import LEAF_BLOCK_TYPES
+
 
 class ActTreeUtils:
     """Stateless-утилиты для итеративного обхода дерева акта."""
@@ -49,14 +51,14 @@ class ActTreeUtils:
             node_type = node.get('type', 'item')
 
             # Обновляем parent_item_id если текущий узел — item
-            if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+            if node_type == 'item' or node_type not in LEAF_BLOCK_TYPES:
                 current_item_id = node.get('id')
             else:
                 current_item_id = p_item_id
 
             if node.get('id') == target_node_id:
                 # Если это content-узел — возвращаем parent_item_id
-                if node_type in ('table', 'textblock', 'violation'):
+                if node_type in LEAF_BLOCK_TYPES:
                     return p_item_id
                 # Если это item-узел — возвращаем его собственный id
                 return node.get('id')

@@ -301,9 +301,18 @@ class TestSaveActContent:
         assert resp.status_code == 422
         svc.save_content.assert_not_awaited()
 
-    def test_save_content_dangling_tree_ref_returns_422(self):
-        """M.13: узел дерева ссылается на отсутствующую таблицу → 422."""
+    def test_save_content_dangling_tree_ref_accepted_with_warning(self):
+        """M.13 (решение «lenient», findings 3+8): висячая ссылка узла больше
+        НЕ отбивает PUT 422 на разборе — запрос принимается, сервис вызывается,
+        а вычистку и warning делает ActContentService (см. service-level тесты).
+        Здесь проверяется только то, что API пропускает такой payload и
+        прокидывает поле warning ответа."""
         svc = _make_content_service()
+        svc.save_content.return_value = {
+            "status": "success",
+            "message": "Содержимое сохранено",
+            "warning": "Очищено рассогласование дерево ↔ словари (висячих ссылок: 1)",
+        }
         app = _build_app(content_service=svc)
 
         payload = _valid_save_payload()
@@ -311,14 +320,14 @@ class TestSaveActContent:
             {"id": "n1", "label": "Таблица", "type": "table",
              "tableId": "t_ghost", "children": []},
         ]
-        # tables пуст — ссылка висячая
+        # tables пуст — ссылка висячая, но запрос больше не отбивается 422
 
         with TestClient(app) as client:
             resp = client.put("/api/v1/acts/42/content", json=payload)
 
-        assert resp.status_code == 422
-        assert "t_ghost" in resp.text
-        svc.save_content.assert_not_awaited()
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["warning"]
+        svc.save_content.assert_awaited_once()
 
     def test_save_content_business_validation_error_returns_400(self):
         """ActValidationError из сервиса (например, глубина дерева) → 400."""

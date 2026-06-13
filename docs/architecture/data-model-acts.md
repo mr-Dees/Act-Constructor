@@ -51,9 +51,10 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 
 **Ссылочная целостность (на app-уровне).** Жёсткой FK между узлами и `act_tables`/`act_textblocks`/`act_violations` нет (всё перезаписывается одной транзакцией). Связь идёт по `id` контейнера и `nodeId` узла:
 
-- Узел `type=table` имеет `tableId`, соответствующая запись в `tables[tableId]` обязательна (кросс-валидатор `ActDataSchema` отклоняет висячую ссылку 422), `tables[tableId].nodeId === node.id`.
+- Узел `type=table` имеет `tableId`, ожидается запись в `tables[tableId]`, `tables[tableId].nodeId === node.id`. **Рассогласование лечится мягко в обе стороны, без 422** (решение «lenient», findings 3+8): висячая ссылка узла (запись словаря отсутствует) автоматически снимается с узла при сохранении — `ActDataSchema.collect_dangling_refs()` собирает такие ссылки, `ActContentService.save_content` удаляет поле-ссылку из дерева перед записью.
 - Аналогично для `type=textblock` (`textBlockId` ↔ `textBlocks[id]`) и `type=violation` (`violationId` ↔ `violations[id]`).
-- Записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя в БД не попадают: orphan-фильтр репозитория отбрасывает их при сохранении (с warning-логом) для всех трёх словарей. Фронт дополнительно чистит сирот при удалении узлов (`_deleteNodeData` в `state-tree.js`).
+- Обратная сторона: записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя в БД не попадают — orphan-фильтр репозитория отбрасывает их при сохранении (с warning-логом) для всех трёх словарей. Фронт дополнительно чистит сирот при удалении узлов (`_deleteNodeData` в `state-tree.js`).
+- Когда при сохранении что-то вычищено (снятые висячие ссылки и/или отброшенные сироты), ответ `PUT /content` несёт одно русскоязычное предупреждение в поле `warning` (`SaveContentResponse.warning`, `str | null`; фронт читает `result.warning`); `status` остаётся `success`. Нулевая половина в тексте опускается, `null` — если чистить было нечего.
 - `invoiceNodeIds` — плоский список ID узлов, у которых на фронте проставлено `node.invoice`. По нему бэк синхронизирует `act_invoices`: всё, чего нет в списке, удаляется (`act_content.py:396-433`).
 
 ---

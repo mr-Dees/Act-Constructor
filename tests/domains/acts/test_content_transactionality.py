@@ -245,6 +245,85 @@ class TestRestoreVersionSingleTransaction:
         assert call_log[-1] == "tx:exit:rollback"
 
 
+class TestSaveContentDanglingRefCleanup:
+    """save_content мягко чистит рассогласование дерево ↔ словари (findings 3+8).
+
+    Висячая ссылка узла не отбивает PUT 422: сервис снимает поле-ссылку с узла,
+    сохранение успешно, в ответе непустой warning. Сохраняемое дерево больше
+    не ссылается на отсутствующую запись.
+    """
+
+    @staticmethod
+    def _data_with_dangling_table_ref() -> ActDataSchema:
+        return ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "n1", "label": "Таблица", "type": "table",
+                     "tableId": "t_ghost", "children": []},
+                ],
+            },
+            saveType="auto",
+        )
+
+    async def test_dangling_ref_stripped_and_warning_returned(self):
+        call_log: list[str] = []
+        svc, conn, tx = _make_content_service(call_log)
+
+        saved: dict = {}
+
+        async def _save_content(act_id, data, username):
+            # Запоминаем дерево в момент сохранения — ссылка уже должна быть снята.
+            saved["tree"] = data.tree
+            return {"status": "success", "message": "ok", "dropped_orphans": 0}
+
+        svc._content.save_content = AsyncMock(side_effect=_save_content)
+
+        data = self._data_with_dangling_table_ref()
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+
+        # Сохранение успешно, не 422.
+        assert result["status"] == "success"
+        # Висячая ссылка вычищена из сохранённого дерева.
+        assert "tableId" not in saved["tree"]["children"][0]
+        # Пользователь предупреждён одной строкой про висячую ссылку.
+        assert result["warning"] is not None
+        assert "висячих ссылок: 1" in result["warning"]
+
+    async def test_no_cleanup_yields_null_warning(self):
+        """Когда чистить нечего — warning равен None."""
+        call_log: list[str] = []
+        svc, conn, tx = _make_content_service(call_log)
+
+        async def _save_content(act_id, data, username):
+            return {"status": "success", "message": "ok", "dropped_orphans": 0}
+
+        svc._content.save_content = AsyncMock(side_effect=_save_content)
+
+        result = await svc.save_content(
+            act_id=1, data=_make_data("auto"), username="12345",
+        )
+        assert result["warning"] is None
+
+    async def test_orphan_dict_drop_surfaced_in_warning(self):
+        """Сироты словарей (от репозитория) попадают в warning половиной 'записей без узла'."""
+        call_log: list[str] = []
+        svc, conn, tx = _make_content_service(call_log)
+
+        async def _save_content(act_id, data, username):
+            return {"status": "success", "message": "ok", "dropped_orphans": 2}
+
+        svc._content.save_content = AsyncMock(side_effect=_save_content)
+
+        result = await svc.save_content(
+            act_id=1, data=_make_data("auto"), username="12345",
+        )
+        assert result["warning"] is not None
+        assert "записей без узла: 2" in result["warning"]
+        # Висячих ссылок не было — эта половина опущена.
+        assert "висячих ссылок" not in result["warning"]
+
+
 class TestCreateVersionPropagatesErrors:
     """create_version пробрасывает ошибки БД (без глотания).
 

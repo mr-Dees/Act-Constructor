@@ -15,6 +15,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.acts.block_types import LEAF_BLOCK_TYPES
 from app.domains.acts.utils import ActDirectivesValidator, ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema
 
@@ -94,9 +95,15 @@ class ActContentRepository(BaseRepository):
         node_map = self._build_node_map(data.tree)
 
         await self._save_tree(act_id, data.tree)
-        await self._save_tables(act_id, audit_act_id, data, audit_point_map, node_map)
-        await self._save_textblocks(act_id, audit_act_id, data, audit_point_map, node_map)
-        await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
+        dropped_tables = await self._save_tables(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
+        dropped_textblocks = await self._save_textblocks(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
+        dropped_violations = await self._save_violations(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
         await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
         await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
         updated_at = await self._update_edit_timestamp(act_id, username)
@@ -106,10 +113,14 @@ class ActContentRepository(BaseRepository):
         # updated_at отдаётся фронту: он запоминает его как базу метаданных
         # снимка-черновика localStorage (baseUpdatedAt) для решения о
         # восстановлении черновика при следующей загрузке акта.
+        # dropped_orphans — суммарное число записей словарей, отброшенных
+        # orphan-фильтром (нет узла-владельца в дереве); сервис включает его
+        # в warning пользователю.
         return {
             "status": "success",
             "message": "Содержимое акта сохранено",
             "updated_at": updated_at,
+            "dropped_orphans": dropped_tables + dropped_textblocks + dropped_violations,
         }
 
     # -------------------------------------------------------------------------
@@ -221,14 +232,14 @@ class ActContentRepository(BaseRepository):
             node_type = node.get("type", "item")
 
             # Определяем current_item_id по логике find_parent_item_node_id
-            if node_type == "item" or node_type not in ("table", "textblock", "violation"):
+            if node_type == "item" or node_type not in LEAF_BLOCK_TYPES:
                 current_item_id = node_id
             else:
                 current_item_id = parent_item_id
 
             # Для content-узлов parent_item_node_id = parent_item_id,
             # для item-узлов = собственный id
-            if node_type in ("table", "textblock", "violation"):
+            if node_type in LEAF_BLOCK_TYPES:
                 resolved_parent = parent_item_id
             else:
                 resolved_parent = node_id
@@ -261,8 +272,13 @@ class ActContentRepository(BaseRepository):
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт таблицы акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт таблицы акта (batch INSERT через executemany).
+
+        Returns:
+            Число таблиц-сирот (nodeId отсутствует в дереве), отброшенных
+            orphan-фильтром — сервис агрегирует это в warning пользователю.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.tables} WHERE act_id = $1",
             act_id
@@ -319,12 +335,18 @@ class ActContentRepository(BaseRepository):
                 args,
             )
 
+        return dropped
+
     async def _save_textblocks(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт текстовые блоки акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт текстовые блоки акта (batch INSERT через executemany).
+
+        Returns:
+            Число текстблоков-сирот, отброшенных orphan-фильтром.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.textblocks} WHERE act_id = $1",
             act_id
@@ -372,12 +394,18 @@ class ActContentRepository(BaseRepository):
                 args,
             )
 
+        return dropped
+
     async def _save_violations(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт нарушения акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт нарушения акта (batch INSERT через executemany).
+
+        Returns:
+            Число нарушений-сирот, отброшенных orphan-фильтром.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.violations} WHERE act_id = $1",
             act_id
@@ -432,6 +460,8 @@ class ActContentRepository(BaseRepository):
                 """,
                 args,
             )
+
+        return dropped
 
     async def _sync_invoices(
         self, act_id: int, audit_act_id: str | None,

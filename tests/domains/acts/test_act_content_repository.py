@@ -283,7 +283,7 @@ class TestSaveTablesOrphanFilter:
         orphan.kind = "regular"
 
         data = _make_act_data(tables={"orphan_tbl": orphan})
-        await repo.save_content(act_id=1, data=data, username="user1")
+        result = await repo.save_content(act_id=1, data=data, username="user1")
 
         # Orphan не должен вставляться — executemany для таблиц не вызывается
         # (нет валидных таблиц).
@@ -291,6 +291,8 @@ class TestSaveTablesOrphanFilter:
             sql = c.args[0]
             if "act_tables" in sql:
                 pytest.fail("orphan-таблица попала в INSERT act_tables")
+        # Репозиторий возвращает число отброшенных сирот (для warning'а сервиса).
+        assert result["dropped_orphans"] == 1
 
     async def test_valid_table_inserted(self, mock_conn):
         """Таблица с nodeId, присутствующим в дереве, вставляется."""
@@ -313,13 +315,15 @@ class TestSaveTablesOrphanFilter:
             "children": [{"id": "node_1", "label": "Таблица", "type": "table",
                           "tableId": "valid_tbl", "children": []}],
         }
-        await repo.save_content(act_id=1, data=data, username="user1")
+        result = await repo.save_content(act_id=1, data=data, username="user1")
 
         table_inserts = [
             c for c in mock_conn.executemany.call_args_list
             if "act_tables" in c.args[0]
         ]
         assert table_inserts, "валидная таблица не вставлена"
+        # Сирот нет — счётчик нулевой.
+        assert result["dropped_orphans"] == 0
 
 
 def _make_textblock(node_id: str) -> MagicMock:
@@ -368,11 +372,12 @@ class TestSaveTextblocksViolationsOrphanFilter:
         mock_conn.fetch.return_value = []
 
         data = _make_act_data(textblocks={"tb_ghost": _make_textblock("ghost")})
-        await repo.save_content(act_id=1, data=data, username="user1")
+        result = await repo.save_content(act_id=1, data=data, username="user1")
 
         for c in mock_conn.executemany.call_args_list:
             if "act_textblocks" in c.args[0]:
                 pytest.fail("orphan-текстблок попал в INSERT act_textblocks")
+        assert result["dropped_orphans"] == 1
 
     async def test_orphan_violation_not_inserted(self, mock_conn):
         """Нарушение с nodeId не из дерева не попадает в INSERT."""
@@ -381,11 +386,12 @@ class TestSaveTextblocksViolationsOrphanFilter:
         mock_conn.fetch.return_value = []
 
         data = _make_act_data(violations={"v_ghost": _make_violation("ghost")})
-        await repo.save_content(act_id=1, data=data, username="user1")
+        result = await repo.save_content(act_id=1, data=data, username="user1")
 
         for c in mock_conn.executemany.call_args_list:
             if "act_violations" in c.args[0]:
                 pytest.fail("orphan-нарушение попало в INSERT act_violations")
+        assert result["dropped_orphans"] == 1
 
     async def test_valid_textblock_and_violation_inserted(self, mock_conn):
         """Записи с узлом-владельцем в дереве сохраняются (фильтр не сверх-агрессивен)."""

@@ -577,7 +577,13 @@ class TestTreeNormalization:
 
 
 class TestTreeDictCrossValidation:
-    """Висячая ссылка из дерева на отсутствующую запись словаря → 422."""
+    """Висячая ссылка дерево → словари НЕ отбивает PUT 422 (решение «lenient»).
+
+    Разбор запроса больше не бросает: collect_dangling_refs ВОЗВРАЩАЕТ висячие
+    ссылки, а сервис (ActContentService.save_content) их вычищает и
+    предупреждает пользователя одним warning'ом. Обе стороны рассогласования
+    (висячая ссылка узла и запись словаря без узла) лечатся мягко.
+    """
 
     @staticmethod
     def _tree_with_ref(ref_field: str, ref_value: str, node_type: str) -> dict:
@@ -589,28 +595,32 @@ class TestTreeDictCrossValidation:
             ],
         }
 
-    def test_dangling_table_ref_rejected(self):
-        with pytest.raises(ValidationError, match="несуществующую таблицу"):
-            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+    def test_dangling_table_ref_collected_not_raised(self):
+        """Висячая ссылка на таблицу не роняет разбор, попадает в список."""
+        d = ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+        assert d.collect_dangling_refs() == [("n1", "tableId", "t_ghost")]
 
-    def test_dangling_textblock_ref_rejected(self):
-        with pytest.raises(ValidationError, match="несуществующий текстовый блок"):
-            ActDataSchema(
-                tree=self._tree_with_ref("textBlockId", "tb_ghost", "textblock"),
-            )
+    def test_dangling_textblock_ref_collected_not_raised(self):
+        d = ActDataSchema(
+            tree=self._tree_with_ref("textBlockId", "tb_ghost", "textblock"),
+        )
+        assert d.collect_dangling_refs() == [("n1", "textBlockId", "tb_ghost")]
 
-    def test_dangling_violation_ref_rejected(self):
-        with pytest.raises(ValidationError, match="несуществующее нарушение"):
-            ActDataSchema(
-                tree=self._tree_with_ref("violationId", "v_ghost", "violation"),
-            )
+    def test_dangling_violation_ref_collected_not_raised(self):
+        d = ActDataSchema(
+            tree=self._tree_with_ref("violationId", "v_ghost", "violation"),
+        )
+        assert d.collect_dangling_refs() == [("n1", "violationId", "v_ghost")]
 
-    def test_error_message_names_node_and_target(self):
-        """Сообщение называет и узел, и недостающую запись."""
-        with pytest.raises(ValidationError, match=r"n1.+t_ghost"):
-            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+    def test_collect_returns_node_id_field_and_ref(self):
+        """Кортеж висячей ссылки несёт id узла, поле-ссылку и значение."""
+        d = ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+        node_id, ref_field, ref = d.collect_dangling_refs()[0]
+        assert node_id == "n1"
+        assert ref_field == "tableId"
+        assert ref == "t_ghost"
 
-    def test_valid_refs_pass(self):
+    def test_valid_refs_have_no_dangling(self):
         d = ActDataSchema(
             tree={
                 "id": "root", "label": "Акт",
@@ -625,21 +635,24 @@ class TestTreeDictCrossValidation:
             textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="n2")},
         )
         assert d.tree["children"][0]["tableId"] == "t1"
+        assert d.collect_dangling_refs() == []
 
     def test_orphan_dict_entry_allowed(self):
         """Обратное направление — запись словаря без узла — НЕ ошибка.
 
         Такие записи отбрасывает orphan-фильтр репозитория при сохранении
-        (pbe-4); отклонять весь PUT из-за них нельзя.
+        (pbe-4); отклонять весь PUT из-за них нельзя. Висячих ссылок дерева
+        здесь нет — collect_dangling_refs пуст.
         """
         d = ActDataSchema(
             tree={"id": "root", "label": "Акт", "children": []},
             tables={"t_orphan": TableSchema(id="t_orphan", nodeId="ghost")},
         )
         assert "t_orphan" in d.tables
+        assert d.collect_dangling_refs() == []
 
-    def test_dangling_ref_in_nested_node_rejected(self):
-        """Валидатор обходит дерево рекурсивно, а не только верхний уровень."""
+    def test_dangling_ref_in_nested_node_collected(self):
+        """Обход рекурсивен: висячая ссылка вложенного узла тоже собирается."""
         tree = {
             "id": "root", "label": "Акт",
             "children": [
@@ -649,8 +662,8 @@ class TestTreeDictCrossValidation:
                 ]},
             ],
         }
-        with pytest.raises(ValidationError, match="v_missing"):
-            ActDataSchema(tree=tree)
+        d = ActDataSchema(tree=tree)
+        assert ("n9", "violationId", "v_missing") in d.collect_dangling_refs()
 
 
 # ── MetricItem ──

@@ -10,12 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.domains.acts.block_types import (
-    LEAF_BLOCK_REFS,
-    NODE_TYPE_TABLE,
-    NODE_TYPE_TEXTBLOCK,
-    NODE_TYPE_VIOLATION,
-)
+from app.domains.acts.block_types import LEAF_BLOCK_REFS
 
 # Жёсткие границы таблиц и шрифта текстблоков — единый источник для
 # Field-констрейнтов схем ниже и эндпоинта GET /acts/limits (api/limits.py).
@@ -37,7 +32,14 @@ VIOLATION_CONTENT_ITEMS_MAX = 50
 # без webp — python-docx не встраивает его в DOCX, превью и экспорт должны совпадать).
 # Согласован с ACTS__IMAGES__ALLOWED_MIME_TYPES (пин — тест
 # test_mime_whitelist_matches_schema_url_whitelist).
-_IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif);base64,")
+#
+# IMAGE_DATA_URL_PATTERN — единый источник формата data:image-URL для всего
+# бэка: схема компилирует его в _IMAGE_DATA_URL_RE, а DOCX-builder нарушений
+# (formatters/docx/builders/violation.py) импортирует паттерн напрямую и
+# строит из него свою regex выделения payload — чтобы whitelist форматов
+# (png/jpeg/gif) был в ОДНОМ месте и не разъезжался между валидацией и сборкой.
+IMAGE_DATA_URL_PATTERN = r"data:image/(?:png|jpe?g|gif);base64,"
+_IMAGE_DATA_URL_RE = re.compile("^" + IMAGE_DATA_URL_PATTERN)
 
 # Подвиды таблиц (enum kind). 'regular' — обычная таблица (дефолт/отсутствие
 # подвида). Единый источник значений на бэке; СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с
@@ -581,47 +583,42 @@ class ActDataSchema(BaseModel):
         """
         return ActItemSchema.model_validate(v).model_dump()
 
-    @model_validator(mode="after")
-    def validate_tree_dict_refs(self) -> "ActDataSchema":
+    def collect_dangling_refs(self) -> list[tuple[str | None, str, str]]:
         """
-        Кросс-валидатор дерево ↔ словари (M.13).
+        Собирает висячие ссылки дерево → словари (M.13, решение «lenient»).
 
-        Каждая ссылка узла (tableId/textBlockId/violationId) обязана указывать
-        на существующую запись словаря — висячая ссылка означает потерянный
-        контент и отбивается 422 с указанием узла и недостающей записи.
+        Каждая ссылка узла (tableId/textBlockId/violationId) должна указывать на
+        существующую запись словаря. Раньше первая висячая ссылка отбивала весь
+        PUT 422 на разборе запроса; теперь обе стороны рассогласования лечатся
+        мягко: сервис (ActContentService.save_content) вызывает этот метод,
+        снимает с узлов «висячие» поля-ссылки и предупреждает пользователя одним
+        warning'ом. Поэтому метод НЕ бросает, а ВОЗВРАЩАЕТ список нарушений.
 
-        Обратное направление НЕ проверяется: запись словаря без узла в дереве —
-        не ошибка запроса, такие сироты отбрасывает orphan-фильтр репозитория
-        при сохранении (pbe-4).
+        Обратное направление (запись словаря без узла) здесь не собирается —
+        его лечит orphan-фильтр репозитория при сохранении (pbe-4).
 
         Состав проверяемых ссылок строится из реестра LEAF_BLOCK_REFS
         (block_types.py): новый leaf-тип без словаря в схеме упадёт здесь
         AttributeError'ом на старте, а не потеряет ссылки молча.
+
+        Returns:
+            Список кортежей (node_id, ref_field, ref): для каждого узла, чья
+            ссылка ref_field указывает на отсутствующую запись словаря.
         """
-        target_names = {
-            NODE_TYPE_TABLE: "несуществующую таблицу",
-            NODE_TYPE_TEXTBLOCK: "несуществующий текстовый блок",
-            NODE_TYPE_VIOLATION: "несуществующее нарушение",
-        }
         ref_checks = tuple(
-            (
-                ref_field,
-                getattr(self, dict_name),
-                target_names.get(block_type, "несуществующую запись словаря"),
-            )
-            for block_type, (ref_field, dict_name) in LEAF_BLOCK_REFS.items()
+            (ref_field, getattr(self, dict_name))
+            for _block_type, (ref_field, dict_name) in LEAF_BLOCK_REFS.items()
         )
+        dangling: list[tuple[str | None, str, str]] = []
         stack = [self.tree] if self.tree else []
         while stack:
             node = stack.pop()
-            for ref_field, registry, target_name in ref_checks:
+            for ref_field, registry in ref_checks:
                 ref = node.get(ref_field)
                 if ref and ref not in registry:
-                    raise ValueError(
-                        f"Узел {node.get('id')} ссылается на {target_name} {ref}"
-                    )
+                    dangling.append((node.get("id"), ref_field, ref))
             stack.extend(node.get("children") or [])
-        return self
+        return dangling
 
 
 class ActSaveResponse(BaseModel):
