@@ -330,58 +330,106 @@ export class APIClient {
     }
 
     /**
-     * Загружает содержимое акта из БД
+     * Загружает содержимое акта из БД (фасад).
+     *
+     * Разделён на две фазы: _fetchActContent (только сеть) и _applyActContent
+     * (применение к состоянию, включая диалог восстановления черновика).
+     * Вызывающие, которым нужно вклинить захват лока МЕЖДУ сетью и применением
+     * (acts-menu::_autoLoadAct, §3.4), дёргают фазы по отдельности. Прочие
+     * вызывающие (переключение акта, обновление метаданных), где лок уже
+     * захвачен, используют этот фасад — поведение для них не меняется.
      *
      * @param {number} actId - ID акта
      * @returns {Promise<void>}
      * @throws {Error} При ошибке доступа или загрузки
      */
     static async loadActContent(actId) {
+        const content = await this._fetchActContent(actId);
+        await this._applyActContent(actId, content);
+    }
+
+    /**
+     * Сетевая фаза загрузки акта (§3.4).
+     *
+     * Только запрос + обработка статусов (403/404/timeout) + парсинг JSON.
+     * Никаких побочных эффектов над состоянием: не трогает window.actMetadata,
+     * права, трекинг, дерево и НЕ показывает диалог восстановления черновика —
+     * это позволяет вызывающему захватить лок до применения контента.
+     *
+     * @param {number} actId - ID акта
+     * @returns {Promise<Object>} Распарсенный content акта
+     * @throws {Error} При ошибке доступа (code ACCESS_DENIED/NOT_FOUND) или загрузки
+     */
+    static async _fetchActContent(actId) {
         const username = AuthManager.getCurrentUser();
 
         if (!username) {
             throw new Error('Пользователь не авторизован');
         }
 
-        try {
-            const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-                headers: {}
-            });
+        const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+            headers: {}
+        });
 
-            if (!resp.ok) {
-                if (resp.status === 403) {
-                    const error = new Error('Нет доступа к акту');
-                    error.code = 'ACCESS_DENIED';
-                    throw error;
-                } else if (resp.status === 404) {
-                    const error = new Error('Акт не найден');
-                    error.code = 'NOT_FOUND';
-                    throw error;
-                }
-                throw new Error('Ошибка загрузки акта');
+        if (!resp.ok) {
+            if (resp.status === 403) {
+                const error = new Error('Нет доступа к акту');
+                error.code = 'ACCESS_DENIED';
+                throw error;
+            } else if (resp.status === 404) {
+                const error = new Error('Акт не найден');
+                error.code = 'NOT_FOUND';
+                throw error;
             }
+            throw new Error('Ошибка загрузки акта');
+        }
 
-            const content = await resp.json();
+        return await resp.json();
+    }
 
+    /**
+     * Применяет права пользователя из content к AppConfig.readOnlyMode (§3.4).
+     *
+     * Вынесено отдельно, чтобы _autoLoadAct мог установить read-only статус
+     * между fetch и захватом лока (LockManager.init пропускает лок в read-only).
+     * Идемпотентно: повторный вызов из _applyActContent безвреден.
+     *
+     * @param {Object} content - content акта (с полем userPermission)
+     */
+    static _applyUserPermission(content) {
+        if (content?.userPermission) {
+            AppConfig.readOnlyMode.isReadOnly = !content.userPermission.canEdit;
+            AppConfig.readOnlyMode.userRole = content.userPermission.role;
+        }
+    }
+
+    /**
+     * Применяющая фаза загрузки акта (§3.4).
+     *
+     * Всё, что было после получения content: метаданные, права (readOnlyMode),
+     * setBaseUpdatedAt, диалог восстановления черновика (_maybeRestoreDraft),
+     * санитайзер, инициализация/загрузка дерева, рендер, баннер read-only.
+     * Вызывается ПОСЛЕ захвата лока в _autoLoadAct (чтобы диалог черновика
+     * показывался когда уже известно, занят ли акт).
+     *
+     * @param {number} actId - ID акта
+     * @param {Object} content - Распарсенный content из _fetchActContent
+     * @returns {Promise<void>}
+     */
+    static async _applyActContent(actId, content) {
+        try {
             // Сохраняем метаданные в глобальную переменную
             window.actMetadata = content.metadata;
 
-            // Обрабатываем права пользователя
-            if (content.userPermission) {
-                AppConfig.readOnlyMode.isReadOnly = !content.userPermission.canEdit;
-                AppConfig.readOnlyMode.userRole = content.userPermission.role;
-
-                console.log('Права пользователя:', content.userPermission);
-                console.log('Режим только чтения:', AppConfig.readOnlyMode.isReadOnly);
-            }
+            // Обрабатываем права пользователя. Идемпотентно: _autoLoadAct (§3.4)
+            // вызывает _applyUserPermission ДО захвата лока, чтобы LockManager.init
+            // знал read-only статус (read-only пользователь не захватывает лок).
+            this._applyUserPermission(content);
 
             // Получаем флаг процессной проверки из метаданных
             const isProcessBased = content.metadata?.is_process_based !== undefined
                 ? content.metadata.is_process_based
                 : true;
-
-            console.log('Загружены метаданные акта:', window.actMetadata);
-            console.log('Тип проверки:', isProcessBased ? 'процессная' : 'непроцессная');
 
             // H3: запоминаем серверный updated_at — базу метаданных снимка
             // черновика (baseUpdatedAt). Обновляется при каждой успешной
