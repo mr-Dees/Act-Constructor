@@ -179,7 +179,9 @@ export class TreeDragDrop {
         const targetNodeId = treeItem.dataset.nodeId;
         const targetNode = AppState.findNodeById(targetNodeId);
 
-        if (TreeUtils.isDescendant(targetNode, this.draggedNode)) {
+        // Null-guard: DOM-элемент может пережить узел (stale-DOM между мутацией
+        // и ререндером) — без проверки null уходил в isDescendant/_calculateDropPosition.
+        if (!targetNode || TreeUtils.isDescendant(targetNode, this.draggedNode)) {
             this.clearDropZone();
             return;
         }

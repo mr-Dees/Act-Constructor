@@ -10,10 +10,9 @@ import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { UndoDeleteManager } from './undo-delete.js';
 import { AppState, _unwrap } from './state-core.js';
-import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
-import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -84,9 +83,13 @@ Object.assign(AppState, {
         );
 
         if (metricsTableNode && node.number) {
-            const newLabel = `Объем выявленных отклонений (В метриках) по ${node.number}`;
-            metricsTableNode.label = newLabel;
-            metricsTableNode.customLabel = newLabel;
+            // Обновляем только автогенерируемую метку (пустую или с каноническим
+            // префиксом). Пользовательский customLabel перенумерация не затирает.
+            if (isAutoMetricsTableLabel(metricsTableNode.customLabel)) {
+                const newLabel = buildMetricsTableLabel(node.number);
+                metricsTableNode.label = newLabel;
+                metricsTableNode.customLabel = newLabel;
+            }
         }
     },
 
@@ -626,8 +629,9 @@ Object.assign(AppState, {
         if (draggedParent.id === 'root') return ValidationCore.success();
 
         // Проверяем, есть ли уже кастомный пункт 7
+        // (Number вместо parseInt: '7.1' не должен считаться пунктом 7)
         const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.number ? parseInt(child.number) : null;
+            const num = child.number ? Number(child.number) : null;
             return num === 7;
         });
 
@@ -636,7 +640,7 @@ Object.assign(AppState, {
         }
 
         // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
-        const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
+        const targetNumber = targetNode.number ? Number(targetNode.number) : null;
         if (!targetNumber) return ValidationCore.success();
 
         if ((position === 'before' && targetNumber !== 7) ||
@@ -905,9 +909,9 @@ Object.assign(AppState, {
             ChangelogTracker.record('tb_change', nodeId, node.label, {abbr, checked});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: узел получен через findNodeById
+        // (tracked-Proxy), мутации node.tb помечают dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer/ItemsRenderer) о per-node изменении.
         // ChatEventBus задействован как ad-hoc общий event-bus; optional chaining
@@ -946,9 +950,9 @@ Object.assign(AppState, {
             ChangelogTracker.record(action, nodeId, node.label, {});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: запись/удаление node.invoice идёт через
+        // tracked-Proxy (findNodeById) и помечает dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer) о per-node изменении фактуры.
         window.ChatEventBus?.emit?.('node:invoice-changed', {nodeId, attached: !!invoiceData});

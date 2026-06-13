@@ -19,6 +19,13 @@ export const ValidationTree = {
      */
     canAddChild(parentId) {
         const depth = TreeUtils.getNodeDepth(parentId);
+
+        // Неизвестный родитель: getNodeDepth даёт -1, что без guard'а
+        // проходило проверку maxDepth и давало ложный success
+        if (depth === -1) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+
         const maxDepth = AppConfig.tree.maxDepth;
 
         if (depth >= maxDepth) {
@@ -54,7 +61,8 @@ export const ValidationTree = {
      */
     _validateFirstLevelSiblingAddition(parent, nodeId) {
         const hasCustomFirstLevel = parent.children.some(child => {
-            const num = child.number ? parseInt(child.number) : null;
+            // Number вместо parseInt: '7.1' не должен считаться пунктом 7
+            const num = child.number ? Number(child.number) : null;
             return num === 7;
         });
 
@@ -86,6 +94,20 @@ export const ValidationTree = {
         // Проверка существования узла
         const existsCheck = ValidationCore.validateNodeExists(node);
         if (!existsCheck.valid) return existsCheck;
+
+        // Проверка глубины (как в canAddChild). Контент-узлы (таблица/текстблок/
+        // нарушение) не создают нового уровня иерархии, поэтому порог — глубина
+        // самого узла > maxDepth (без +1). Узел вне дерева (depth -1) — отказ.
+        const depth = TreeUtils.getNodeDepth(node.id);
+        const maxDepth = AppConfig.tree.maxDepth;
+        if (depth === -1) {
+            return ValidationCore.failure(AppConfig.tree.validation.nodeNotFound);
+        }
+        if (depth > maxDepth) {
+            return ValidationCore.failure(
+                AppConfig.tree.validation.maxDepthExceeded(maxDepth)
+            );
+        }
 
         // Проверка типа узла
         const typeCheck = this._validateNodeType(node, contentType);

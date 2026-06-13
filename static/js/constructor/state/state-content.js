@@ -9,7 +9,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -243,7 +243,8 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
-        const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
+        // Каноническая авто-метка (единый источник с updateMetricsTableLabel).
+        const tableLabel = buildMetricsTableLabel(nodeNumber);
 
         // Сводная таблица неудаляема вручную (deletable=false): guard deleteNode
         // блокирует её. Удаляется только автоматически каскадом при исчезновении рисков.
@@ -262,7 +263,8 @@ Object.assign(AppState, {
             grid,
             colWidths: preset.colWidths,
             protected: true,
-            deletable: true,
+            // Зеркалит deletable узла: сводная неудаляема вручную.
+            deletable: false,
             kind: KIND_METRICS
         };
 
@@ -415,7 +417,8 @@ Object.assign(AppState, {
             grid,
             colWidths: preset.colWidths,
             protected: true,
-            deletable: true,
+            // Зеркалит deletable узла: главная сводная неудаляема вручную.
+            deletable: false,
             kind: KIND_MAIN_METRICS
         };
 

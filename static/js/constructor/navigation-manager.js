@@ -206,22 +206,22 @@ export class NavigationManager {
             return false;
         }
 
-        // Предупреждение о пустых таблицах
+        // Предупреждение о пустых таблицах (не блокирует, уровень warning)
         const dataCheckResult = ValidationTable.validateData();
-        if (!dataCheckResult.valid) {
+        if (dataCheckResult.isWarning) {
             Notifications.show(
                 dataCheckResult.message,
-                'info',
+                'warning',
                 AppConfig.notifications.duration.warning
             );
         }
 
-        // Предупреждение о незаполненных ТБ
+        // Предупреждение о незаполненных ТБ (не блокирует, уровень warning)
         const tbCheckResult = ValidationAct.validateTb();
-        if (!tbCheckResult.valid) {
+        if (tbCheckResult.isWarning) {
             Notifications.show(
                 tbCheckResult.message,
-                'info',
+                'warning',
                 AppConfig.notifications.duration.warning
             );
         }

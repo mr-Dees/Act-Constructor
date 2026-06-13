@@ -57,3 +57,29 @@ export function shouldHaveMainMetrics(section5, findRiskTables) {
     if (!section5) return false;
     return findRiskTables(section5).length > 0;
 }
+
+/**
+ * Префикс автогенерируемой метки сводной таблицы метрик на 5.X.
+ * Единый источник для создания (_createMetricsTable) и перенумерации
+ * (updateMetricsTableLabel) — по нему различаются авто- и пользовательские метки.
+ */
+export const METRICS_TABLE_LABEL_PREFIX = 'Объем выявленных отклонений (В метриках) по ';
+
+/**
+ * Строит автогенерируемую метку сводной таблицы метрик по номеру узла 5.X.
+ * @param {string} nodeNumber - Номер узла (например, '5.1').
+ * @returns {string}
+ */
+export function buildMetricsTableLabel(nodeNumber) {
+    return `${METRICS_TABLE_LABEL_PREFIX}${nodeNumber}`;
+}
+
+/**
+ * Метка сводной таблицы — автогенерируемая (пустая или с каноническим
+ * префиксом)? Пользовательский customLabel перенумерация затирать не должна.
+ * @param {string|undefined} label - Текущий customLabel узла таблицы.
+ * @returns {boolean}
+ */
+export function isAutoMetricsTableLabel(label) {
+    return !label || String(label).startsWith(METRICS_TABLE_LABEL_PREFIX);
+}

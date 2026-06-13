@@ -21,9 +21,10 @@
  *
  * Что даёт фасад поверх делегации в текущем виде:
  *
- * 1) Единая точка для callsite'ов (context-menu / state-tree.deleteNode /
- *    state-tree.moveNode / state-content.deleteTableFromNode) — раньше часть
- *    обходила coordinator и звала AppState._...AfterRiskTableDeleted напрямую.
+ * 1) Единая точка для callsite'ов (context-menu добавление риск-таблиц /
+ *    state-tree.deleteNode (через _deleteNodeUnchecked) / state-tree.moveNode) —
+ *    раньше часть обходила coordinator и звала
+ *    AppState._cleanupMetricsTablesAfterRiskTableDeleted напрямую.
  *
  * 2) Snapshot/rollback safety: каждый хук обёрнут в _withSnapshot, который
  *    делает поверхностный snapshot затронутых частей дерева и откатывается,
