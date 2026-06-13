@@ -13,6 +13,7 @@ import { AppState, _unwrap } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
 import { PreviewFitScaler } from './preview-fit.js';
+import { shouldShowTableTitle, tableTitleText } from '../table/table-title.js';
 
 export class PreviewManager {
     /**
@@ -408,10 +409,10 @@ export class PreviewManager {
      * @private
      */
     static _renderTableNode(child, container, level, previewTrim) {
-        // Показываем название только если customLabel задан явно
-        if (child.customLabel !== '') {
+        // Единый с DOM-рендерером и DOCX предикат показа заголовка (render-8).
+        if (shouldShowTableTitle(child)) {
             const tableTitle = document.createElement('h4');
-            tableTitle.textContent = child.customLabel || child.number || child.label;
+            tableTitle.textContent = tableTitleText(child);
             tableTitle.className = 'preview-table-title';
             container.appendChild(tableTitle);
         }
