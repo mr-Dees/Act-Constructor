@@ -9,6 +9,7 @@
  */
 
 import { AppConfig } from '../../shared/app-config.js';
+import { CONTENT_TYPE_IMAGE } from './violation-content-item.js';
 
 /** Дефолтные лимиты — зеркало ImagesSettings (app/domains/acts/settings.py). */
 export const DEFAULT_IMAGE_LIMITS = {
@@ -95,7 +96,7 @@ export function estimateActImageBytes(violations) {
     for (const violation of Object.values(violations || {})) {
         const items = violation?.additionalContent?.items || [];
         for (const item of items) {
-            if (item && item.type === 'image' && item.url) {
+            if (item && item.type === CONTENT_TYPE_IMAGE && item.url) {
                 total += estimateDataUrlBytes(item.url);
             }
         }
