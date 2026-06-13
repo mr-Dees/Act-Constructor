@@ -91,6 +91,9 @@ export class TreeContextMenu {
             const isAddChildBlocked = node.number?.match(/^5\.\d+$/) && this._hasRiskTablesAtLevel5x();
             addChildItem.classList.toggle('disabled', !!isAddChildBlocked);
         }
+
+        // Доступность инъецированных пунктов «Копировать»/«Вставить» (clipboard).
+        window.NodeClipboard?.refreshMenuState?.(node);
     }
 
     /**
