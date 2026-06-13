@@ -56,7 +56,14 @@ export class TableCellsOperations {
         cellEl.appendChild(textarea);
         textarea.focus();
 
+        let finished = false;
         const finishEditing = (cancel = false) => {
+            // Guard от повторного входа: установка cellEl.textContent ниже
+            // удаляет textarea из DOM и может повторно эмитнуть blur (→ второй
+            // finishEditing с уже пустым/изменённым значением). Завершаем ровно раз.
+            if (finished) return;
+            finished = true;
+
             if (cancel) {
                 cellEl.textContent = originalContent;
             } else {
