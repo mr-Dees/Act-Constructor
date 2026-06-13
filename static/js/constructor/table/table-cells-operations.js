@@ -575,7 +575,9 @@ export class TableCellsOperations {
         const rowIndex = parseInt(cell.dataset.row);
         const table = AppState.tables[tableId];
 
-        if (!table || !table.grid) return;
+        // Пустой grid (grid:[]) — легальное персистентное/импортированное состояние;
+        // grid[rowIndex].some(...) ниже был бы чтением undefined → TypeError. No-op.
+        if (!table || !table.grid || !table.grid.length) return;
 
         // Проверка: запрещаем удаление строки заголовков
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
