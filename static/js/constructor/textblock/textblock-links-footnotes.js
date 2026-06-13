@@ -402,59 +402,48 @@ Object.assign(TextBlockManager.prototype, {
         const footnotes = this.activeEditor.querySelectorAll('.text-footnote');
 
         [...links, ...footnotes].forEach(element => {
-            // Удаляем старые обработчики
-            if (element._contextmenuHandler) {
-                element.removeEventListener('contextmenu', element._contextmenuHandler);
-            }
-            if (element._mouseenterHandler) {
-                element.removeEventListener('mouseenter', element._mouseenterHandler);
-            }
-            if (element._mouseleaveHandler) {
-                element.removeEventListener('mouseleave', element._mouseleaveHandler);
-            }
-            if (element._dblclickHandler) {
-                element.removeEventListener('dblclick', element._dblclickHandler);
-            }
+            // Снимаем ВЕСЬ предыдущий набор слушателей разом (включая
+            // click-capture, который раньше навешивался анонимно и копился).
+            // Покрывает и initial tooltip-обработчики (_attachInitialTooltipHandlers
+            // навешивает свой набор через тот же _lfAbort).
+            if (element._lfAbort) element._lfAbort.abort();
+            const controller = new AbortController();
+            element._lfAbort = controller;
+            const { signal } = controller;
 
             // Обработчик контекстного меню (ПКМ)
-            element._contextmenuHandler = (e) => {
+            element.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 linkFootnoteContextMenu.show(e.clientX, e.clientY, {element});
-            };
+            }, { signal });
 
             // Обработчик двойного клика (ЛКМ x2)
-            element._dblclickHandler = (e) => {
+            element.addEventListener('dblclick', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 this.enableInlineEditing(element);
-            };
+            }, { signal });
 
             // Обработчик наведения для tooltip
-            element._mouseenterHandler = (e) => {
+            element.addEventListener('mouseenter', (e) => {
                 if (element.classList.contains('editing-mode')) return;
 
                 this.tooltipTimeout = setTimeout(() => {
                     this.showTooltip(element, e);
                 }, 700);
-            };
+            }, { signal });
 
             // Обработчик ухода мыши
-            element._mouseleaveHandler = () => {
+            element.addEventListener('mouseleave', () => {
                 this.hideTooltip();
-            };
+            }, { signal });
 
-            // Привязываем обработчики
-            element.addEventListener('contextmenu', element._contextmenuHandler);
-            element.addEventListener('dblclick', element._dblclickHandler);
-            element.addEventListener('mouseenter', element._mouseenterHandler);
-            element.addEventListener('mouseleave', element._mouseleaveHandler);
-
-            // Предотвращаем случайное редактирование
+            // Предотвращаем случайное редактирование (capture-фаза)
             element.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-            }, true);
+            }, { capture: true, signal });
         });
     }
 });
