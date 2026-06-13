@@ -81,3 +81,33 @@ test('withoutTracking восстанавливает глубину и при и
   assert.equal(StorageManager._trackingDepth, 1, 'глубина внешнего disable сохранена');
   StorageManager.enableTracking();
 });
+
+test('forceSaveAsync: при throw в forceSave отложенный enableTracking всё равно выполняется (Finding 7)', async () => {
+  // Зеркало withoutTracking-throws: forceSave() кидает → _trackingDepth
+  // обязан вернуться к доисходному значению (а не залипнуть > 0), иначе
+  // markAsUnsaved() навсегда станет no-op'ом.
+  const realRaf = globalThis.requestAnimationFrame;
+  const realSetTimeout = globalThis.setTimeout;
+  const realForceSave = StorageManager.forceSave;
+
+  // rAF и setTimeout (только для deferred enableTracking) исполняем синхронно,
+  // чтобы прогнать весь pipeline forceSaveAsync без реальных таймеров.
+  globalThis.requestAnimationFrame = (cb) => { cb(); return 0; };
+  globalThis.setTimeout = (cb) => { cb(); return 0; };
+  StorageManager.forceSave = () => { throw new Error('сбой forceSave'); };
+
+  const depthBefore = StorageManager._trackingDepth;
+  try {
+    const result = await StorageManager.forceSaveAsync();
+    assert.equal(result, false, 'при сбое forceSave результат false');
+    assert.equal(
+      StorageManager._trackingDepth,
+      depthBefore,
+      'глубина трекинга вернулась к доисходной — enableTracking выполнился даже при throw'
+    );
+  } finally {
+    globalThis.requestAnimationFrame = realRaf;
+    globalThis.setTimeout = realSetTimeout;
+    StorageManager.forceSave = realForceSave;
+  }
+});

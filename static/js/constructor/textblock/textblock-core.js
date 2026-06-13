@@ -55,6 +55,34 @@ export class TextBlockManager {
     }
 
     /**
+     * Принудительно коммитит pending-правку активного текстблок-редактора.
+     *
+     * Ввод в редактор сохраняется в state через debounce 500мс
+     * (textblock-editor.js::handleEditorInput), поэтому таймерный автосейв /
+     * экспорт / переключение акта могут прочитать exportData() без последних
+     * символов, ещё висящих в debounce. Метод вызывается из persistence-воронок
+     * (StorageManager._flushPendingEdits) ДО exportData(): если в фокусе
+     * textblock-редактор с непогашенным saveTimeout — переносим его innerHTML
+     * в state и снимаем таймер (он бы повторил ту же работу).
+     *
+     * @returns {boolean} true если был закоммичен pending-редактор
+     */
+    flushActiveEditor() {
+        const editor = document.activeElement;
+        if (!editor || !editor.classList || !editor.classList.contains('textblock-editor')) {
+            return false;
+        }
+        if (!editor.saveTimeout) {
+            return false;
+        }
+        clearTimeout(editor.saveTimeout);
+        editor.saveTimeout = null;
+        const textBlockId = editor.dataset.textBlockId;
+        this.saveContent(textBlockId, editor.innerHTML);
+        return true;
+    }
+
+    /**
      * Сохраняет контент текстового блока
      */
     saveContent(textBlockId, content) {

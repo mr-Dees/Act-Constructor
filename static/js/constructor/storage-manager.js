@@ -569,6 +569,12 @@ export class StorageManager {
                 return true;
             }
 
+            // Перед сериализацией коммитим зависшие правки (текстблок в debounce,
+            // редактируемая ячейка таблицы), иначе снимок уедет без последних
+            // символов. Централизованно — той же воронкой, что и PUT /content
+            // и экспорт (см. _flushPendingEdits).
+            this._flushPendingEdits();
+
             const snapshot = {
                 actId,
                 savedAt: new Date().toISOString(),
@@ -612,6 +618,37 @@ export class StorageManager {
         } finally {
             // pfe-3: lock снимается всегда — даже при раннем return или ошибке.
             this._saveInProgress = false;
+        }
+    }
+
+    /**
+     * Коммитит все зависшие правки контента в state перед сериализацией.
+     *
+     * Единая точка для всех persistence/export-воронок (saveState,
+     * PUT /content, экспорт): ни один путь не должен читать AppState.exportData()
+     * без предварительного flush'а. Покрывает:
+     *  - активный textblock-редактор с непогашенным debounce (500мс);
+     *  - редактируемую ячейку таблицы (textarea в `.editing`).
+     * Ячейки таблиц вне редактирования пишутся в state синхронно, поэтому
+     * специального flush'а не требуют.
+     *
+     * Модули конструктора доступны через window (lazy, как ActsManagerPage):
+     * прямой импорт textBlockManager/tableManager здесь не нужен.
+     * @private
+     */
+    static _flushPendingEdits() {
+        try {
+            if (window.textBlockManager && typeof window.textBlockManager.flushActiveEditor === 'function') {
+                window.textBlockManager.flushActiveEditor();
+            }
+            const cellsOps = window.tableManager?.cellsOps;
+            if (cellsOps && typeof cellsOps.commitPendingEdit === 'function') {
+                cellsOps.commitPendingEdit();
+            }
+        } catch (error) {
+            // Flush не должен валить сохранение — в худшем случае уедет
+            // предыдущее значение, но снимок/PUT всё равно состоится.
+            console.error('Ошибка коммита зависших правок перед сохранением:', error);
         }
     }
 
@@ -728,14 +765,28 @@ export class StorageManager {
             this.disableTracking();
 
             requestAnimationFrame(() => {
-                const result = this.forceSave();
-
-                // Небольшая задержка для завершения всех операций
-                setTimeout(() => {
-                    // Разблокируем отслеживание
-                    this.enableTracking();
-                    resolve(result);
-                }, AppConfig.timings.enableTrackingAfterSave);
+                // try/finally-зеркало withoutTracking: если forceSave() кинет,
+                // отложенный enableTracking() всё равно обязан быть
+                // запланирован, иначе _trackingDepth навсегда залипнет > 0 и
+                // markAsUnsaved() станет no-op'ом (правки перестанут помечаться
+                // как несохранённые). Отложенный тайминг сохраняем — трекинг
+                // включается через AppConfig.timings.enableTrackingAfterSave,
+                // а не синхронно.
+                let result = false;
+                let threw = false;
+                try {
+                    result = this.forceSave();
+                } catch (error) {
+                    threw = true;
+                    console.error('Ошибка в forceSaveAsync:', error);
+                } finally {
+                    // Небольшая задержка для завершения всех операций
+                    setTimeout(() => {
+                        // Разблокируем отслеживание
+                        this.enableTracking();
+                        resolve(threw ? false : result);
+                    }, AppConfig.timings.enableTrackingAfterSave);
+                }
             });
         });
     }

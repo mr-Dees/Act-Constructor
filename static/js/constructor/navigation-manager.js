@@ -72,6 +72,12 @@ export class NavigationManager {
             return;
         }
 
+        // Воронка «Сохранить и экспортировать»: коммитим зависшие правки
+        // (textblock в debounce, ячейка таблицы) ДО валидации и чтения
+        // exportData() в save/export. Save/export-методы api.js флашат повторно
+        // (идемпотентно), но валидация ниже тоже читает state — флашим здесь.
+        StorageManager._flushPendingEdits();
+
         // Получаем выбранные действия
         const selectedFormats = FormatMenuManager.getSelectedFormats();
         const shouldSaveToDb = selectedFormats.includes('db');

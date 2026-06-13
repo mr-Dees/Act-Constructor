@@ -106,6 +106,11 @@ export class APIClient {
         window.StorageManager.disableTracking();
 
         try {
+            // Коммитим зависшие правки ДО сериализации экспорта. saveState ниже
+            // тоже флашит, но порядок гарантируем явно: data читается из
+            // exportData() сразу после.
+            window.StorageManager._flushPendingEdits();
+
             window.StorageManager.saveState(true);
 
             const data = window.AppState.exportData();
@@ -697,6 +702,10 @@ export class APIClient {
             // Блокируем отслеживание на время сохранения
             window.StorageManager.disableTracking();
 
+            // Коммитим зависшие правки (textblock в debounce, ячейка таблицы)
+            // ДО сериализации — иначе PUT уедет без последних символов.
+            window.StorageManager._flushPendingEdits();
+
             const data = window.AppState.exportData();
             data.saveType = saveType;
             data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
@@ -752,6 +761,14 @@ export class APIClient {
 
             // Содержимое теперь в БД — снимок-черновик больше не нужен.
             window.StorageManager.removeSnapshot(actId);
+
+            // Бэкенд может вернуть мягкое предупреждение (Finding 3/8): сохранение
+            // прошло, но есть на что обратить внимание. Для периодического
+            // (фонового) сохранения toast не показываем — это сюрпризные
+            // уведомления при автосейве.
+            if (result?.warning && saveType !== 'periodic') {
+                Notifications.warning(result.warning);
+            }
 
             Notifications.success('Акт сохранен в базу данных');
 
