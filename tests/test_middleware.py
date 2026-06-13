@@ -115,6 +115,25 @@ def _make_security_app(security: SecuritySettings) -> FastAPI:
     return app
 
 
+def _make_security_presence_app(security: SecuritySettings) -> FastAPI:
+    """Как ``_make_security_app``, но эндпоинт выдаёт ПРИЗНАК наличия nonce.
+
+    Возвращает ``repr(getattr(request.state, "csp_nonce", "__MISSING__"))``:
+    тело ``'__MISSING__'`` означало бы, что middleware не выставил атрибут,
+    ``repr("")`` — атрибут есть и пуст, иначе — непустой nonce. Так тест
+    различает «отсутствует» и «пустая строка» (обычный namespace их сливает).
+    """
+    settings = SimpleNamespace(security=security)
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
+
+    @app.get("/test")
+    async def test_endpoint(request: Request):
+        return PlainTextResponse(repr(getattr(request.state, "csp_nonce", "__MISSING__")))
+
+    return app
+
+
 def _script_src(csp_value: str) -> str:
     """Вырезает директиву script-src из значения CSP-заголовка."""
     for directive in csp_value.split(";"):
@@ -211,3 +230,58 @@ class TestSecurityHeadersMiddleware:
             assert resp.headers["x-frame-options"] == sec.frame_options
             assert "referrer-policy" in resp.headers
             assert "permissions-policy" in resp.headers
+
+    async def test_nonce_state_set_when_csp_disabled(self):
+        """При csp_enabled=False request.state.csp_nonce определён и ПУСТ.
+
+        Шаблоны читают request.state.csp_nonce безусловно; атрибут обязан
+        существовать (пустая строка), иначе StrictUndefined уронит рендер в 500.
+        Эндпоинт отдаёт repr через getattr-сентинел: "__MISSING__" в теле
+        означало бы, что атрибут не выставлен.
+        """
+        sec = SecuritySettings(csp_enabled=False)
+        app = _make_security_presence_app(sec)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/test")
+            assert resp.status_code == 200
+            assert "__MISSING__" not in resp.text
+            assert resp.text == repr("")
+            # CSP-заголовок при выключенном CSP не выставляется.
+            assert "content-security-policy" not in resp.headers
+
+    async def test_nonce_state_set_when_policy_has_no_nonce(self):
+        """Политика без {nonce}: request.state.csp_nonce определён и ПУСТ.
+
+        Заголовок CSP выставляется, но не содержит литерала "{nonce}".
+        """
+        sec = SecuritySettings(
+            csp_report_only=False, csp_policy="default-src 'self'"
+        )
+        app = _make_security_presence_app(sec)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/test")
+            assert resp.status_code == 200
+            assert "__MISSING__" not in resp.text
+            assert resp.text == repr("")
+            csp = resp.headers["content-security-policy"]
+            assert "{nonce}" not in csp
+
+    async def test_nonce_state_non_empty_when_csp_enabled(self):
+        """CSP включён с {nonce}: nonce непуст и совпадает с заголовком."""
+        sec = SecuritySettings(csp_report_only=False)
+        app = _make_security_presence_app(sec)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/test")
+            assert resp.status_code == 200
+            assert "__MISSING__" not in resp.text
+            # repr непустой строки — это не repr("").
+            assert resp.text != repr("")
+            state_nonce = resp.text.strip("'\"")
+            assert state_nonce
+            assert f"'nonce-{state_nonce}'" in resp.headers["content-security-policy"]

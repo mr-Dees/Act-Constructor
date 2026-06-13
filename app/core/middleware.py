@@ -271,10 +271,13 @@ class SecurityHeadersMiddleware:
         # Per-request nonce: генерируем ДО рендера роутом и кладём в state,
         # чтобы шаблон проставил его inline-скриптам. Тот же nonce уходит в
         # заголовок CSP ниже — значения совпадают по построению.
+        # request.state.csp_nonce публикуется ВСЕГДА (пустая строка, когда CSP
+        # выключен или в политике нет плейсхолдера {nonce}): шаблоны читают его
+        # безусловно, и отсутствие атрибута сломало бы рендер при StrictUndefined.
         csp_nonce = ""
         if self._csp_enabled and self._csp_has_nonce:
             csp_nonce = secrets.token_urlsafe(16)
-            scope.setdefault("state", {})["csp_nonce"] = csp_nonce
+        scope.setdefault("state", {})["csp_nonce"] = csp_nonce
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
