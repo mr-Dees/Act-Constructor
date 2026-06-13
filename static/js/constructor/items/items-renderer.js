@@ -346,27 +346,15 @@ export class ItemsRenderer {
 
     /**
      * Настраивает редактирование заголовка по двойному клику.
-     * Использует таймер для определения двойного клика (300мс).
+     * Нативное событие dblclick — браузер сам различает одиночный/двойной клик
+     * (раньше это эмулировал ручной 300мс таймер).
      * @param {HTMLElement} title - Элемент заголовка
      * @param {Object} node - Узел дерева
      * @private
      */
     static _setupTitleEditing(textSpan, node) {
-        let clickCount = 0;
-        let clickTimer = null;
-
-        textSpan.addEventListener('click', () => {
-            clickCount++;
-
-            if (clickCount === 1) {
-                clickTimer = setTimeout(() => {
-                    clickCount = 0;
-                }, 300);
-            } else if (clickCount === 2) {
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingItemTitle(textSpan, node);
-            }
+        textSpan.addEventListener('dblclick', () => {
+            ItemsTitleEditing.startEditingItemTitle(textSpan, node);
         });
 
         textSpan.style.cursor = 'pointer';
@@ -646,26 +634,14 @@ export class ItemsRenderer {
 
     /**
      * Настраивает редактирование заголовка таблицы по двойному клику.
+     * Нативное событие dblclick вместо ручного 300мс таймера.
      * @param {HTMLElement} tableTitle - Элемент заголовка таблицы
      * @param {Object} node - Узел дерева таблицы
      * @private
      */
     static _setupTableTitleEditing(tableTitle, node) {
-        let clickCount = 0;
-        let clickTimer = null;
-
-        tableTitle.addEventListener('click', () => {
-            clickCount++;
-
-            if (clickCount === 1) {
-                clickTimer = setTimeout(() => {
-                    clickCount = 0;
-                }, 300);
-            } else if (clickCount === 2) {
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
-            }
+        tableTitle.addEventListener('dblclick', () => {
+            ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
         });
     }
 
