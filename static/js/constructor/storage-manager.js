@@ -761,33 +761,47 @@ export class StorageManager {
      */
     static async forceSaveAsync() {
         return new Promise((resolve) => {
-            // Блокируем отслеживание на время сохранения и последующих операций
+            // Блокируем отслеживание на время сохранения и последующих операций.
             this.disableTracking();
 
-            requestAnimationFrame(() => {
-                // try/finally-зеркало withoutTracking: если forceSave() кинет,
-                // отложенный enableTracking() всё равно обязан быть
-                // запланирован, иначе _trackingDepth навсегда залипнет > 0 и
-                // markAsUnsaved() станет no-op'ом (правки перестанут помечаться
-                // как несохранённые). Отложенный тайминг сохраняем — трекинг
-                // включается через AppConfig.timings.enableTrackingAfterSave,
-                // а не синхронно.
-                let result = false;
-                let threw = false;
-                try {
-                    result = this.forceSave();
-                } catch (error) {
-                    threw = true;
-                    console.error('Ошибка в forceSaveAsync:', error);
-                } finally {
-                    // Небольшая задержка для завершения всех операций
-                    setTimeout(() => {
-                        // Разблокируем отслеживание
-                        this.enableTracking();
-                        resolve(threw ? false : result);
-                    }, AppConfig.timings.enableTrackingAfterSave);
-                }
-            });
+            // Декремент гарантируется РОВНО один раз. На счастливом пути его
+            // делает отложенный setTimeout (трекинг включается ПОСЛЕ ре-рендера
+            // генерации — enableTrackingAfterSave). Если кадр/таймер не сработают
+            // (вкладка в фоне, страница уничтожается) или планирование RAF кинет
+            // — декремент делает синхронный catch, иначе _trackingDepth залипнет
+            // > 0 и markAsUnsaved() станет no-op'ом (тихая потеря правок, #5).
+            let released = false;
+            const release = () => {
+                if (released) return;
+                released = true;
+                this.enableTracking();
+            };
+
+            try {
+                requestAnimationFrame(() => {
+                    let result = false;
+                    let threw = false;
+                    try {
+                        result = this.forceSave();
+                    } catch (error) {
+                        threw = true;
+                        console.error('Ошибка в forceSaveAsync:', error);
+                    } finally {
+                        // Отложенный тайминг сохраняем — трекинг включается
+                        // через AppConfig.timings.enableTrackingAfterSave, а не
+                        // синхронно (иначе ре-рендер генерации пометил бы только
+                        // что сохранённый акт грязным).
+                        setTimeout(() => {
+                            release();
+                            resolve(threw ? false : result);
+                        }, AppConfig.timings.enableTrackingAfterSave);
+                    }
+                });
+            } catch (error) {
+                console.error('Ошибка планирования forceSaveAsync:', error);
+                release();
+                resolve(false);
+            }
         });
     }
 
@@ -1008,6 +1022,10 @@ export class StorageManager {
         this._teardownEventHandlers();
 
         this._resetDbSaveFailureState();
+
+        // Сбрасываем счётчик трекинга: teardown не должен оставить отслеживание
+        // выключенным, если forceSaveAsync не успел вернуть его кадром (#5).
+        this._trackingDepth = 0;
     }
 
     /**
