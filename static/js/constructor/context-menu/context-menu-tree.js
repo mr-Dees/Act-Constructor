@@ -561,7 +561,7 @@ export class TreeContextMenu {
         } else {
             treeManager.render();
         }
-        PreviewManager.update('previewTrim', 30);
+        PreviewManager.update();
         if (AppState.currentStep === 2) {
             if (scopeNodeId) {
                 ItemsRenderer.updateItem(scopeNodeId);

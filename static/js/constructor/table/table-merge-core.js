@@ -9,11 +9,9 @@
  *   - поглощённая — {isSpanned:true, spanOrigin:{row,col}};
  *   - одиночная/восстановленная — content/isHeader/colSpan/rowSpan/originRow/originCol.
  *
- * Эти функции — основа merge/unmerge/auto-unmerge в TableCellsOperations.
- * Реализованы поверх range-list ядра (grid-merges.js): прямоугольник
- * добавляется/убирается из набора объединений, затем сетка перестраивается.
+ * Эти функции — основа merge/unmerge в TableCellsOperations. Работают
+ * напрямую на dense-grid (клон → правка span'ов → новая сетка).
  */
-import { gridToMerges, applyMergesToGrid } from './grid-merges.js';
 
 /**
  * Глубокая копия dense-сетки (ячейки — плоские объекты).
@@ -143,38 +141,9 @@ export function unmergeAt(grid, row, col) {
     return next;
 }
 
-/**
- * Перед удалением строки разъединяет все объединения, чьи прямоугольники
- * покрывают эту строку: origin внутри строки ИЛИ объединение из строк выше,
- * доходящее до неё. Возвращает новую сетку.
- *
- * Ядром deleteRow больше НЕ используется (M.22: строка с объединениями теперь
- * отклоняется, а не авто-разъединяется); функция остаётся в чистом ядре —
- * её семантику фиксируют golden-тесты. Устойчива к поглощённым ячейкам без
- * originRow/originCol: покрывающие объединения определяются по range-list
- * всей сетки (а не по полям поглощённой ячейки).
- *
- * @param {Object[][]} grid Исходная сетка (не мутируется).
- * @param {number} rowIndex Индекс удаляемой строки.
- * @returns {Object[][]} Новая сетка с разъединёнными покрывающими объединениями.
- */
-export function autoUnmergeRow(grid, rowIndex) {
-    // Объединения, чей прямоугольник пересекает целевую строку.
-    const covering = gridToMerges(grid).filter(
-        (m) => m.row <= rowIndex && rowIndex <= m.row + m.rowspan - 1,
-    );
-
-    let next = grid;
-    for (const m of covering) {
-        next = unmergeAt(next, m.row, m.col);
-    }
-    return next;
-}
-
 // Дублируем в window ради inline-скриптов в шаблонах (см. CLAUDE.md).
 // Guard: модуль также импортируется в node:test, где window отсутствует.
 if (typeof window !== 'undefined') {
     window.mergeRange = mergeRange;
     window.unmergeAt = unmergeAt;
-    window.autoUnmergeRow = autoUnmergeRow;
 }

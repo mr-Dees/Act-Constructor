@@ -6,7 +6,6 @@
  */
 import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
-import { AppConfig } from '../../shared/app-config.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
 import { PreviewFitScaler } from '../preview/preview-fit.js';
 
@@ -315,8 +314,7 @@ export class PreviewMenuManager {
 
         // Единая сборка документа — та же структура, что и в inline-панели
         // (лист A4 + sizer + индикатор зума, заголовок «АКТ» и tooltip'ы внутри).
-        const previewTrim = AppConfig.preview.defaultTrimLength;
-        PreviewManager.renderDocumentInto(this.menuBody, { previewTrim });
+        PreviewManager.renderDocumentInto(this.menuBody);
 
         // Fit-to-width для модального тела (attach идемпотентен на перерендере).
         if (!this.fitScaler) this.fitScaler = new PreviewFitScaler();

@@ -9,6 +9,7 @@ import { AppConfig } from '../app-config.js';
 import { AuthManager } from '../auth.js';
 import { ClientActionsRegistry } from './chat-client-actions.js';
 import { EscapeStack } from '../escape-stack.js';
+import { formatFileSize } from '../format-units.js';
 import { SafeHTML } from '../sanitize.js';
 
 export const ChatRenderer = {
@@ -1034,9 +1035,8 @@ export const ChatRenderer = {
      * @private
      */
     _formatSize(bytes) {
-        if (bytes < 1024) return bytes + ' Б';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' КБ';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+        // Делегирует в общий хелпер (shared/format-units.js).
+        return formatFileSize(bytes);
     },
 
     /**

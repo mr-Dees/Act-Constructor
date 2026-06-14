@@ -315,7 +315,7 @@ export class App {
             }
         } else {
             textBlockManager.hideToolbar();
-            requestAnimationFrame(() => PreviewManager.update('previewTrim'));
+            requestAnimationFrame(() => PreviewManager.update());
         }
     }
 

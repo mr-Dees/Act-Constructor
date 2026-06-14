@@ -109,8 +109,8 @@ test.describe('Preview как лист A4 (Word-геометрия)', () => {
     // 3 строки текста → высота заметно больше одной строки.
     expect(cellHeight).toBeGreaterThan(lineHeight * 2);
 
-    // (c+) F1: текст ячейки показан ЦЕЛИКОМ, без обрезки (раньше previewTrim=30
-    // резал до «…»). Третья строка длиннее старого лимита — должна быть полной.
+    // (c+) F1: текст ячейки показан ЦЕЛИКОМ, без обрезки (раньше резал до «…»).
+    // Третья строка длиннее старого лимита — должна быть полной.
     const cellText = await multilineCell.evaluate((el) => el.textContent);
     expect(cellText).toBe('Первая строка\nВторая строка\nТретья строка');
     expect(cellText).not.toContain('…');

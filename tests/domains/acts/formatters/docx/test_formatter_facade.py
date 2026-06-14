@@ -223,6 +223,37 @@ def test_textblock_partial_formatting_left_alignment_applied():
     assert para.runs[0].bold is True
 
 
+def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
+    """#9: смена только выравнивания при дефолтном fontSize=14 НЕ уменьшает шрифт.
+
+    Раньше любое отличие formatting гнало через fontSize*0.75 (14→10.5pt);
+    теперь дефолтный размер сохраняет body_pt (12pt), а выравнивание
+    применяется независимо.
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+    from app.domains.acts.formatters.docx.styles import Sizes
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(
+            id="tb1", nodeId="1.1", content="Центрированный блок",
+            formatting={"fontSize": 14, "alignment": "center", "bold": False,
+                        "italic": False, "underline": False},
+        )},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    para = next(p for p in doc.paragraphs if "Центрированный блок" in p.text)
+    assert para.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert para.runs[0].font.size == Pt(Sizes.body_pt)  # 12pt, НЕ 10.5pt
+
+
 def test_item_content_rendered_as_plain_text():
     """item.content — plain-текст из textarea: <b> и & выводятся дословно (M.4)."""
     fmt = DocxFormatter()

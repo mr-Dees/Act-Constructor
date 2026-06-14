@@ -33,6 +33,7 @@ import { getBlockType, isLeafBlockType } from '../block-types.js';
 import { isPinnedTable } from '../table/table-kind.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
+import { formatMb } from '../../shared/format-units.js';
 import {
     estimateActImageBytes,
     getImageLimits,
@@ -206,11 +207,10 @@ export function regenerateIds(payload, gens) {
  */
 export function checkImageLimits(existingBytes, pastedBytes, maxTotalBytes) {
     if (existingBytes + pastedBytes > maxTotalBytes) {
-        const fmt = (b) => (b / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
         return {
             ok: false,
             reason: `Вставка превысит лимит суммарного размера картинок акта `
-                + `(${fmt(maxTotalBytes)} МБ). Скопированное поддерево не вставлено.`,
+                + `(${formatMb(maxTotalBytes)} МБ). Скопированное поддерево не вставлено.`,
         };
     }
     return { ok: true, reason: '' };
@@ -273,10 +273,9 @@ export const NodeClipboard = {
         const limits = getImageLimits();
         const imgBytes = estimateActImageBytes(payload.dicts.violations || {});
         if (imgBytes > limits.maxTotalSizePerAct) {
-            const fmt = (b) => (b / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
             Notifications.error(
                 `Картинки скопированного фрагмента слишком большие для копирования `
-                + `(лимит ${fmt(limits.maxTotalSizePerAct)} МБ)`
+                + `(лимит ${formatMb(limits.maxTotalSizePerAct)} МБ)`
             );
             return false;
         }
@@ -449,7 +448,7 @@ export const NodeClipboard = {
             window.ItemsRenderer?.updateItem?.(targetNodeId)
                 ?? window.ItemsRenderer?.renderAll?.();
         }
-        window.PreviewManager?.update?.('previewTrim', 30);
+        window.PreviewManager?.update?.();
     },
 
     /**

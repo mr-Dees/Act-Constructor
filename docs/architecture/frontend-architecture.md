@@ -655,26 +655,19 @@ Per-node API (вместо полного `renderAll()`):
 `preview.js:23-46`:
 
 ```js
-static update(options = {}) {
-    if (typeof options === 'string') {
-        options = {previewTrim: AppConfig.preview.defaultTrimLength};
-    }
+static update() {
     if (this._pendingUpdate) {
-        Object.assign(this._pendingOptions, options);  // мерж и выход
-        return;
+        return;  // RAF уже запланирован — выходим
     }
     this._pendingUpdate = true;
-    this._pendingOptions = {...options};
     requestAnimationFrame(() => {
-        const opts = this._pendingOptions;
         this._pendingUpdate = false;
-        this._pendingOptions = null;
-        this._performUpdate(opts.previewTrim ?? AppConfig.preview.defaultTrimLength);
+        this._performUpdate();
     });
 }
 ```
 
-На N подряд идущих вызовов в одном кадре выполняется ровно один `_performUpdate` с последними опциями.
+На N подряд идущих вызовов в одном кадре выполняется ровно один `_performUpdate`.
 
 ### 8.2 Debounce 150мс для typing (`scheduleTyping`)
 

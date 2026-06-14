@@ -13,6 +13,7 @@
  */
 
 import { AppConfig } from '../../shared/app-config.js';
+import { formatMb } from '../../shared/format-units.js';
 import { CONTENT_TYPE_IMAGE } from './violation-content-item.js';
 
 /** Дефолтные лимиты — зеркало ImagesSettings (app/domains/acts/settings.py). */
@@ -172,8 +173,8 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
     if (file.size > lim.maxFileSize) {
         return {
             ok: false,
-            reason: `Файл «${file.name || ''}» слишком большой (${_fmtMb(file.size)} МБ). `
-                + `Лимит на файл — ${_fmtMb(lim.maxFileSize)} МБ.`,
+            reason: `Файл «${file.name || ''}» слишком большой (${formatMb(file.size)} МБ). `
+                + `Лимит на файл — ${formatMb(lim.maxFileSize)} МБ.`,
         };
     }
     if (itemsCount >= lim.maxItemsPerViolation) {
@@ -186,19 +187,11 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
     if (existingTotalBytes + file.size > lim.maxTotalSizePerAct) {
         return {
             ok: false,
-            reason: `Суммарный размер картинок акта превысит лимит ${_fmtMb(lim.maxTotalSizePerAct)} МБ. `
+            reason: `Суммарный размер картинок акта превысит лимит ${formatMb(lim.maxTotalSizePerAct)} МБ. `
                 + `Файл «${file.name || ''}» не добавлен.`,
         };
     }
     return { ok: true, reason: '' };
-}
-
-/**
- * Байты → мегабайты одной десятичной цифрой (для сообщений).
- * @private
- */
-function _fmtMb(bytes) {
-    return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
 }
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.

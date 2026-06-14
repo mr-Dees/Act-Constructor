@@ -92,7 +92,7 @@ test('выключенный descriptionList не выводится', () => {
     assert.ok(!lines.some(l => l.type === 'list'));
 });
 
-test('кейсы и свободный текст — полные, previewTrim не применяется (M.5)', () => {
+test('кейсы и свободный текст — полные, без обрезки (M.5)', () => {
     const lines = collectViolationLines(makeViolation({
         additionalContent: {
             enabled: true,

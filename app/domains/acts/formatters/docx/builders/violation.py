@@ -148,7 +148,13 @@ def _scale_picture(shape, width_percent: int) -> None:
 
     width_percent > 0 — процент полезной ширины страницы; 0 — натуральный
     размер с потолком по полезной ширине.
+
+    Картинка нулевой ширины (битый/вырожденный shape, который python-docx всё
+    же встроил) не масштабируется — иначе деление на ноль уронило бы весь
+    экспорт DOCX. Оставляем натуральный размер и продолжаем сборку.
     """
+    if not int(shape.width):
+        return
     usable_emu = int(Twips(_USABLE_WIDTH_TWIPS))
     if width_percent:
         target = usable_emu * width_percent // 100

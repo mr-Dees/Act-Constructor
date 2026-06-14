@@ -12,14 +12,80 @@ import re
 # <span class="text-footnote" data-footnote-text="...">якорь</span> — сноска.
 # Данные живут в атрибутах: вырезание тегов «как есть» их теряет, поэтому
 # такие span'ы разворачиваются в текстовый вид ДО общего вырезания тегов.
-_LINK_SPAN_RE = re.compile(
-    r'<span\b[^>]*\bdata-link-url="([^"]*)"[^>]*>(.*?)</span>',
-    re.IGNORECASE | re.DOTALL,
-)
-_FOOTNOTE_SPAN_RE = re.compile(
-    r'<span\b[^>]*\bdata-footnote-text="([^"]*)"[^>]*>(.*?)</span>',
-    re.IGNORECASE | re.DOTALL,
-)
+#
+# Разбор — сканером с учётом ВЛОЖЕННОСТИ span'ов (а не нежадной регуляркой
+# `(.*?)</span>`): если внутри ссылки есть вложенный <span> (часть текста
+# форматирована отдельно), нежадный матч обрывал ссылку на первом внутреннем
+# </span>, и хвост текста «вываливался» наружу. Сканер ищет ПАРНЫЙ </span>
+# по глубине — текст ссылки/сноски не рвётся и соседние span'ы не склеиваются.
+_TAG_RE = re.compile(r"<[^>]+>")
+_SPAN_OPEN_RE = re.compile(r"<span\b[^>]*>", re.IGNORECASE)
+_SPAN_CLOSE_RE = re.compile(r"</span\s*>", re.IGNORECASE)
+_LINK_ATTR_RE = re.compile(r'\bdata-link-url="([^"]*)"', re.IGNORECASE)
+_FOOTNOTE_ATTR_RE = re.compile(r'\bdata-footnote-text="([^"]*)"', re.IGNORECASE)
+
+
+def _capture_span_inner(content: str, start: int) -> tuple[str, int]:
+    """Возвращает (внутренний HTML, индекс_после_закрывающего_span).
+
+    Идёт от ``start`` (сразу после открывающего <span>) до ПАРНОГО </span>,
+    считая вложенные span'ы по глубине. Незакрытый span — забираем остаток.
+    """
+    depth = 1
+    i, n = start, len(content)
+    while i < n:
+        m = _TAG_RE.match(content, i) if content[i] == "<" else None
+        if m:
+            tag = m.group(0)
+            if _SPAN_OPEN_RE.match(tag):
+                depth += 1
+            elif _SPAN_CLOSE_RE.match(tag):
+                depth -= 1
+                if depth == 0:
+                    return content[start:i], m.end()
+            i = m.end()
+        else:
+            i += 1
+    return content[start:], n
+
+
+def _resolve_special_spans(content: str, link_fmt) -> str:
+    """Разворачивает спец-span'ы (ссылка/сноска) в текстовый вид.
+
+    ``link_fmt(inner, url)`` форматирует ссылку (TXT: «текст (url)», MD:
+    «[текст](url)»); сноска — всегда «якорь (сноска: текст)». Внутренний HTML
+    сохраняется как есть — вложенные теги обработает общий конвейер ниже
+    (вырезание тегов / markdown-замены), а финальный html.unescape снимет
+    экранирование атрибутов один раз (как и прежняя регулярка).
+    """
+    out: list[str] = []
+    i, n = 0, len(content)
+    while i < n:
+        if content[i] == "<":
+            m = _TAG_RE.match(content, i)
+            if m:
+                tag = m.group(0)
+                if _SPAN_OPEN_RE.match(tag):
+                    link = _LINK_ATTR_RE.search(tag)
+                    foot = _FOOTNOTE_ATTR_RE.search(tag)
+                    if link or foot:
+                        inner, end = _capture_span_inner(content, m.end())
+                        if link:
+                            out.append(link_fmt(inner, link.group(1)))
+                        else:
+                            out.append(f"{inner} (сноска: {foot.group(1)})")
+                        i = end
+                        continue
+                out.append(tag)
+                i = m.end()
+                continue
+        nxt = content.find("<", i)
+        if nxt == -1:
+            out.append(content[i:])
+            break
+        out.append(content[i:nxt])
+        i = nxt
+    return "".join(out)
 
 
 class HTMLUtils:
@@ -45,8 +111,7 @@ class HTMLUtils:
 
         # Спец-span'ы редактора: ссылка → «текст (url)», сноска →
         # «якорь (сноска: текст)» — иначе данные атрибутов теряются.
-        clean = _LINK_SPAN_RE.sub(r"\2 (\1)", clean)
-        clean = _FOOTNOTE_SPAN_RE.sub(r"\2 (сноска: \1)", clean)
+        clean = _resolve_special_spans(clean, lambda inner, url: f"{inner} ({url})")
 
         # Удаление всех HTML-тегов
         clean = re.sub(r"<[^>]+>", "", clean)
@@ -77,8 +142,7 @@ class HTMLUtils:
         # Спец-span'ы редактора: ссылка → [текст](url), сноска —
         # inline «якорь (сноска: текст)» (без блока сносок: конвертер
         # работает с фрагментом и не знает контекста документа).
-        result = _LINK_SPAN_RE.sub(r"[\2](\1)", result)
-        result = _FOOTNOTE_SPAN_RE.sub(r"\2 (сноска: \1)", result)
+        result = _resolve_special_spans(result, lambda inner, url: f"[{inner}]({url})")
 
         # <b>, <strong> -> **текст**
         result = re.sub(
