@@ -248,9 +248,10 @@ class TestRestoreVersionSingleTransaction:
 class TestSaveContentDanglingRefCleanup:
     """save_content мягко чистит рассогласование дерево ↔ словари (findings 3+8).
 
-    Висячая ссылка узла не отбивает PUT 422: сервис снимает поле-ссылку с узла,
-    сохранение успешно, в ответе непустой warning. Сохраняемое дерево больше
-    не ссылается на отсутствующую запись.
+    Висячая ссылка листового узла не отбивает PUT 422: сервис удаляет узел-зомби
+    ЦЕЛИКОМ (фикс #4 — иначе пустой узел отрисуется в экспорте), сохранение
+    успешно, в ответе непустой warning. Сохраняемое дерево больше не содержит
+    бессодержательного узла.
     """
 
     @staticmethod
@@ -266,14 +267,14 @@ class TestSaveContentDanglingRefCleanup:
             saveType="auto",
         )
 
-    async def test_dangling_ref_stripped_and_warning_returned(self):
+    async def test_dangling_ref_node_removed_and_warning_returned(self):
         call_log: list[str] = []
         svc, conn, tx = _make_content_service(call_log)
 
         saved: dict = {}
 
         async def _save_content(act_id, data, username):
-            # Запоминаем дерево в момент сохранения — ссылка уже должна быть снята.
+            # Запоминаем дерево в момент сохранения — узел-зомби уже удалён.
             saved["tree"] = data.tree
             return {"status": "success", "message": "ok", "dropped_orphans": 0}
 
@@ -284,11 +285,76 @@ class TestSaveContentDanglingRefCleanup:
 
         # Сохранение успешно, не 422.
         assert result["status"] == "success"
-        # Висячая ссылка вычищена из сохранённого дерева.
-        assert "tableId" not in saved["tree"]["children"][0]
-        # Пользователь предупреждён одной строкой про висячую ссылку.
+        # Узел-зомби удалён целиком (а не просто снята ссылка).
+        assert saved["tree"]["children"] == []
+        # Пользователь предупреждён одной строкой.
         assert result["warning"] is not None
         assert "висячих ссылок: 1" in result["warning"]
+
+    async def test_nested_zombie_removed_parent_and_siblings_survive(self):
+        """Вложенный зомби удаляется, родитель-item и валидные соседи остаются."""
+        call_log: list[str] = []
+        svc, conn, tx = _make_content_service(call_log)
+
+        saved: dict = {}
+
+        async def _save_content(act_id, data, username):
+            saved["tree"] = data.tree
+            return {"status": "success", "message": "ok", "dropped_orphans": 0}
+
+        svc._content.save_content = AsyncMock(side_effect=_save_content)
+
+        data = ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "sec", "label": "Раздел", "type": "item", "children": [
+                        {"id": "z", "label": "Таблица", "type": "table",
+                         "tableId": "ghost", "children": []},
+                        {"id": "ok", "label": "Пункт", "type": "item", "children": []},
+                    ]},
+                ],
+            },
+            saveType="auto",
+        )
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+
+        assert result["status"] == "success"
+        sec_children = saved["tree"]["children"][0]["children"]
+        ids = [n["id"] for n in sec_children]
+        assert "z" not in ids        # зомби удалён
+        assert "ok" in ids           # валидный сосед остался
+        assert "висячих ссылок: 1" in result["warning"]
+
+    async def test_valid_leaf_ref_not_removed(self):
+        """Лист с валидной ссылкой не трогается, warning пуст."""
+        call_log: list[str] = []
+        svc, conn, tx = _make_content_service(call_log)
+
+        saved: dict = {}
+
+        async def _save_content(act_id, data, username):
+            saved["tree"] = data.tree
+            return {"status": "success", "message": "ok", "dropped_orphans": 0}
+
+        svc._content.save_content = AsyncMock(side_effect=_save_content)
+
+        data = ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "n1", "label": "Таблица", "type": "table",
+                     "tableId": "t1", "children": []},
+                ],
+            },
+            tables={"t1": {"id": "t1", "nodeId": "n1", "grid": []}},
+            saveType="auto",
+        )
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+
+        assert result["status"] == "success"
+        assert [n["id"] for n in saved["tree"]["children"]] == ["n1"]
+        assert result["warning"] is None
 
     async def test_no_cleanup_yields_null_warning(self):
         """Когда чистить нечего — warning равен None."""
