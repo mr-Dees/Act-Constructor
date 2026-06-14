@@ -44,6 +44,8 @@ ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 # + execCommand bold/italic/underline/strikeThrough; textblock-formatting.js:
 # parent.style.{fontSize,fontWeight,fontStyle,textDecoration,color,backgroundColor}).
 # Всё прочее (position, behavior, url(...) и т.п.) CSSSanitizer вырежет.
+# СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с фронтовым DOMPurify-профилем 'acts'
+# (static/js/shared/sanitize.js, ACTS_CSS_PROPERTIES) — JS не импортирует Python.
 ALLOWED_CSS_PROPERTIES = [
     "font-size",
     "color",
@@ -51,11 +53,21 @@ ALLOWED_CSS_PROPERTIES = [
     "font-weight",
     "font-style",
     "text-decoration",
+    # Внешний контент шлёт зачёркивание и так: без него DOCX-парсер
+    # (inline.py _STRIKE_RE) ловит line-through, но bleach срезал бы свойство.
+    "text-decoration-line",
 ]
 
 # Модульный синглтон: без него bleach 6.x вырезает значение style целиком
 # и сыпет NoCssSanitizerWarning на каждый clean().
 css_sanitizer = CSSSanitizer(allowed_css_properties=ALLOWED_CSS_PROPERTIES)
+
+# Единый источник состава очищаемых HTML-полей нарушения. Обе точки очистки
+# (sanitize_act_data для Pydantic и sanitize_act_content_dict для dict-пути
+# восстановления версий) читают эти кортежи — список полей не разъезжается
+# (пин — тест паритета test_sanitizer_field_parity).
+_VIOLATION_HTML_FIELDS = ("violated", "established")
+_VIOLATION_OPTIONAL_HTML_FIELDS = ("reasons", "consequences", "responsible", "recommendations")
 
 
 def sanitize_html(html: str | None) -> str:
@@ -132,8 +144,8 @@ def sanitize_act_data(data) -> None:
         block.content = sanitize_html(block.content)
 
     for violation in data.violations.values():
-        violation.violated = sanitize_html(violation.violated)
-        violation.established = sanitize_html(violation.established)
+        for html_field in _VIOLATION_HTML_FIELDS:
+            setattr(violation, html_field, sanitize_html(getattr(violation, html_field)))
         violation.descriptionList.items = [
             sanitize_plain_text(item) for item in violation.descriptionList.items
         ]
@@ -141,7 +153,7 @@ def sanitize_act_data(data) -> None:
             item.content = sanitize_html(item.content)
             item.caption = sanitize_plain_text(item.caption)
             item.filename = sanitize_plain_text(item.filename)
-        for field_name in ("reasons", "consequences", "responsible", "recommendations"):
+        for field_name in _VIOLATION_OPTIONAL_HTML_FIELDS:
             field = getattr(violation, field_name)
             field.content = sanitize_html(field.content)
 
@@ -168,7 +180,7 @@ def sanitize_act_content_dict(content: dict) -> None:
     for violation in (content.get("violations") or {}).values():
         if not isinstance(violation, dict):
             continue
-        for html_field in ("violated", "established"):
+        for html_field in _VIOLATION_HTML_FIELDS:
             if html_field in violation:
                 violation[html_field] = sanitize_html(violation[html_field])
         dl = violation.get("descriptionList")
@@ -185,7 +197,7 @@ def sanitize_act_content_dict(content: dict) -> None:
                     item["caption"] = sanitize_plain_text(item["caption"])
                 if "filename" in item:
                     item["filename"] = sanitize_plain_text(item["filename"])
-        for field_name in ("reasons", "consequences", "responsible", "recommendations"):
+        for field_name in _VIOLATION_OPTIONAL_HTML_FIELDS:
             field = violation.get(field_name)
             if isinstance(field, dict) and "content" in field:
                 field["content"] = sanitize_html(field["content"])
