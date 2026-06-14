@@ -60,3 +60,10 @@ def test_strike_via_span_style_survives():
     """Зачёркивание span-style формой (text-decoration: line-through) сохраняется."""
     out = sanitize_html('<span style="text-decoration: line-through;">зач</span>')
     assert "line-through" in out
+
+
+def test_strike_via_text_decoration_line_survives():
+    """#14: форма text-decoration-line не срезается bleach'ем (ловит _STRIKE_RE)."""
+    out = sanitize_html('<span style="text-decoration-line: line-through;">зач</span>')
+    assert "line-through" in out
+    assert "text-decoration-line" in out

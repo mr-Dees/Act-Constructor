@@ -12,7 +12,7 @@ import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SafeHTML, SAFE_HTML_PROFILES } from '../../static/js/shared/sanitize.js';
+import { SafeHTML, SAFE_HTML_PROFILES, ACTS_CSS_PROPERTIES } from '../../static/js/shared/sanitize.js';
 
 const acts = SAFE_HTML_PROFILES.acts;
 
@@ -54,6 +54,19 @@ test('acts: data-атрибуты ссылок и сносок сохранен�
 
 test('acts: ни одного on*-обработчика в ALLOWED_ATTR', () => {
     assert.ok(acts.ALLOWED_ATTR.every((a) => !/^on/i.test(a)));
+});
+
+test('acts: CSS-allowlist зеркалит бэк ALLOWED_CSS_PROPERTIES (#10/#14)', () => {
+    const backendCss = [
+        'font-size', 'color', 'background-color',
+        'font-weight', 'font-style', 'text-decoration', 'text-decoration-line',
+    ];
+    assert.deepEqual([...ACTS_CSS_PROPERTIES].sort(), [...backendCss].sort());
+    // Профиль несёт allowlist для хука фильтрации inline-style.
+    assert.deepEqual(acts.__cssAllowlist, ACTS_CSS_PROPERTIES);
+    // text-decoration-line обязателен — иначе зачёркивание из внешнего контента
+    // срезалось бы и расходилось бы между превью и экспортом.
+    assert.ok(ACTS_CSS_PROPERTIES.includes('text-decoration-line'));
 });
 
 test('fallback без DOMPurify: sanitize экранирует HTML (и для профиля acts)', () => {
