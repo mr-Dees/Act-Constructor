@@ -111,3 +111,26 @@ test('forceSaveAsync: при throw в forceSave отложенный enableTrack
     StorageManager.forceSave = realForceSave;
   }
 });
+
+test('forceSaveAsync: кадр не наступил — destroy() сбрасывает залипший трекинг (#5)', () => {
+  // rAF, который НИКОГДА не вызывает колбэк (вкладка в фоне / страница рушится):
+  // отложенный enableTracking не выполнится, _trackingDepth залип бы навсегда.
+  const realRaf = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = () => 0;
+  try {
+    StorageManager._trackingDepth = 0;
+    // Не await: промис не резолвится без кадра — нам важен синхронный инкремент.
+    StorageManager.forceSaveAsync();
+    assert.equal(StorageManager._trackingDepth, 1, 'disableTracking сработал синхронно');
+
+    // destroy() обязан вернуть счётчик в 0, иначе markAsUnsaved — навсегда no-op.
+    StorageManager.destroy();
+    assert.equal(StorageManager._trackingDepth, 0, 'destroy сбросил залипший счётчик');
+
+    StorageManager._setState('saved');
+    StorageManager.markAsUnsaved();
+    assert.equal(StorageManager._state, 'unsaved', 'после destroy трекинг снова работает');
+  } finally {
+    globalThis.requestAnimationFrame = realRaf;
+  }
+});

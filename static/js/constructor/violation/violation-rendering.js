@@ -146,7 +146,8 @@ Object.assign(ViolationManager.prototype, {
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.updateBlock('violation', violation.id);
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);
@@ -203,7 +204,8 @@ Object.assign(ViolationManager.prototype, {
 
         captionInput.addEventListener('input', () => {
             item.caption = captionInput.value;
-            PreviewManager.updateBlock('violation', violation.id);
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
@@ -273,7 +275,8 @@ Object.assign(ViolationManager.prototype, {
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.updateBlock('violation', violation.id);
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);
