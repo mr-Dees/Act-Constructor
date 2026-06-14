@@ -363,7 +363,7 @@ export class TreeDragDrop {
 
         if (result.valid) {
             this._renderTreeAfterDrop(oldParentId, newParentId, needsFullTreeRender);
-            PreviewManager.update('previewTrim', 30);
+            PreviewManager.update();
 
             if (AppState.currentStep === 2) {
                 // Пересобираем оба поддерева: старый родитель и новый.

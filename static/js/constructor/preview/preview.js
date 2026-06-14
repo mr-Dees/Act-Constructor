@@ -21,7 +21,6 @@ export class PreviewManager {
      * @private
      */
     static _pendingUpdate = false;
-    static _pendingOptions = null;
 
     /**
      * Единый скейлер fit-to-width для inline-панели предпросмотра (#preview).
@@ -50,38 +49,26 @@ export class PreviewManager {
     /**
      * Обновляет содержимое панели предпросмотра.
      * Дедуплицирует подряд идущие вызовы в пределах одного animation frame:
-     * на N вызовов выполнится ровно один _performUpdate с последними опциями.
-     *
-     * @param {Object|string} options - Настройки отображения или строка 'previewTrim' для обратной совместимости
+     * на N вызовов выполнится ровно один _performUpdate.
      */
-    static update(options = {}) {
-        // Обратная совместимость со старым API
-        if (typeof options === 'string') {
-            options = {previewTrim: AppConfig.preview.defaultTrimLength};
-        }
-
+    static update() {
         if (this._pendingUpdate) {
-            // Подряд идущий вызов в том же кадре — мержим опции и выходим,
-            // существующий RAF подберёт обновлённый _pendingOptions.
-            Object.assign(this._pendingOptions, options);
+            // Подряд идущий вызов в том же кадре — выходим, существующий RAF
+            // выполнит обновление.
             return;
         }
 
         this._pendingUpdate = true;
-        this._pendingOptions = {...options};
 
         requestAnimationFrame(() => {
-            const opts = this._pendingOptions;
             this._pendingUpdate = false;
-            this._pendingOptions = null;
-            const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
             // Сбрасываем кеш замечаний ДО рендера: _applyTableOutlines (рамки) и
             // collectTableItems (колокольчик) пересчитают снимок один раз и
             // переиспользуют его. Инвалидация здесь, а не на content-changed,
             // потому что событие летит ПОСЛЕ outlines — иначе рамки читали бы
             // устаревший кеш.
             invalidateTableWarningsCache();
-            this._performUpdate(previewTrim);
+            this._performUpdate();
             this._emitContentChanged();
         });
     }
@@ -218,12 +205,11 @@ export class PreviewManager {
         const id = key.slice(sep + 1);
         const el = this._blockIndex.get(key);
         const hasElement = !!el && el.isConnected;
-        const trim = AppConfig.preview.defaultTrimLength;
 
         if (kind === 'table') {
             const table = _unwrap(AppState.tables)[id];
             if (decideBlockPatch(kind, {hasElement, hasData: !!table}) !== 'patch') return false;
-            const fresh = PreviewTableRenderer.create(table, trim, { tableId: id });
+            const fresh = PreviewTableRenderer.create(table, { tableId: id });
             el.replaceWith(fresh);
             this._blockIndex.set(key, fresh);
             return true;
@@ -248,7 +234,7 @@ export class PreviewManager {
         if (kind === 'violation') {
             const violation = _unwrap(AppState.violations)[id];
             if (decideBlockPatch(kind, {hasElement, hasData: !!violation}) !== 'patch') return false;
-            const fresh = PreviewViolationRenderer.create(violation, trim);
+            const fresh = PreviewViolationRenderer.create(violation);
             el.replaceWith(fresh);
             this._blockIndex.set(key, fresh);
             this._attachPreviewTooltips(fresh);
@@ -261,9 +247,8 @@ export class PreviewManager {
     /**
      * Выполняет обновление предпросмотра
      * @private
-     * @param {number} previewTrim - Максимальная длина текста
      */
-    static _performUpdate(previewTrim) {
+    static _performUpdate() {
         const preview = document.getElementById('preview');
         if (!preview) return;
 
@@ -277,7 +262,7 @@ export class PreviewManager {
         this._blockIndex.clear();
         this._indexBlocks = true;
         try {
-            this.renderDocumentInto(preview, { previewTrim });
+            this.renderDocumentInto(preview);
         } finally {
             this._indexBlocks = false;
         }
@@ -298,11 +283,9 @@ export class PreviewManager {
      * деревом и tooltip'ами, плюс индикатор зума поверх холста.
      *
      * @param {HTMLElement} container - Холст (#preview или #previewMenuBody).
-     * @param {Object} opts
-     * @param {number} opts.previewTrim - Максимальная длина текста.
      * @returns {{sheet: HTMLElement, sizer: HTMLElement, indicator: HTMLElement}}
      */
-    static renderDocumentInto(container, { previewTrim }) {
+    static renderDocumentInto(container) {
         // Sizer занимает масштабированный footprint листа (см. preview-fit.js).
         const sizer = document.createElement('div');
         sizer.className = 'preview-sheet-sizer';
@@ -315,7 +298,7 @@ export class PreviewManager {
         container.appendChild(sizer);
 
         this._renderTitle(sheet);
-        this._renderTree(sheet, previewTrim);
+        this._renderTree(sheet);
         this._attachPreviewTooltips(sheet);
 
         // Цветные рамки проблемных таблиц на листе (источник — те же замечания,
@@ -372,11 +355,10 @@ export class PreviewManager {
      * Рендерит дерево структуры документа
      * @private
      * @param {HTMLElement} container - Контейнер для дерева
-     * @param {number} previewTrim - Максимальная длина текста
      */
-    static _renderTree(container, previewTrim) {
+    static _renderTree(container) {
         // Read-only обход — по raw-дереву (без Proxy get-трапов).
-        this.renderNode(_unwrap(AppState.treeData), container, 1, previewTrim);
+        this.renderNode(_unwrap(AppState.treeData), container, 1);
     }
 
     /**
@@ -385,14 +367,13 @@ export class PreviewManager {
      * @param {Object} node - Узел дерева для рендеринга
      * @param {HTMLElement} container - Контейнер для вставки элементов
      * @param {number} level - Уровень вложенности для размера заголовков
-     * @param {number} previewTrim - Максимальная длина текста
      */
-    static renderNode(node, container, level, previewTrim) {
+    static renderNode(node, container, level) {
         if (!node.children) return;
 
         node.children.forEach(child => {
             const renderer = this._getRenderer(child.type);
-            renderer.call(this, child, container, level, previewTrim);
+            renderer.call(this, child, container, level);
         });
     }
 
@@ -416,7 +397,7 @@ export class PreviewManager {
      * Рендерит узел таблицы
      * @private
      */
-    static _renderTableNode(child, container, level, previewTrim) {
+    static _renderTableNode(child, container, level) {
         // Единый с DOM-рендерером и DOCX предикат показа заголовка (render-8).
         if (shouldShowTableTitle(child)) {
             const tableTitle = document.createElement('h4');
@@ -428,7 +409,7 @@ export class PreviewManager {
         // Read-only: raw-таблица (рендерер ячеек только читает grid).
         const tableData = _unwrap(AppState.tables)[child.tableId];
         if (tableData) {
-            const table = PreviewTableRenderer.create(tableData, previewTrim, { tableId: child.tableId });
+            const table = PreviewTableRenderer.create(tableData, { tableId: child.tableId });
             container.appendChild(table);
             if (this._indexBlocks) this._blockIndex.set(`table:${child.tableId}`, table);
         }
@@ -438,7 +419,7 @@ export class PreviewManager {
      * Рендерит узел текстового блока
      * @private
      */
-    static _renderTextBlockNode(child, container, level, previewTrim) {
+    static _renderTextBlockNode(child, container, level) {
         const textBlock = _unwrap(AppState.textBlocks)[child.textBlockId];
 
         if (this._hasContent(textBlock)) {
@@ -452,11 +433,11 @@ export class PreviewManager {
      * Рендерит узел нарушения
      * @private
      */
-    static _renderViolationNode(child, container, level, previewTrim) {
+    static _renderViolationNode(child, container, level) {
         const violation = _unwrap(AppState.violations)[child.violationId];
 
         if (violation) {
-            const element = PreviewViolationRenderer.create(violation, previewTrim);
+            const element = PreviewViolationRenderer.create(violation);
             container.appendChild(element);
             if (this._indexBlocks) this._blockIndex.set(`violation:${child.violationId}`, element);
         }
@@ -466,13 +447,13 @@ export class PreviewManager {
      * Рендерит обычный узел-пункт
      * @private
      */
-    static _renderItemNode(child, container, level, previewTrim) {
+    static _renderItemNode(child, container, level) {
         this._renderHeading(child, container, level);
-        this._renderContent(child, container, previewTrim);
+        this._renderContent(child, container);
 
         // Рекурсивная обработка дочерних элементов
         if (child.children?.length > 0) {
-            this.renderNode(child, container, level + 1, previewTrim);
+            this.renderNode(child, container, level + 1);
         }
     }
 
@@ -491,13 +472,12 @@ export class PreviewManager {
      * Рендерит содержимое пункта
      * @private
      */
-    static _renderContent(child, container, previewTrim) {
+    static _renderContent(child, container) {
         if (!child.content?.trim()) return;
 
         const contentDiv = document.createElement('div');
         contentDiv.className = 'preview-content';
-        // M.5: content пункта выводится полностью (DOCX не обрезает),
-        // previewTrim к нему не применяется.
+        // M.5: content пункта выводится полностью (DOCX не обрезает).
         contentDiv.textContent = child.content;
         container.appendChild(contentDiv);
     }
@@ -517,7 +497,7 @@ export class PreviewManager {
     static forceUpdate() {
         // Та же инвалидация кеша замечаний перед рендером, что и в update().
         invalidateTableWarningsCache();
-        this._performUpdate(AppConfig.preview.defaultTrimLength);
+        this._performUpdate();
         this._emitContentChanged();
     }
 

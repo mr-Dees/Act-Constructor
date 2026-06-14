@@ -286,7 +286,7 @@ export const UndoDeleteManager = {
         if (AppState.currentStep === 2) {
             window.ItemsRenderer?.renderAll?.();
         }
-        window.PreviewManager?.update?.('previewTrim', 30);
+        window.PreviewManager?.update?.();
     },
 
     /**

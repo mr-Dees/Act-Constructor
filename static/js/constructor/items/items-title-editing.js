@@ -118,9 +118,9 @@ export class ItemsTitleEditing {
         }
         // Точечное обновление подписи в дереве вместо полного render().
         treeManager.renderer.renderNodeRenamed(node.id);
-        // Preview-зона перерисовывается дешёвым trim-режимом; для редактирования
-        // заголовка пункта это адекватная стоимость.
-        PreviewManager.update('previewTrim');
+        // Preview-зона перерисовывается целиком; для редактирования заголовка
+        // пункта это адекватная стоимость.
+        PreviewManager.update();
     }
 
     /**
