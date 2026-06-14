@@ -729,3 +729,68 @@ class TestInvoiceSave:
                      ["КС", "ФР", "ОР", "РР", "МКР"]],
         ))
         assert len(inv.metrics) == 5
+
+
+# == Динамические лимиты из настроек (#3, #15, #13) ==
+
+
+class TestDynamicLimitsFromSettings:
+    """Схема читает лимиты из реестра настроек (единый источник, config/env)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self):
+        from app.core import settings_registry
+        settings_registry.reset()
+        yield
+        settings_registry.reset()
+
+    @staticmethod
+    def _register(acts_settings):
+        from app.core import settings_registry
+        from app.domains.acts import DOMAIN_NAME
+        settings_registry._registry[DOMAIN_NAME] = acts_settings
+
+    def test_items_count_limit_from_settings(self):
+        """#3: лимит элементов нарушения берётся из ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION."""
+        from app.domains.acts.settings import ActsSettings, ImagesSettings
+        self._register(ActsSettings(images=ImagesSettings(max_items_per_violation=2)))
+        items = [
+            ViolationContentItemSchema(id=str(i), type="freeText", content="x")
+            for i in range(3)
+        ]
+        with pytest.raises(ValidationError):
+            ViolationAdditionalContentSchema(enabled=True, items=items)
+        # 2 элемента проходят
+        ViolationAdditionalContentSchema(enabled=True, items=items[:2])
+
+    def test_image_mime_whitelist_from_settings(self):
+        """#15: добавленный в настройки MIME принимается схемой url."""
+        from app.domains.acts.settings import ActsSettings, ImagesSettings
+        self._register(ActsSettings(
+            images=ImagesSettings(allowed_mime_types=["image/webp", "image/png"])
+        ))
+        # webp теперь валиден
+        ViolationContentItemSchema(id="1", type="image", url="data:image/webp;base64,AAAA")
+        # gif больше не в whitelist -> отвергается
+        with pytest.raises(ValidationError):
+            ViolationContentItemSchema(id="2", type="image", url="data:image/gif;base64,AAAA")
+
+    def test_table_rows_limit_from_settings(self):
+        """#13: потолок строк grid берётся из ACTS__TABLES__MAX_ROWS."""
+        from app.domains.acts.settings import ActsSettings, TablesSettings
+        self._register(ActsSettings(tables=TablesSettings(max_rows=2)))
+        cell = lambda: TableCellSchema(content="x")
+        grid3 = [[cell()], [cell()], [cell()]]
+        with pytest.raises(ValidationError):
+            TableSchema(id="t", nodeId="n", grid=grid3)
+        TableSchema(id="t", nodeId="n", grid=grid3[:2])
+
+    def test_font_size_bounds_from_settings(self):
+        """#13: границы шрифта берутся из ACTS__TEXTBLOCKS__*."""
+        from app.domains.acts.settings import ActsSettings, TextblocksSettings
+        self._register(ActsSettings(textblocks=TextblocksSettings(font_size_min=10, font_size_max=20)))
+        with pytest.raises(ValidationError):
+            TextBlockFormattingSchema(fontSize=8)
+        with pytest.raises(ValidationError):
+            TextBlockFormattingSchema(fontSize=22)
+        TextBlockFormattingSchema(fontSize=14)

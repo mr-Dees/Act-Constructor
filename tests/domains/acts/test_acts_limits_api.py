@@ -21,9 +21,15 @@ from app.domains.acts.schemas.act_content import (
     FONT_SIZE_MIN,
     TABLE_MAX_COLS,
     TABLE_MAX_ROWS,
+    VIOLATION_CONTENT_ITEMS_MAX,
     VIOLATION_IMAGE_URL_MAX_LENGTH,
 )
-from app.domains.acts.settings import ActsSettings, ImagesSettings
+from app.domains.acts.settings import (
+    ActsSettings,
+    ImagesSettings,
+    TablesSettings,
+    TextblocksSettings,
+)
 
 
 USERNAME = "12345"
@@ -65,13 +71,47 @@ class TestImagesSettingsDefaults:
 
     def test_mime_whitelist_matches_schema_url_whitelist(self):
         """MIME-whitelist настроек согласован с regex-whitelist'ом схемы url."""
-        from app.domains.acts.schemas.act_content import _IMAGE_DATA_URL_RE
+        from app.domains.acts.schemas.act_content import _image_data_url_re
         s = ImagesSettings()
+        rx = _image_data_url_re(tuple(s.allowed_mime_types))
         for mime in s.allowed_mime_types:
             subtype = mime.split("/", 1)[1]
-            assert _IMAGE_DATA_URL_RE.match(f"data:image/{subtype};base64,AAAA"), (
+            assert rx.match(f"data:image/{subtype};base64,AAAA"), (
                 f"MIME {mime} разрешён настройками, но отбивается схемой url"
             )
+
+
+# ── Tables/Textblocks settings: дефолты + пин против фолбэк-констант схемы ────
+
+
+class TestStructureSettingsDefaults:
+    """Дефолты границ таблиц/текстблоков и их согласованность со схемой."""
+
+    def test_tables_defaults(self):
+        s = TablesSettings()
+        assert s.max_rows == 64
+        assert s.max_cols == 16
+        assert s.min_col_width_px == 80
+
+    def test_textblocks_defaults(self):
+        s = TextblocksSettings()
+        assert s.font_size_min == 8
+        assert s.font_size_max == 72
+
+    def test_acts_settings_includes_tables_and_textblocks(self):
+        s = ActsSettings()
+        assert isinstance(s.tables, TablesSettings)
+        assert isinstance(s.textblocks, TextblocksSettings)
+
+    def test_settings_defaults_match_schema_fallbacks(self):
+        """Дефолты настроек == фолбэк-константы схемы (не должны разъезжаться)."""
+        t = TablesSettings()
+        tb = TextblocksSettings()
+        assert t.max_rows == TABLE_MAX_ROWS
+        assert t.max_cols == TABLE_MAX_COLS
+        assert tb.font_size_min == FONT_SIZE_MIN
+        assert tb.font_size_max == FONT_SIZE_MAX
+        assert ImagesSettings().max_items_per_violation == VIOLATION_CONTENT_ITEMS_MAX
 
 
 # ── GET /api/v1/acts/limits ─────────────────────────────────────────────────
@@ -112,18 +152,36 @@ class TestActsLimitsEndpoint:
             "max_items_per_violation": 50,
             "preview_max_height_percent": 40,
         }
-        # Границы таблиц/шрифта — из констант схем, не независимый хардкод
+        # Границы таблиц/шрифта — из настроек ACTS__TABLES__/TEXTBLOCKS__
         assert body["tables"] == {
             "max_rows": TABLE_MAX_ROWS,
             "max_cols": TABLE_MAX_COLS,
+            "min_col_width_px": 80,
         }
         assert body["textblocks"] == {
             "font_size_min": FONT_SIZE_MIN,
             "font_size_max": FONT_SIZE_MAX,
         }
-        # Фактические значения границ (пин против случайной правки констант)
-        assert body["tables"] == {"max_rows": 64, "max_cols": 16}
+        # Фактические значения границ (пин против случайной правки дефолтов)
+        assert body["tables"] == {"max_rows": 64, "max_cols": 16, "min_col_width_px": 80}
         assert body["textblocks"] == {"font_size_min": 8, "font_size_max": 72}
+
+    def test_limits_reflect_settings_override(self):
+        """Эндпоинт отдаёт значения из настроек (config/env), не хардкод."""
+        app = FastAPI()
+        for router, prefix, _tags in get_api_routers():
+            app.include_router(router, prefix=f"/api/v1{prefix}")
+        app.dependency_overrides[get_username] = lambda: USERNAME
+        app.dependency_overrides[_get_acts_settings] = lambda: ActsSettings(
+            tables=TablesSettings(max_rows=100, max_cols=20, min_col_width_px=50),
+            textblocks=TextblocksSettings(font_size_min=6, font_size_max=96),
+            images=ImagesSettings(max_items_per_violation=80),
+        )
+        with TestClient(app) as client:
+            body = client.get("/api/v1/acts/limits").json()
+        assert body["tables"] == {"max_rows": 100, "max_cols": 20, "min_col_width_px": 50}
+        assert body["textblocks"] == {"font_size_min": 6, "font_size_max": 96}
+        assert body["images"]["max_items_per_violation"] == 80
 
     def test_limits_not_shadowed_by_act_id_route(self):
         """Регрессия порядка роутеров: /limits не перехвачен /{act_id}."""
