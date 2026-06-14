@@ -46,21 +46,10 @@ export const CLIPBOARD_FORMAT_VERSION = 1;
 export const CLIPBOARD_STORAGE_KEY = 'constructor:clipboard';
 
 /**
- * Deep-копия plain-данных (узлы/словари JSON-сериализуемы — они и так уходят
- * на бэкенд через exportData).
- * @param {*} value
- * @returns {*}
- */
-function deepCopy(value) {
-    return typeof structuredClone === 'function'
-        ? structuredClone(value)
-        : JSON.parse(JSON.stringify(value));
-}
-
-/**
  * Сериализует поддерево узла в payload буфера: deep-копия узла + записи
  * словарей всех листьев-блоков поддерева. Чистая функция: читает raw-узлы и
- * raw-словари, возвращает новые объекты.
+ * raw-словари, возвращает новые объекты. deep-копия и сбор записей словарей —
+ * общие хелперы TreeUtils (см. undo-delete).
  *
  * @param {Object} rawNode - Raw-корень копируемого поддерева
  * @param {Object} rawDicts - Сырые словари {tables, textBlocks, violations}
@@ -68,27 +57,11 @@ function deepCopy(value) {
  * @returns {Object} Payload буфера
  */
 export function serializeSubtree(rawNode, rawDicts, sourceActId = null) {
-    const dicts = {};
-    const walk = (n) => {
-        const spec = n.type ? getBlockType(n.type) : null;
-        if (spec?.idProp && spec.dictName) {
-            const contentId = n[spec.idProp];
-            const dict = rawDicts[spec.dictName];
-            const entry = contentId && dict ? _unwrap(dict[contentId]) : null;
-            if (entry) {
-                if (!dicts[spec.dictName]) dicts[spec.dictName] = {};
-                dicts[spec.dictName][contentId] = deepCopy(entry);
-            }
-        }
-        (n.children || []).forEach(child => walk(_unwrap(child)));
-    };
-    walk(_unwrap(rawNode));
-
     return {
         version: CLIPBOARD_FORMAT_VERSION,
         sourceActId: sourceActId ?? null,
-        node: deepCopy(_unwrap(rawNode)),
-        dicts,
+        node: TreeUtils.deepCopy(_unwrap(rawNode)),
+        dicts: TreeUtils.collectSubtreeDictEntries(rawNode, rawDicts),
     };
 }
 
@@ -121,7 +94,7 @@ export function filterPinnedFromSubtree(node) {
         return copy;
     };
 
-    return { node: clone(deepCopy(node)), skippedPinned };
+    return { node: clone(TreeUtils.deepCopy(node)), skippedPinned };
 }
 
 /**
@@ -156,8 +129,8 @@ export function resetInvoices(node) {
  */
 export function regenerateIds(payload, gens) {
     const { genNodeId, genContentId } = gens;
-    const srcNode = deepCopy(payload.node);
-    const srcDicts = deepCopy(payload.dicts || {});
+    const srcNode = TreeUtils.deepCopy(payload.node);
+    const srcDicts = TreeUtils.deepCopy(payload.dicts || {});
 
     // Маппинг старый contentId → новый contentId (по dictName).
     const contentIdMap = {};
