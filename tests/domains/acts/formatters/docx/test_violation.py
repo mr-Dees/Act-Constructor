@@ -250,3 +250,36 @@ def test_empty_case_not_rendered_and_not_numbered(doc):
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "Кейс 1: Единственный" in text
     assert "Кейс 2:" not in text
+
+
+class _StubShape:
+    """Минимальный shape для юнит-теста _scale_picture (width/height — int)."""
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+
+def test_scale_picture_zero_width_does_not_crash():
+    """#7: картинка нулевой ширины не роняет экспорт (нет ZeroDivisionError)."""
+    shape = _StubShape(width=0, height=100)
+    _scale_picture(shape, width_percent=50)  # не должно бросить
+    # Размеры не тронуты — масштабировать нечего.
+    assert shape.width == 0
+    assert shape.height == 100
+
+
+def test_scale_picture_zero_width_auto_branch():
+    """#7: тот же guard в ветке width_percent=0 (натуральный размер)."""
+    shape = _StubShape(width=0, height=50)
+    _scale_picture(shape, width_percent=0)
+    assert shape.width == 0
+    assert shape.height == 50
+
+
+def test_scale_picture_normal_still_scales():
+    """Регрессия: ненулевая ширина по-прежнему масштабируется по проценту."""
+    usable = int(Twips(_USABLE_WIDTH_TWIPS))
+    shape = _StubShape(width=usable, height=usable)
+    _scale_picture(shape, width_percent=50)
+    assert shape.width == usable * 50 // 100
+    assert shape.height == shape.width  # пропорции 1:1 сохранены

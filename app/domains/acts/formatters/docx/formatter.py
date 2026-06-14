@@ -12,7 +12,7 @@ from docx.shared import Pt
 from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.formatters.docx.builders.cover import build_cover_block
 from app.domains.acts.formatters.docx.builders.header_footer import apply_header_footer
-from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
+from app.domains.acts.formatters.docx.builders.inline import _PX_TO_PT, apply_inline_html
 from app.domains.acts.formatters.docx.builders.rubricator import build_rubricator_plate
 from app.domains.acts.formatters.docx.builders.signature import build_signature
 from app.domains.acts.formatters.docx.builders.tables import build_table
@@ -30,12 +30,13 @@ from app.domains.acts.formatters.docx.styles import (
 from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
 
 # Нетронутый юзером formatting (все значения схемных дефолтов) → легаси-рендер
-# текстблока: JUSTIFY + body_pt. Любое отличие — formatting задан явно и
-# применяется буквально (M.1): поведение существующих актов не меняется.
+# текстблока: JUSTIFY + body_pt. Размер шрифта обрабатывается ОТДЕЛЬНО от
+# прочих полей: дефолтный fontSize → body_pt (12pt), изменённый → px→pt
+# (×0.75); alignment/bold/italic/underline применяются независимо и на размер
+# не влияют (M.1, фикс #9: смена только выравнивания не уменьшала шрифт).
 _DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
 
-# px → pt: умножение на 0.75 (16px → 12pt), как в builders/inline.py.
-_PX_TO_PT = 0.75
+# px → pt (16px → 12pt) — единый источник в builders/inline.py (_PX_TO_PT).
 
 _TB_ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -96,7 +97,9 @@ class DocxFormatter:
 
         Нетронутый formatting (равен схемным дефолтам) → легаси: JUSTIFY +
         body_pt. Заданный юзером — применяется буквально: alignment,
-        fontSize (px→pt ×0.75), bold/italic/underline поверх runs.
+        bold/italic/underline поверх runs. Размер: дефолтный fontSize →
+        body_pt (12pt), изменённый → px→pt (×0.75) — смена только
+        выравнивания/начертания шрифт НЕ уменьшает (#9).
         Inline-разметка содержимого (теги <b>/<i>/... ) имеет приоритет —
         базовые свойства лишь «включают», но не снимают начертание.
         """
@@ -107,7 +110,12 @@ class DocxFormatter:
             apply_inline_html(para, schema.content, base_size_pt=Sizes.body_pt)
             return
         para.alignment = _TB_ALIGNMENT_MAP.get(fmt.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY)
-        apply_inline_html(para, schema.content, base_size_pt=fmt.fontSize * _PX_TO_PT)
+        base_size_pt = (
+            Sizes.body_pt
+            if fmt.fontSize == _DEFAULT_TB_FORMATTING.fontSize
+            else fmt.fontSize * _PX_TO_PT
+        )
+        apply_inline_html(para, schema.content, base_size_pt=base_size_pt)
         if fmt.bold or fmt.italic or fmt.underline:
             for run in para.runs:
                 if fmt.bold:
