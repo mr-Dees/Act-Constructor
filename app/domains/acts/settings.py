@@ -113,6 +113,32 @@ class ImagesSettings(BaseModel):
     preview_max_height_percent: int = Field(default=40, gt=0, le=100)
 
 
+class TablesSettings(BaseModel):
+    """
+    Жёсткие границы таблиц (grid) — защита от исчерпания памяти.
+
+    Единый источник для серверной схемы (act_content.py читает их в
+    валидаторах), эндпоинта GET /acts/limits и фронт-гейтов вставки
+    строк/колонок. Дефолты обязаны совпадать с фолбэк-константами схемы
+    (TABLE_MAX_ROWS/TABLE_MAX_COLS).
+    """
+    max_rows: int = Field(default=64, gt=0)
+    max_cols: int = Field(default=16, gt=0)
+    min_col_width_px: int = Field(default=80, gt=0)
+
+
+class TextblocksSettings(BaseModel):
+    """
+    Границы форматирования текстблоков (размер шрифта редактора).
+
+    Единый источник для серверной схемы (TextBlockFormattingSchema),
+    GET /acts/limits и фронт-тулбара. Дефолты совпадают с фолбэками схемы
+    (FONT_SIZE_MIN/FONT_SIZE_MAX).
+    """
+    font_size_min: int = Field(default=8, gt=0)
+    font_size_max: int = Field(default=72, gt=0)
+
+
 class ActsSettings(BaseModel):
     """Корневая модель настроек домена актов."""
     lock: LockSettings = LockSettings()
@@ -121,3 +147,5 @@ class ActsSettings(BaseModel):
     invoice: InvoiceSettings = InvoiceSettings()
     audit_log: AuditLogSettings = AuditLogSettings()
     images: ImagesSettings = ImagesSettings()
+    tables: TablesSettings = TablesSettings()
+    textblocks: TextblocksSettings = TextblocksSettings()

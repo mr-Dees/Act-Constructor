@@ -11,15 +11,16 @@
 - картинки (data:image-URL) встраиваются inline shape'ом: отдельный абзац
   по центру, подпись курсивом по центру ниже (Б-1.5). Ширина — поле
   `width` (% полезной ширины страницы); 0/не задана — натуральный размер,
-  но не шире полезной ширины (Б-1.4). Допустимые форматы — png/jpeg/gif
-  (whitelist IMAGE_DATA_URL_PATTERN из act_content, тот же, что и у валидатора
-  url). Битый/пустой url или формат вне whitelist (webp/svg) → текстовый
-  плейсхолдер «Изображение: {filename}» (паритет с MD/TXT).
+  но не шире полезной ширины (Б-1.4). Допустимые форматы — из настроек
+  ACTS__IMAGES__ALLOWED_MIME_TYPES (через image_data_url_pattern из act_content,
+  тот же источник, что и у валидатора url). Битый/пустой url или формат вне
+  whitelist → текстовый плейсхолдер «Изображение: {filename}» (паритет с MD/TXT).
 """
 import base64
 import binascii
 import io
 import re
+from functools import lru_cache
 
 from docx.document import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -27,7 +28,7 @@ from docx.shared import Pt, Twips
 
 from app.domains.acts.formatters.docx.styles import Fonts, Margins, Page, Sizes
 from app.domains.acts.schemas.act_content import (
-    IMAGE_DATA_URL_PATTERN,
+    image_data_url_pattern,
     ViolationContentItemSchema,
     ViolationSchema,
 )
@@ -35,13 +36,21 @@ from app.domains.acts.schemas.act_content import (
 # Полезная ширина страницы (A4 минус поля) в твипах — потолок ширины картинок.
 _USABLE_WIDTH_TWIPS = Page.width_twips - Margins.left - Margins.right
 
-# data:image-URL: формат уже отвалидирован схемой (png/jpeg/gif, base64) — тем же
-# IMAGE_DATA_URL_PATTERN, что и валидатор url. Здесь только довешиваем выделение
-# base64-payload. Единый источник whitelist'а форматов — паттерн из act_content.
-_DATA_URL_RE = re.compile(
-    "^" + IMAGE_DATA_URL_PATTERN + r"(?P<payload>.+)$",
-    re.IGNORECASE | re.DOTALL,
-)
+
+@lru_cache(maxsize=8)
+def _data_url_re_for(pattern: str) -> re.Pattern:
+    """regex выделения base64-payload для данного whitelist-паттерна."""
+    return re.compile("^" + pattern + r"(?P<payload>.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _data_url_re() -> re.Pattern:
+    """data:image-URL regex с выделением payload по живому whitelist'у настроек.
+
+    Whitelist форматов берётся из ACTS__IMAGES__ALLOWED_MIME_TYPES (через
+    image_data_url_pattern) — тот же источник, что и у валидатора схемы, чтобы
+    форматы не разъезжались между валидацией и сборкой DOCX.
+    """
+    return _data_url_re_for(image_data_url_pattern())
 
 
 def build_violation(doc: Document, violation: ViolationSchema) -> None:
@@ -125,7 +134,7 @@ def _decode_data_url(url: str) -> bytes | None:
     """Достаёт байты картинки из data:image-URL; None — если url не пригоден."""
     if not url:
         return None
-    match = _DATA_URL_RE.match(url)
+    match = _data_url_re().match(url)
     if not match:
         return None
     try:
