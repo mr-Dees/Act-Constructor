@@ -6,6 +6,10 @@
  * с GET /api/v1/acts/limits (паттерн chat-files._loadLimits); до ответа
  * сервера действуют дефолты — зеркало ACTS__IMAGES__* (settings.py),
  * серверная валидация схемы в любом случае прикроет.
+ *
+ * Тот же единственный GET наполняет и СТРУКТУРНЫЕ лимиты (таблицы/шрифт,
+ * секции tables/textblocks ответа) — getStructureLimits() для гейтов
+ * таблиц и тулбара шрифта (см. table-cells-operations.js, table-sizes.js).
  */
 
 import { AppConfig } from '../../shared/app-config.js';
@@ -20,7 +24,22 @@ export const DEFAULT_IMAGE_LIMITS = {
     previewMaxHeightPercent: 40,
 };
 
+/**
+ * Дефолтные структурные лимиты (таблицы/шрифт) — синхронный фолбэк до ответа
+ * сервера. Источник истины в рантайме — GET /acts/limits (секции tables /
+ * textblocks из настроек ACTS__TABLES__* / ACTS__TEXTBLOCKS__*); до ответа
+ * берём AppConfig.limits (зеркало дефолтов схемы).
+ */
+export const DEFAULT_STRUCTURE_LIMITS = {
+    maxRows: AppConfig.limits.table.maxRows,
+    maxCols: AppConfig.limits.table.maxCols,
+    minColWidthPx: AppConfig.limits.table.minColWidthPx,
+    fontSizeMin: AppConfig.limits.textblock.fontSizeMin,
+    fontSizeMax: AppConfig.limits.textblock.fontSizeMax,
+};
+
 let _limits = { ...DEFAULT_IMAGE_LIMITS };
+let _structure = { ...DEFAULT_STRUCTURE_LIMITS };
 let _loadPromise = null;
 
 /**
@@ -48,6 +67,17 @@ export function loadImageLimits() {
                 if (typeof img.max_items_per_violation === 'number') _limits.maxItemsPerViolation = img.max_items_per_violation;
                 if (typeof img.preview_max_height_percent === 'number') _limits.previewMaxHeightPercent = img.preview_max_height_percent;
             }
+            const tbl = data && data.tables;
+            if (tbl) {
+                if (typeof tbl.max_rows === 'number') _structure.maxRows = tbl.max_rows;
+                if (typeof tbl.max_cols === 'number') _structure.maxCols = tbl.max_cols;
+                if (typeof tbl.min_col_width_px === 'number') _structure.minColWidthPx = tbl.min_col_width_px;
+            }
+            const tb = data && data.textblocks;
+            if (tb) {
+                if (typeof tb.font_size_min === 'number') _structure.fontSizeMin = tb.font_size_min;
+                if (typeof tb.font_size_max === 'number') _structure.fontSizeMax = tb.font_size_max;
+            }
         } catch (_) {
             // Сеть/CORS — дефолты, серверная валидация прикроет.
         }
@@ -65,9 +95,20 @@ export function getImageLimits() {
     return _limits;
 }
 
+/**
+ * Текущие структурные лимиты таблиц/шрифта (дефолты до ответа сервера).
+ *
+ * @returns {{maxRows:number, maxCols:number, minColWidthPx:number,
+ *            fontSizeMin:number, fontSizeMax:number}}
+ */
+export function getStructureLimits() {
+    return _structure;
+}
+
 /** Сброс к дефолтам — для тестов. */
 export function resetImageLimitsForTests() {
     _limits = { ...DEFAULT_IMAGE_LIMITS };
+    _structure = { ...DEFAULT_STRUCTURE_LIMITS };
     _loadPromise = null;
 }
 
@@ -164,6 +205,7 @@ function _fmtMb(bytes) {
 window.ViolationImageValidator = {
     loadImageLimits,
     getImageLimits,
+    getStructureLimits,
     validateImageFile,
     estimateDataUrlBytes,
     estimateActImageBytes,
