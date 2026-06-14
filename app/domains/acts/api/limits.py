@@ -12,12 +12,6 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
 from app.domains.acts.deps import _get_acts_settings
-from app.domains.acts.schemas.act_content import (
-    FONT_SIZE_MAX,
-    FONT_SIZE_MIN,
-    TABLE_MAX_COLS,
-    TABLE_MAX_ROWS,
-)
 from app.domains.acts.settings import ActsSettings
 
 logger = logging.getLogger("audit_workstation.api.acts.limits")
@@ -37,9 +31,12 @@ async def get_acts_limits(
 
     Фронт читает один раз при инициализации конструктора: валидация
     картинок (MIME/размер/число) и границы grid/fontSize синхронизируются
-    с серверными (настройки ACTS__IMAGES__* + константы схем act_content.py).
+    с серверными настройками (ACTS__IMAGES__* / ACTS__TABLES__* /
+    ACTS__TEXTBLOCKS__*) — единый источник для UI-гейтов и схемы.
     """
     images = acts_cfg.images
+    tables = acts_cfg.tables
+    textblocks = acts_cfg.textblocks
     return {
         "images": {
             "max_file_size": images.max_file_size,
@@ -49,11 +46,12 @@ async def get_acts_limits(
             "preview_max_height_percent": images.preview_max_height_percent,
         },
         "tables": {
-            "max_rows": TABLE_MAX_ROWS,
-            "max_cols": TABLE_MAX_COLS,
+            "max_rows": tables.max_rows,
+            "max_cols": tables.max_cols,
+            "min_col_width_px": tables.min_col_width_px,
         },
         "textblocks": {
-            "font_size_min": FONT_SIZE_MIN,
-            "font_size_max": FONT_SIZE_MAX,
+            "font_size_min": textblocks.font_size_min,
+            "font_size_max": textblocks.font_size_max,
         },
     }

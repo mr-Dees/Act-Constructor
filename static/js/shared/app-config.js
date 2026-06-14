@@ -588,13 +588,16 @@ export class AppConfig {
     };
 
     /**
-     * Лимиты структуры контента — единый источник для фронт-гейтов.
+     * Синхронный ФОЛБЭК структурных лимитов до ответа GET /acts/limits.
      *
-     * Числа зеркалят серверную схему app/domains/acts/schemas/act_content.py
-     * (TableSchema: grid максимум 64 строки × 16 колонок;
-     * TextBlockFormattingSchema: fontSize 8-72). Контракт фронт↔бэк закреплён
-     * стражами: tests/js/table-cells-limits.test.mjs и
-     * tests/test_act_content_roundtrip.py — при изменении менять синхронно.
+     * Источник истины в рантайме — настройки ACTS__TABLES__* /
+     * ACTS__TEXTBLOCKS__* (отдаются /limits, читаются через
+     * getStructureLimits() в violation-image-validator.js). Эти числа —
+     * зеркало дефолтов настроек (= фолбэк-констант схемы
+     * app/domains/acts/schemas/act_content.py); действуют, пока ответ сервера
+     * не пришёл. Контракт фронт↔бэк закреплён стражами:
+     * tests/js/table-cells-limits.test.mjs и tests/test_act_content_roundtrip.py
+     * — при изменении дефолтов менять синхронно.
      */
     static limits = {
         table: {

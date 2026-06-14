@@ -2,6 +2,7 @@
  * Расширение для работы с панелью инструментов
  */
 import { TextBlockManager } from './textblock-core.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -137,6 +138,12 @@ Object.assign(TextBlockManager.prototype, {
      */
     applyFontSize(fontSize) {
         if (!this.activeEditor) return;
+
+        // Кламп по границам шрифта из настроек (ACTS__TEXTBLOCKS__* через
+        // /limits): схема отвергнет размер вне диапазона — не даём UI выйти
+        // за него даже если в списке остались крайние значения.
+        const { fontSizeMin, fontSizeMax } = getStructureLimits();
+        fontSize = Math.max(fontSizeMin, Math.min(fontSizeMax, fontSize));
 
         this.activeEditor.focus();
         const selection = window.getSelection();

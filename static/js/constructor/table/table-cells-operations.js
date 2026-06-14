@@ -9,6 +9,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
 import { mergeRange, unmergeAt } from './table-merge-core.js';
 import { validateGridRegion, gridToMerges, applyMergesToGrid } from './grid-merges.js';
@@ -151,7 +152,7 @@ export class TableCellsOperations {
      * @returns {boolean} true если вставка разрешена; false — показан warning
      */
     _checkRowLimit(table) {
-        const maxRows = AppConfig.limits.table.maxRows;
+        const maxRows = getStructureLimits().maxRows;
         if (table.grid.length >= maxRows) {
             Notifications.warning(`Достигнут максимум строк таблицы (${maxRows}). Добавить новую строку нельзя.`);
             return false;
@@ -168,7 +169,7 @@ export class TableCellsOperations {
      * @returns {boolean} true если вставка разрешена; false — показан warning
      */
     _checkColumnLimit(table) {
-        const maxCols = AppConfig.limits.table.maxCols;
+        const maxCols = getStructureLimits().maxCols;
         if (table.grid[0].length >= maxCols) {
             Notifications.warning(`Достигнут максимум колонок таблицы (${maxCols}). Добавить новую колонку нельзя.`);
             return false;

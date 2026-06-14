@@ -6,14 +6,19 @@ Pydantic схемы для валидации данных актов.
 """
 
 import re
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domains.acts.block_types import LEAF_BLOCK_REFS
 
-# Жёсткие границы таблиц и шрифта текстблоков — единый источник для
-# Field-констрейнтов схем ниже и эндпоинта GET /acts/limits (api/limits.py).
+# Фолбэк-дефолты границ таблиц и шрифта текстблоков. Единый ИСТОЧНИК ИСТИНЫ —
+# настройки (ACTS__TABLES__* / ACTS__TEXTBLOCKS__*, см. settings.py); схема и
+# эндпоинт GET /acts/limits читают их в рантайме (_acts_settings). Константы
+# ниже используются только когда реестр настроек ещё не заполнен (импорт-тайм,
+# юнит-тесты) и обязаны совпадать с дефолтами settings (пин — тест
+# test_settings_defaults_match_schema_fallbacks).
 TABLE_MAX_ROWS = 64
 TABLE_MAX_COLS = 16
 FONT_SIZE_MIN = 8
@@ -26,20 +31,75 @@ FONT_SIZE_MAX = 72
 # ≈ 14 млн символов data-URL < 15 млн. Пин — тест
 # test_url_max_length_covers_max_file_size_in_base64.
 VIOLATION_IMAGE_URL_MAX_LENGTH = 15_000_000
+# Фолбэк-дефолт числа элементов нарушения. ИСТОЧНИК ИСТИНЫ —
+# ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION (валидатор validate_items_count читает
+# его в рантайме); константа — только для импорт-тайма/тестов.
 VIOLATION_CONTENT_ITEMS_MAX = 50
 
-# Whitelist data-URL картинок: только растровые форматы (без SVG — XSS;
-# без webp — python-docx не встраивает его в DOCX, превью и экспорт должны совпадать).
-# Согласован с ACTS__IMAGES__ALLOWED_MIME_TYPES (пин — тест
-# test_mime_whitelist_matches_schema_url_whitelist).
-#
-# IMAGE_DATA_URL_PATTERN — единый источник формата data:image-URL для всего
-# бэка: схема компилирует его в _IMAGE_DATA_URL_RE, а DOCX-builder нарушений
-# (formatters/docx/builders/violation.py) импортирует паттерн напрямую и
-# строит из него свою regex выделения payload — чтобы whitelist форматов
-# (png/jpeg/gif) был в ОДНОМ месте и не разъезжался между валидацией и сборкой.
+# Whitelist data-URL картинок. ИСТОЧНИК ИСТИНЫ форматов —
+# ACTS__IMAGES__ALLOWED_MIME_TYPES (settings.py): и валидатор схемы
+# (_image_data_url_re), и DOCX-builder нарушений
+# (formatters/docx/builders/violation.py через image_data_url_pattern())
+# выводят regex из ОДНОГО списка настроек — whitelist не разъезжается между
+# валидацией и сборкой DOCX. IMAGE_DATA_URL_PATTERN/_IMAGE_DATA_URL_RE ниже —
+# фолбэк-дефолт (растровые png/jpeg/gif; без SVG — XSS; без webp — python-docx
+# его не встраивает) для импорт-тайма/тестов.
 IMAGE_DATA_URL_PATTERN = r"data:image/(?:png|jpe?g|gif);base64,"
 _IMAGE_DATA_URL_RE = re.compile("^" + IMAGE_DATA_URL_PATTERN)
+
+
+def _acts_settings():
+    """ActsSettings из реестра; на старте/в тестах (реестр пуст) — дефолты.
+
+    Ленивый импорт: схема импортируется задолго до discover_domains, а реестр
+    заполняется на старте. Валидаторы вызываются на парсинге запроса (реестр
+    уже жив), поэтому читать настройки внутри валидатора безопасно.
+    """
+    try:
+        from app.core.settings_registry import get as _get
+        from app.domains.acts import DOMAIN_NAME
+        from app.domains.acts.settings import ActsSettings
+        return _get(DOMAIN_NAME, ActsSettings)
+    except Exception:
+        from app.domains.acts.settings import ActsSettings
+        return ActsSettings()
+
+
+@lru_cache(maxsize=8)
+def _image_data_url_body(mime_types: tuple[str, ...]) -> str:
+    """Строит тело regex whitelist'а data:image-URL из списка MIME настроек.
+
+    `image/jpeg`/`image/jpg` → алиас `jpe?g` (браузеры эмитят и `jpg`).
+    Прочие — экранированный подтип. Кэш по кортежу MIME.
+    """
+    subtypes: set[str] = set()
+    for mime in mime_types:
+        if not mime.startswith("image/"):
+            continue
+        sub = mime.split("/", 1)[1].strip().lower()
+        if sub in ("jpeg", "jpg"):
+            subtypes.add("jpe?g")
+        elif sub:
+            subtypes.add(re.escape(sub))
+    if not subtypes:
+        # Пустой whitelist — не матчим ничего (валидатор отвергнет любой url).
+        return r"(?!x)x"
+    return r"data:image/(?:" + "|".join(sorted(subtypes)) + r");base64,"
+
+
+@lru_cache(maxsize=8)
+def _image_data_url_re(mime_types: tuple[str, ...]) -> re.Pattern:
+    """Компилированный whitelist data:image-URL для текущих MIME настроек."""
+    return re.compile("^" + _image_data_url_body(mime_types))
+
+
+def image_data_url_pattern() -> str:
+    """Тело regex whitelist'а data:image-URL из настроек (без якорей).
+
+    Единый источник формата для валидатора схемы (`validate_image_url`) и
+    DOCX-builder'а нарушений (`formatters/docx/builders/violation.py`).
+    """
+    return _image_data_url_body(tuple(_acts_settings().images.allowed_mime_types))
 
 # Подвиды таблиц (enum kind). 'regular' — обычная таблица (дефолт/отсутствие
 # подвида). Единый источник значений на бэке; СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с
@@ -87,13 +147,15 @@ class TableCellSchema(BaseModel):
 
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
+    # Верхняя граница span'ов — по лимиту колонок/строк из настроек; проверяется
+    # в TableSchema.validate_grid_dimensions (по живым настройкам), не Field-ом.
     colSpan: int = Field(
-        default=1, ge=1, le=TABLE_MAX_COLS,
-        description="Число объединённых колонок (1..16, по лимиту колонок таблицы)"
+        default=1, ge=1,
+        description="Число объединённых колонок (≥1, потолок — по лимиту колонок таблицы)"
     )
     rowSpan: int = Field(
-        default=1, ge=1, le=TABLE_MAX_ROWS,
-        description="Число объединённых строк (1..64, по лимиту строк таблицы)"
+        default=1, ge=1,
+        description="Число объединённых строк (≥1, потолок — по лимиту строк таблицы)"
     )
     isSpanned: bool = Field(default=False, description="Часть объединения")
     spanOrigin: dict[str, int] | None = Field(default=None, description="Координаты главной ячейки")
@@ -123,13 +185,11 @@ class TableSchema(BaseModel):
     nodeId: str = Field(description="ID узла дерева")
     grid: list[list[TableCellSchema]] = Field(
         default_factory=list,
-        description="Матрица ячеек",
-        max_length=TABLE_MAX_ROWS
+        description="Матрица ячеек (потолок строк/колонок — по настройкам ACTS__TABLES__*)",
     )
     colWidths: list[int] = Field(
         default_factory=list,
         description="Относительные веса ширины колонок (целые > 0; нормируются по сумме)",
-        max_length=TABLE_MAX_COLS
     )
     protected: bool = Field(
         default=False,
@@ -151,26 +211,40 @@ class TableSchema(BaseModel):
     @classmethod
     def validate_grid_dimensions(cls, v: list[list[TableCellSchema]]) -> list[list[TableCellSchema]]:
         """
-        Проверяет размеры матрицы (макс 64 строки × 16 колонок).
+        Проверяет размеры матрицы и span'ы ячеек по лимитам из настроек.
 
-        Args:
-            v: Матрица для валидации
-
-        Returns:
-            Валидированная матрица
+        Потолки строк/колонок берутся из ACTS__TABLES__* (settings.py), а не
+        из статических констант — env реально меняет лимит по всей цепочке.
 
         Raises:
-            ValueError: Если превышен лимит колонок
+            ValueError: Если превышен лимит строк/колонок или span ячейки.
         """
         if not v:
             return v
 
+        tables = _acts_settings().tables
+        max_rows, max_cols = tables.max_rows, tables.max_cols
+
+        if len(v) > max_rows:
+            raise ValueError(
+                f"Таблица содержит {len(v)} строк, максимум допустимо {max_rows}"
+            )
+
         for row_idx, row in enumerate(v):
-            if len(row) > TABLE_MAX_COLS:
+            if len(row) > max_cols:
                 raise ValueError(
                     f"Строка {row_idx} содержит {len(row)} колонок, "
-                    f"максимум допустимо {TABLE_MAX_COLS}"
+                    f"максимум допустимо {max_cols}"
                 )
+            for cell in row:
+                if cell.colSpan > max_cols:
+                    raise ValueError(
+                        f"colSpan ячейки ({cell.colSpan}) превышает лимит колонок ({max_cols})"
+                    )
+                if cell.rowSpan > max_rows:
+                    raise ValueError(
+                        f"rowSpan ячейки ({cell.rowSpan}) превышает лимит строк ({max_rows})"
+                    )
 
         return v
 
@@ -178,17 +252,16 @@ class TableSchema(BaseModel):
     @classmethod
     def validate_col_widths(cls, v: list[int]) -> list[int]:
         """
-        Проверяет что все ширины положительные.
-
-        Args:
-            v: Список ширин для валидации
-
-        Returns:
-            Валидированный список
+        Проверяет положительность ширин и их число (по лимиту колонок настроек).
 
         Raises:
-            ValueError: Если есть неположительные ширины
+            ValueError: Если есть неположительные ширины или их больше лимита колонок.
         """
+        max_cols = _acts_settings().tables.max_cols
+        if len(v) > max_cols:
+            raise ValueError(
+                f"Число ширин колонок ({len(v)}) превышает лимит ({max_cols})"
+            )
         if any(width <= 0 for width in v):
             raise ValueError("Ширины колонок должны быть положительными")
         return v
@@ -290,11 +363,11 @@ class TextBlockFormattingSchema(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
+    # Границы размера — по настройкам ACTS__TEXTBLOCKS__* (валидатор ниже),
+    # не Field-ом: env реально меняет лимит (UI-гейт → /limits → схема).
     fontSize: int = Field(
         default=14,
-        ge=FONT_SIZE_MIN,
-        le=FONT_SIZE_MAX,
-        description="Базовый размер шрифта"
+        description="Базовый размер шрифта (границы — по настройкам)"
     )
     alignment: Literal["left", "center", "right", "justify"] = Field(
         default="left",
@@ -303,6 +376,17 @@ class TextBlockFormattingSchema(BaseModel):
     bold: bool = Field(default=False, description="Жирный")
     italic: bool = Field(default=False, description="Курсив")
     underline: bool = Field(default=False, description="Подчеркивание")
+
+    @model_validator(mode="after")
+    def validate_font_size(self) -> "TextBlockFormattingSchema":
+        """Проверяет размер шрифта по границам из настроек ACTS__TEXTBLOCKS__*."""
+        tb = _acts_settings().textblocks
+        if not (tb.font_size_min <= self.fontSize <= tb.font_size_max):
+            raise ValueError(
+                f"Размер шрифта ({self.fontSize}) вне допустимого диапазона "
+                f"{tb.font_size_min}–{tb.font_size_max}"
+            )
+        return self
 
 
 class TextBlockSchema(BaseModel):
@@ -392,11 +476,16 @@ class ViolationContentItemSchema(BaseModel):
                 f"({VIOLATION_IMAGE_URL_MAX_LENGTH} символов data-URL). "
                 f"Уменьшите изображение."
             )
-        if self.type == "image" and self.url and not _IMAGE_DATA_URL_RE.match(self.url):
-            raise ValueError(
-                "Изображение нарушения должно быть встроенным data:image-URL "
-                "формата png, jpeg или gif (base64)."
-            )
+        if self.type == "image" and self.url:
+            mime_types = tuple(_acts_settings().images.allowed_mime_types)
+            if not _image_data_url_re(mime_types).match(self.url):
+                allowed = ", ".join(
+                    m.split("/", 1)[1] for m in mime_types if m.startswith("image/")
+                )
+                raise ValueError(
+                    "Изображение нарушения должно быть встроенным data:image-URL "
+                    f"разрешённого формата ({allowed or 'нет'}, base64)."
+                )
         return self
 
 
@@ -412,11 +501,12 @@ class ViolationAdditionalContentSchema(BaseModel):
     def validate_items_count(
         cls, v: list[ViolationContentItemSchema],
     ) -> list[ViolationContentItemSchema]:
-        """Ограничивает число элементов дополнительного контента."""
-        if len(v) > VIOLATION_CONTENT_ITEMS_MAX:
+        """Ограничивает число элементов доп. контента (лимит — из настроек)."""
+        max_items = _acts_settings().images.max_items_per_violation
+        if len(v) > max_items:
             raise ValueError(
                 f"Слишком много элементов дополнительного контента: {len(v)}. "
-                f"Максимум — {VIOLATION_CONTENT_ITEMS_MAX} элементов на нарушение."
+                f"Максимум — {max_items} элементов на нарушение."
             )
         return v
 

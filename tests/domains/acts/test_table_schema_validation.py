@@ -36,17 +36,22 @@ def _table(grid_data, **kw):
 
 
 class TestCellSpanBounds:
+    """Верхние границы span'ов проверяются на уровне grid (по лимитам настроек).
+
+    Лимит стал динамическим (ACTS__TABLES__*), поэтому он применяется не
+    Field-констрейнтом голой ячейки, а валидатором матрицы по живым настройкам.
+    """
 
     def test_col_span_above_limit_rejected(self):
         with pytest.raises(ValidationError):
-            TableCellSchema(colSpan=99)
+            _table([[{"colSpan": 99}]])
 
     def test_col_span_at_limit_allowed(self):
         assert TableCellSchema(colSpan=16).colSpan == 16
 
     def test_row_span_above_limit_rejected(self):
         with pytest.raises(ValidationError):
-            TableCellSchema(rowSpan=99)
+            _table([[{"rowSpan": 99}]])
 
     def test_row_span_at_limit_allowed(self):
         assert TableCellSchema(rowSpan=64).rowSpan == 64
