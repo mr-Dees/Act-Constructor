@@ -416,18 +416,17 @@ export class TreeDragDrop {
 
     /**
      * Проверяет (по текущему дереву), является ли один узел предком другого.
+     * Делегирует в TreeUtils.isDescendant (узлы по id; порядок аргументов
+     * обратный: ancestorId предок nodeId ⇔ node потомок ancestor).
      * @private
      * @param {string} ancestorId - ID предполагаемого предка
      * @param {string} nodeId - ID узла
      * @returns {boolean}
      */
     _isAncestorOf(ancestorId, nodeId) {
-        let parent = AppState.findParentNode(nodeId);
-        while (parent) {
-            if (parent.id === ancestorId) return true;
-            parent = AppState.findParentNode(parent.id);
-        }
-        return false;
+        const ancestor = AppState.findNodeById(ancestorId);
+        const node = AppState.findNodeById(nodeId);
+        return !!(ancestor && node && TreeUtils.isDescendant(node, ancestor));
     }
 
     /**
