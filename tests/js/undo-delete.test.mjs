@@ -25,7 +25,6 @@ import { MetricsRiskCoordinator } from '../../static/js/constructor/state/metric
 import {
     UndoDeleteManager,
     UNDO_STACK_DEPTH,
-    collectDictEntries,
 } from '../../static/js/constructor/state/undo-delete.js';
 import { TreeUtils } from '../../static/js/constructor/tree/tree-utils.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
@@ -445,9 +444,9 @@ test('правки соседней §5-таблицы НЕ откатывают
     assertNoIndexMiss();
 });
 
-// ── Чистое ядро: collectDictEntries ──────────────────────────────────────────
+// ── Чистое ядро: TreeUtils.collectSubtreeDictEntries ─────────────────────────
 
-test('collectDictEntries собирает записи словарей всех листьев поддерева', () => {
+test('TreeUtils.collectSubtreeDictEntries собирает записи словарей всех листьев поддерева', () => {
     AppState.initializeTree(true);
     const item = addItem('6');
     AppState.addTableToNode(item.id);
@@ -459,7 +458,7 @@ test('collectDictEntries собирает записи словарей всех
         textBlocks: AppState.textBlocks,
         violations: AppState.violations,
     };
-    const entries = collectDictEntries(item, rawDicts);
+    const entries = TreeUtils.collectSubtreeDictEntries(item, rawDicts);
 
     assert.equal(Object.keys(entries.tables).length, 1);
     assert.equal(Object.keys(entries.textBlocks).length, 1);

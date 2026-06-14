@@ -8,49 +8,53 @@
  * Правила:
  *  (а) записи словарей tables/textBlocks/violations, чей nodeId не существует
  *      в дереве — отбрасываются;
- *  (б) ссылки узлов (tableId/textBlockId/violationId) без записи в словаре —
- *      обнуляются (узел остаётся в дереве, его контент-контейнер будет пустым).
+ *  (б) листовой узел (tableId/textBlockId/violationId) без записи в словаре —
+ *      удаляется ЦЕЛИКОМ из дерева (зеркало бэкового _strip_dangling_refs):
+ *      снять только ссылку мало — пустой узел-зомби всё равно отрисуется в
+ *      экспорте («Таблица N» без данных) и не вычистится пересохранением.
  *
  * Применяется в loadActContent ПОСЛЕ получения контента (включая
  * восстановленный черновик) и ДО присвоения в AppState.
  */
 
-/** Соответствие словарей контента полям-ссылкам на узлах дерева. */
-const DICT_REFS = [
-    ['tables', 'tableId'],
-    ['textBlocks', 'textBlockId'],
-    ['violations', 'violationId'],
-];
+import { BLOCK_TYPES, LEAF_BLOCK_TYPES } from '../block-types.js';
+
+// [dictName, refField] для каждого листового типа — из реестра block-types.js
+// (не хардкод): добавление типа-блока не требует правки этого санитайзера.
+const DICT_REFS = LEAF_BLOCK_TYPES.map((t) => [BLOCK_TYPES[t].dictName, BLOCK_TYPES[t].idProp]);
 
 /**
  * Чистит несогласованные данные контента акта на месте.
  *
  * @param {Object} content Контент акта ({tree, tables, textBlocks, violations, ...})
- * @returns {{changed: boolean, droppedEntries: Object<string, string[]>, clearedRefs: string[]}}
+ * @returns {{changed: boolean, droppedEntries: Object<string, string[]>, removedNodes: string[]}}
  *   Отчёт: changed — было ли что-то исправлено; droppedEntries — id отброшенных
- *   записей по словарям; clearedRefs — id узлов с обнулёнными ссылками.
+ *   записей по словарям; removedNodes — id удалённых узлов-зомби.
  */
 export function sanitizeActContent(content) {
     const report = {
         changed: false,
         droppedEntries: { tables: [], textBlocks: [], violations: [] },
-        clearedRefs: [],
+        removedNodes: [],
     };
 
     if (!content || !content.tree || typeof content.tree !== 'object') {
         return report;
     }
 
-    // Один обход дерева: собираем множество id узлов и плоский список узлов.
+    // Один обход дерева: множество id узлов + список {node, parent} (для
+    // вырезания зомби; корень несёт parent=null и под удаление не попадает).
     const nodeIds = new Set();
-    const nodes = [];
-    const stack = [content.tree];
+    const linked = [];
+    const stack = [{ node: content.tree, parent: null }];
     while (stack.length) {
-        const node = stack.pop();
+        const { node, parent } = stack.pop();
         if (!node || typeof node !== 'object') continue;
-        nodes.push(node);
+        linked.push({ node, parent });
         if (node.id) nodeIds.add(node.id);
-        if (Array.isArray(node.children)) stack.push(...node.children);
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) stack.push({ node: child, parent: node });
+        }
     }
 
     // (а) сироты словарей: nodeId записи не существует в дереве.
@@ -66,13 +70,19 @@ export function sanitizeActContent(content) {
         }
     }
 
-    // (б) висячие ссылки узлов: запись словаря отсутствует (в т.ч. после (а)).
-    for (const node of nodes) {
-        for (const [dictName, refField] of DICT_REFS) {
+    // (б) узлы-зомби: листовая ссылка указывает на отсутствующую запись
+    //     словаря (в т.ч. после (а)) → удаляем узел целиком из родителя.
+    for (const { node, parent } of linked) {
+        if (!parent || !Array.isArray(parent.children)) continue;
+        const dangling = DICT_REFS.some(([dictName, refField]) => {
             const ref = node[refField];
-            if (ref && !(content[dictName] && content[dictName][ref])) {
-                delete node[refField];
-                report.clearedRefs.push(node.id || '(без id)');
+            return ref && !(content[dictName] && content[dictName][ref]);
+        });
+        if (dangling) {
+            const idx = parent.children.indexOf(node);
+            if (idx !== -1) {
+                parent.children.splice(idx, 1);
+                report.removedNodes.push(node.id || '(без id)');
                 report.changed = true;
             }
         }

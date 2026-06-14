@@ -108,8 +108,9 @@ class ActContentService:
         self._sanitize_html_fields(data)
 
         # Мягкая чистка рассогласования дерево ↔ словари (решение «lenient»,
-        # обе стороны). Висячие ссылки узлов снимаются ДО diff/сохранения —
-        # сохраняемое дерево не должно ссылаться на отсутствующую запись.
+        # обе стороны). Листовые узлы-зомби с висячей ссылкой удаляются ЦЕЛИКОМ
+        # ДО diff/сохранения — сохраняемое дерево не ссылается на потерянный
+        # контент и не оставляет пустых блоков в экспорте.
         stripped_refs = self._strip_dangling_refs(data)
 
         async with self.conn.transaction():
@@ -157,12 +158,19 @@ class ActContentService:
         return result
 
     def _strip_dangling_refs(self, data: ActDataSchema) -> int:
-        """Снимает с узлов дерева висячие ссылки на отсутствующие записи словарей.
+        """Удаляет листовые узлы-зомби с висячей ссылкой на отсутствующую запись.
 
-        Узел, ссылающийся (tableId/textBlockId/violationId) на запись, которой
-        нет в соответствующем словаре, лишается этого поля-ссылки — так
-        сохраняемое дерево не ссылается на потерянный контент. Возвращает число
-        снятых ссылок (для warning'а пользователю).
+        Узел-лист (table/textBlock/violation), чья ссылка
+        (tableId/textBlockId/violationId) указывает на запись, которой нет в
+        словаре, удаляется из дерева ЦЕЛИКОМ — снять только поле-ссылку мало:
+        остался бы бессодержательный узел, который walker экспорта всё равно
+        отрисует (пустая «Таблица N»), а пересохранение его не вычистит
+        (висячей ссылки уже нет). Зеркалит act-content-sanitizer.js на фронте.
+
+        Удаляем безусловно: нефункциональный лист — мусор независимо от
+        protected/deletable; защищённые секции 1–5 имеют type='item' и
+        листовых ссылок не несут, поэтому под удаление не попадают. Возвращает
+        число удалённых узлов (для предупреждения пользователю).
         """
         dangling = data.collect_dangling_refs()
         if not dangling:
@@ -173,17 +181,28 @@ class ActContentService:
         for node_id, ref_field, ref in dangling:
             to_strip.setdefault((node_id, ref_field), set()).add(ref)
 
-        stripped = 0
-        stack = [data.tree] if data.tree else []
-        while stack:
-            node = stack.pop()
+        def _is_zombie(node: dict) -> bool:
             node_id = node.get("id")
             for (target_id, ref_field), refs in to_strip.items():
                 if node_id == target_id and node.get(ref_field) in refs:
-                    node.pop(ref_field, None)
-                    stripped += 1
-            stack.extend(node.get("children") or [])
-        return stripped
+                    return True
+            return False
+
+        # Обходим с родителями; узел-зомби вырезаем из children родителя.
+        # Корень не проверяется (ссылок не несёт) — только его поддерево.
+        removed = 0
+        stack = [data.tree] if data.tree else []
+        while stack:
+            node = stack.pop()
+            children = node.get("children")
+            if not isinstance(children, list) or not children:
+                continue
+            kept = [child for child in children if not _is_zombie(child)]
+            if len(kept) != len(children):
+                removed += len(children) - len(kept)
+                node["children"] = kept
+            stack.extend(kept)
+        return removed
 
     @staticmethod
     def _build_cleanup_warning(stripped_refs: int, dropped_orphans: int) -> str | None:

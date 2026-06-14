@@ -3,8 +3,10 @@
  *
  * sanitizeActContent — последний рубеж для исторически испорченных данных
  * в БД: (а) отбрасывает записи словарей, чей nodeId не существует в дереве;
- * (б) обнуляет ссылки узлов без записи в словаре.
+ * (б) удаляет листовой узел-зомби, ссылка которого не имеет записи в словаре
+ * (зеркало бэкового _strip_dangling_refs).
  */
+import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeActContent } from '../../static/js/constructor/state/act-content-sanitizer.js';
@@ -31,6 +33,19 @@ function makeCleanContent() {
   };
 }
 
+/** id всех узлов поддерева. */
+function nodeIdsOf(tree) {
+  const ids = new Set();
+  const stack = [tree];
+  while (stack.length) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.id) ids.add(n.id);
+    (n.children || []).forEach((c) => stack.push(c));
+  }
+  return ids;
+}
+
 test('чистые данные → без изменений (changed=false, контент не тронут)', () => {
   const content = makeCleanContent();
   const reference = JSON.parse(JSON.stringify(content));
@@ -40,7 +55,7 @@ test('чистые данные → без изменений (changed=false, к
   assert.equal(report.changed, false);
   assert.deepEqual(content, reference);
   assert.deepEqual(report.droppedEntries, { tables: [], textBlocks: [], violations: [] });
-  assert.deepEqual(report.clearedRefs, []);
+  assert.deepEqual(report.removedNodes, []);
 });
 
 test('сирота словаря таблиц (nodeId не в дереве) отбрасывается', () => {
@@ -80,32 +95,35 @@ test('запись без nodeId считается сиротой', () => {
   assert.deepEqual(report.droppedEntries.tables, ['t_no_node']);
 });
 
-test('висячая ссылка узла (нет записи в словаре) обнуляется, узел остаётся', () => {
+test('узел-зомби (нет записи в словаре) удаляется целиком', () => {
   const content = makeCleanContent();
   delete content.tables.t1; // запись пропала, узел n1 ссылается в пустоту
 
   const report = sanitizeActContent(content);
 
-  const n1 = content.tree.children[0];
   assert.equal(report.changed, true);
-  assert.equal(n1.tableId, undefined);
-  assert.equal(n1.id, 'n1'); // узел не удалён
-  assert.deepEqual(report.clearedRefs, ['n1']);
+  assert.ok(!nodeIdsOf(content.tree).has('n1'), 'узел-зомби n1 не удалён');
+  assert.deepEqual(report.removedNodes, ['n1']);
+  // Соседние валидные узлы на месте.
+  assert.ok(nodeIdsOf(content.tree).has('n2'));
 });
 
-test('висячие ссылки на текстблок и нарушение (вложенный узел) обнуляются', () => {
+test('зомби-текстблок и зомби-нарушение (вложенный узел) удаляются', () => {
   const content = makeCleanContent();
   delete content.textBlocks.tb1;
   delete content.violations.v1;
 
   const report = sanitizeActContent(content);
 
-  assert.equal(content.tree.children[1].textBlockId, undefined);
-  assert.equal(content.tree.children[2].children[0].violationId, undefined);
-  assert.deepEqual([...report.clearedRefs].sort(), ['n2', 'n4']);
+  const ids = nodeIdsOf(content.tree);
+  assert.ok(!ids.has('n2'), 'зомби-текстблок n2 не удалён');
+  assert.ok(!ids.has('n4'), 'вложенный зомби-нарушение n4 не удалён');
+  // Родительский item n3 (не лист) сохранён, его children пуст.
+  assert.ok(ids.has('n3'));
+  assert.deepEqual([...report.removedNodes].sort(), ['n2', 'n4']);
 });
 
-test('цепочка: сирота словаря + узел, ссылающийся на неё → чистятся оба', () => {
+test('цепочка: сирота словаря + узел, ссылающийся на неё → запись отброшена, узел удалён', () => {
   const content = makeCleanContent();
   // Запись указывает на несуществующий узел, а легитимный узел n1 — на неё
   content.tables.t1.nodeId = 'призрак';
@@ -113,9 +131,9 @@ test('цепочка: сирота словаря + узел, ссылающий
   const report = sanitizeActContent(content);
 
   assert.equal(content.tables.t1, undefined);          // (а) сирота отброшена
-  assert.equal(content.tree.children[0].tableId, undefined); // (б) ссылка n1 обнулена
+  assert.ok(!nodeIdsOf(content.tree).has('n1'), 'узел n1 не удалён'); // (б) узел вырезан
   assert.deepEqual(report.droppedEntries.tables, ['t1']);
-  assert.deepEqual(report.clearedRefs, ['n1']);
+  assert.deepEqual(report.removedNodes, ['n1']);
 });
 
 test('пустое/отсутствующее дерево → no-op', () => {
@@ -132,6 +150,6 @@ test('отсутствующие словари не ломают обход (б
   const report = sanitizeActContent(content);
 
   assert.equal(report.changed, true);
-  assert.equal(content.tree.children[0].tableId, undefined);
-  assert.deepEqual(report.clearedRefs, ['n1']);
+  assert.ok(!nodeIdsOf(content.tree).has('n1'));
+  assert.deepEqual(report.removedNodes, ['n1']);
 });

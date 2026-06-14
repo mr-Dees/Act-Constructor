@@ -2,8 +2,9 @@
  * Откат удалений блоков дерева (решение Б-4: только undo для delete,
  * не полный command-stack).
  *
- * Чистое ядро (buildDeletionSnapshot / collectDictEntries) + менеджер
- * UndoDeleteManager со стеком LIFO глубиной 20.
+ * Чистое ядро (buildDeletionSnapshot) + менеджер UndoDeleteManager со стеком
+ * LIFO глубиной 20. deep-копия и сбор записей словарей поддерева — общие
+ * хелперы TreeUtils.deepCopy / collectSubtreeDictEntries (см. node-clipboard).
  *
  * Жизненный цикл снимка:
  *  - AppState.deleteNode зовёт captureDeletion(nodeId) ДО фактического
@@ -40,7 +41,6 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 import { AppState, _unwrap } from './state-core.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { getBlockType } from '../block-types.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 
@@ -49,47 +49,6 @@ export const UNDO_STACK_DEPTH = 20;
 
 /** Длительность toast'а с кнопкой «Отменить», мс. */
 export const UNDO_TOAST_DURATION_MS = 9000;
-
-/**
- * Deep-копия plain-данных снимка. Узлы дерева и записи словарей —
- * JSON-сериализуемые объекты (они и так уходят на бэкенд через exportData).
- * @param {*} value - Копируемое значение
- * @returns {*} Глубокая копия
- */
-function deepCopy(value) {
-    return typeof structuredClone === 'function'
-        ? structuredClone(value)
-        : JSON.parse(JSON.stringify(value));
-}
-
-/**
- * Собирает записи словарей (tables/textBlocks/violations) для всех
- * листьев-блоков поддерева. Обход по реестру block-types: idProp/dictName.
- *
- * Чистая функция: читает raw-узлы и raw-словари, возвращает deep-копии.
- *
- * @param {Object} rawNode - Raw-корень поддерева
- * @param {Object} rawDicts - Сырые словари {tables, textBlocks, violations}
- * @returns {Object} Словарь dictName → {id: deep-копия записи}
- */
-export function collectDictEntries(rawNode, rawDicts) {
-    const result = {};
-    const walk = (n) => {
-        const spec = n.type ? getBlockType(n.type) : null;
-        if (spec?.idProp && spec.dictName) {
-            const contentId = n[spec.idProp];
-            const dict = rawDicts[spec.dictName];
-            const entry = contentId && dict ? _unwrap(dict[contentId]) : null;
-            if (entry) {
-                if (!result[spec.dictName]) result[spec.dictName] = {};
-                result[spec.dictName][contentId] = deepCopy(entry);
-            }
-        }
-        (n.children || []).forEach(child => walk(_unwrap(child)));
-    };
-    walk(_unwrap(rawNode));
-    return result;
-}
 
 /**
  * Строит снимок удаления (чистое ядро, без побочных эффектов).
@@ -113,8 +72,8 @@ export function buildDeletionSnapshot({rawNode, parentId, index, rawDicts}) {
         label: rawNode.label || '',
         parentId,
         index,
-        node: deepCopy(rawNode),
-        dicts: collectDictEntries(rawNode, rawDicts),
+        node: TreeUtils.deepCopy(rawNode),
+        dicts: TreeUtils.collectSubtreeDictEntries(rawNode, rawDicts),
     };
 }
 
