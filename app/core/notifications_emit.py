@@ -13,8 +13,8 @@
   эмиссия молча пропускается (важно для юнит-тестов продьюсеров, где
   notifications не поднимается — никакой регрессии).
 
-Параметр ``body`` сознательно не пробрасывается: ``NotificationService.push``
-сам дефолтит ``body=None``, отдельное поле здесь спекулятивно.
+``body`` пробрасывается: продьюсеры (например, статус акта #8) передают в нём
+конкретику — список замечаний — которую центр уведомлений показывает в теле.
 """
 
 import logging
@@ -26,6 +26,7 @@ async def push_notification(
     *,
     source: str,
     title: str,
+    body: str | None = None,
     severity: str = "info",
     link: str | None = None,
     recipient_user_id: str | None = None,
@@ -38,6 +39,7 @@ async def push_notification(
     Args:
         source: домен-источник события ('acts'/'chat').
         title: заголовок уведомления (пользовательский текст).
+        body: подробности (многострочный текст), напр. список замечаний акта.
         severity: важность ('info'/'success'/'warning'/'error').
         link: proxy-safe относительный путь (например ``/constructor?act_id=42``);
             ``None`` — переход из уведомления не предусмотрен.
@@ -57,6 +59,7 @@ async def push_notification(
             await svc.push(
                 source=source,
                 title=title,
+                body=body,
                 severity=severity,
                 link=link,
                 recipient_user_id=recipient_user_id,
