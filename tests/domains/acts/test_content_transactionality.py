@@ -75,7 +75,7 @@ def _make_content_service(call_log: list[str]):
     svc.guard.require_edit_permission = AsyncMock()
     svc.guard.require_lock_owner = AsyncMock()
 
-    async def _save_content(act_id, data, username):
+    async def _save_content(act_id, data, username, **kwargs):
         call_log.append("repo:save_content")
         return {"status": "success", "message": "ok"}
 
@@ -197,7 +197,7 @@ class TestRestoreVersionSingleTransaction:
             return {"tree": {"id": "root"}, "tables": {},
                     "textBlocks": {}, "violations": {}}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             call_log.append("repo:save_content")
 
         with patch(
@@ -273,7 +273,7 @@ class TestSaveContentDanglingRefCleanup:
 
         saved: dict = {}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             # Запоминаем дерево в момент сохранения — узел-зомби уже удалён.
             saved["tree"] = data.tree
             return {"status": "success", "message": "ok", "dropped_orphans": 0}
@@ -298,7 +298,7 @@ class TestSaveContentDanglingRefCleanup:
 
         saved: dict = {}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             saved["tree"] = data.tree
             return {"status": "success", "message": "ok", "dropped_orphans": 0}
 
@@ -333,7 +333,7 @@ class TestSaveContentDanglingRefCleanup:
 
         saved: dict = {}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             saved["tree"] = data.tree
             return {"status": "success", "message": "ok", "dropped_orphans": 0}
 
@@ -361,7 +361,7 @@ class TestSaveContentDanglingRefCleanup:
         call_log: list[str] = []
         svc, conn, tx = _make_content_service(call_log)
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             return {"status": "success", "message": "ok", "dropped_orphans": 0}
 
         svc._content.save_content = AsyncMock(side_effect=_save_content)
@@ -376,7 +376,7 @@ class TestSaveContentDanglingRefCleanup:
         call_log: list[str] = []
         svc, conn, tx = _make_content_service(call_log)
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             return {"status": "success", "message": "ok", "dropped_orphans": 2}
 
         svc._content.save_content = AsyncMock(side_effect=_save_content)

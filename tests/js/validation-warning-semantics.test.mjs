@@ -8,8 +8,8 @@
  *    неблокирующий результат;
  *  - ValidationAct.validateTb() находит раздел 5 по id (а не по number —
  *    до генерации нумерации поиск по number молча пропускал проверку);
- *  - NavigationManager._validateTables() показывает предупреждения уровнем
- *    'warning' (не 'info') и не блокирует переход.
+ *  - NavigationManager._showContentWarnings() показывает предупреждения уровнем
+ *    'warning' (не 'info') и НЕ блокирует сохранение (#8: WIP сохраняется).
  */
 import './_browser-stub.mjs';
 import { test, beforeEach } from 'node:test';
@@ -115,10 +115,10 @@ test('validateTb: все leaf с ТБ → success', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// val-1 + val-2: предупреждения в _validateTables — уровень 'warning', без блокировки
+// val-1 + val-2: предупреждения в _showContentWarnings — уровень 'warning', без блокировки
 // ──────────────────────────────────────────────────────────────────────────
 
-test('_validateTables: tb-предупреждение показывается уровнем warning и не блокирует', () => {
+test('_showContentWarnings: tb-предупреждение показывается уровнем warning и не блокирует', () => {
     AppState.treeData = {
         id: 'root',
         label: 'Акт',
@@ -140,8 +140,7 @@ test('_validateTables: tb-предупреждение показывается 
     const originalShow = Notifications.show;
     Notifications.show = (message, type) => { shown.push({ message, type }); return 'id'; };
     try {
-        const ok = NavigationManager._validateTables();
-        assert.equal(ok, true, 'предупреждение не должно блокировать переход');
+        NavigationManager._showContentWarnings();
         assert.equal(shown.length, 1);
         assert.equal(shown[0].type, 'warning', 'предупреждение обязано показываться уровнем warning');
         assert.match(shown[0].message, /Не назначен ТБ/);
@@ -150,7 +149,7 @@ test('_validateTables: tb-предупреждение показывается 
     }
 });
 
-test('_validateTables: таблица без данных → предупреждение уровнем warning', () => {
+test('_showContentWarnings: таблица без данных → предупреждение уровнем warning', () => {
     AppState.tables = {
         t1: {
             id: 't1',
@@ -166,12 +165,31 @@ test('_validateTables: таблица без данных → предупреж
     const originalShow = Notifications.show;
     Notifications.show = (message, type) => { shown.push({ message, type }); return 'id'; };
     try {
-        const ok = NavigationManager._validateTables();
-        assert.equal(ok, true);
+        NavigationManager._showContentWarnings();
         assert.equal(shown.length, 1);
         assert.equal(shown[0].type, 'warning');
         assert.match(shown[0].message, /без данных/);
     } finally {
         Notifications.show = originalShow;
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// #8: экспорт блокируется на сломанной структуре, но это отдельный гейт
+//     от сохранения в БД (сохранение WIP не блокируется — проверяется в e2e).
+// ──────────────────────────────────────────────────────────────────────────
+
+test('_validateForExport: сломанная структура (нет разделов 1–5) блокирует экспорт', () => {
+    AppState.treeData = { id: 'root', label: 'Акт', children: [] };
+    AppState._rebuildNodeIndex();
+    const errors = [];
+    const originalError = Notifications.error;
+    Notifications.error = (message) => { errors.push(message); return 'id'; };
+    try {
+        const ok = NavigationManager._validateForExport();
+        assert.equal(ok, false, 'экспорт сломанной структуры обязан блокироваться');
+        assert.ok(errors.length >= 1);
+    } finally {
+        Notifications.error = originalError;
     }
 });
