@@ -69,6 +69,13 @@
     box-shadow: var(--shadow-md), 0 0 var(--spacing-lg) var(--act-attention-border);
 }
 
+/* Структурная валидация (#8): акт «требует проверки» — отдельный левый акцент
+   поверх жёлтого тела needs-attention. Текст-описание — в data-tooltip
+   («🔎 Акт требует проверки: …») и в уведомлениях (колокольчик/toast). */
+.act-card.needs-review {
+    border-left: var(--border-width-thick) solid var(--warning);
+}
+
 /* Карточка с критичным требованием проверки фактуры (только красная) */
 .act-card.needs-invoice:not(.needs-attention) {
     background: var(--act-critical-bg);

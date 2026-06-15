@@ -770,6 +770,24 @@ export class APIClient {
                 Notifications.warning(result.warning);
             }
 
+            // Статус валидации акта (#8): бэк — источник истины. Сохраняем
+            // замечания для колокольчика конструктора и, при ручном сохранении,
+            // показываем краткий toast с конкретикой (что именно проверить).
+            const issues = Array.isArray(result?.validation_issues) ? result.validation_issues : [];
+            if (window.AppState) {
+                window.AppState.validationStatus = result?.validation_status || 'ok';
+                window.AppState.validationIssues = issues;
+            }
+            document.dispatchEvent(new CustomEvent('act:validation-updated', {
+                detail: { status: result?.validation_status || 'ok', issues },
+            }));
+            if (result?.validation_status === 'needs_review' && saveType !== 'periodic') {
+                const head = issues.slice(0, 3).map(i => i.message).join('; ');
+                Notifications.warning(
+                    `Акт требует проверки${head ? ': ' + head : ''}`
+                );
+            }
+
             Notifications.success('Акт сохранен в базу данных');
 
         } catch (err) {
