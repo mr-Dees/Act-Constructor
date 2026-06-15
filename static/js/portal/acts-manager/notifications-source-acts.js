@@ -15,8 +15,9 @@
  * Строит элементы уведомлений из массива актов (чистая функция — для тестов).
  *
  * Берёт только акты с незакрытыми требованиями; заблокированные и «готовые»
- * пропускает. severity = 'error' если нужна проверка фактуры (критично, как
- * красная карточка), иначе 'warning'.
+ * пропускает. severity = 'error' если нужна проверка фактуры ИЛИ есть
+ * структурная ошибка (validation_status='error') — критично, как красная
+ * карточка; иначе 'warning' (в т.ч. агрегат «работа не закончена»).
  *
  * @param {Array<Object>} acts Акты из /api/v1/acts/list (ActListItem).
  * @param {{onOpen?: (actId:(number|string)) => void}} [opts]
@@ -37,26 +38,36 @@ export function buildActsNotificationItems(acts, opts = {}) {
     if (act.needs_directive_number) otherNeeds.push('номера поручений');
     if (act.needs_service_note) otherNeeds.push('служебная записка');
 
-    // Структурная валидация содержимого (#8): конкретные замечания с бэка.
-    const reviewIssues = act.validation_status === 'needs_review'
-      && Array.isArray(act.validation_issues)
-      ? act.validation_issues.map((i) => i && i.message).filter(Boolean)
+    // Структурная валидация содержимого (#8):
+    //   error   → конкретные ошибки «Проверить: …», severity error (как фактура);
+    //   warning → один агрегат «Работа не закончена» (без перечисления),
+    //             severity warning. Конкретику warning'ов (пустые таблицы и пр.)
+    //             на лендинг не выносим — она видна полным списком внутри акта.
+    const isValidationError = act.validation_status === 'error';
+    const isValidationWarning = act.validation_status === 'warning';
+    const errorIssues = isValidationError && Array.isArray(act.validation_issues)
+      ? act.validation_issues
+          .filter((i) => i && i.severity === 'error')
+          .map((i) => i.message)
+          .filter(Boolean)
       : [];
 
-    if (!needsInvoice && otherNeeds.length === 0 && reviewIssues.length === 0) continue;
+    if (!needsInvoice && otherNeeds.length === 0 && !isValidationError && !isValidationWarning) continue;
 
     const lines = [];
     const parts = [];
     if (needsInvoice) parts.push('проверка фактуры');
     parts.push(...otherNeeds);
     if (parts.length) lines.push(`Требуется: ${parts.join(', ')}`);
-    if (reviewIssues.length) lines.push(`Проверить: ${reviewIssues.join('; ')}`);
+    if (errorIssues.length) lines.push(`Проверить: ${errorIssues.join('; ')}`);
+    else if (isValidationError) lines.push('Требуется проверка структуры акта');
+    else if (isValidationWarning) lines.push('Работа не закончена: остались незаполненные данные');
 
     items.push({
       id: `acts:${act.id}`,
       title: act.inspection_name || `Акт ${act.id}`,
       body: lines.join('\n'),
-      severity: needsInvoice ? 'error' : 'warning',
+      severity: (needsInvoice || isValidationError) ? 'error' : 'warning',
       onClick: typeof onOpen === 'function' ? () => onOpen(act.id) : undefined,
     });
   }

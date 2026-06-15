@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
     -- Состояние структурной валидации содержимого (вычисляется при сохранении)
     validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'
         CONSTRAINT check_acts_validation_status_values
-        CHECK (validation_status IN ('ok', 'needs_review')),
+        CHECK (validation_status IN ('ok', 'warning', 'error')),
     validation_issues JSONB,
 
     -- Блокировка для редактирования
@@ -99,7 +99,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_created_date IS 'Флаг вали
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_directive_number IS 'Флаг валидации: требуется ли номер поручения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_invoice_check IS 'Флаг валидации: требуется ли проверка фактуры';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_service_note IS 'Флаг валидации: требуется ли информация по служебной записке';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.validation_status IS 'Состояние структурной валидации содержимого: ok / needs_review';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.validation_status IS 'Состояние структурной валидации содержимого: ok / warning / error';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.validation_issues IS 'Список конкретных замечаний валидации (JSON), вычисляется при сохранении';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.locked_by IS 'Username пользователя, заблокировавшего акт для редактирования';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.locked_at IS 'Время начала блокировки';

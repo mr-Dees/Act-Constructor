@@ -210,8 +210,10 @@ export class CreateActDialog extends DialogBase {
                 form.dataset.originalProcessBased = actData.is_process_based !== false ? 'true' : 'false';
             }
 
-            // Добавляем предупреждение о фактуре если нужно
-            if (actData.needs_invoice_check || status?.isCritical) {
+            // Предупреждение о фактуре — строго по флагу фактуры. (status.isCritical
+            // теперь означает и структурную ошибку акта (#8), а у неё своё место —
+            // конструктор и колокольчик, не диалог метаданных.)
+            if (actData.needs_invoice_check) {
                 this._addInvoiceWarning(dialog);
             }
         } else {

@@ -297,6 +297,72 @@ class TestAuditLogServiceRestore:
         assert result["restored_version"] == 5
         assert result["success"] is True
 
+    async def test_restore_recomputes_validation_status_from_content(self):
+        """restore пересчитывает validation_status из ВОССТАНОВЛЕННОГО контента.
+
+        Регрессия на баг «restore слепо сбрасывал статус в ok»: восстановление
+        дефектной структуры (пустое дерево) должно дать save_content с
+        validation_status='error', а не дефолтным 'ok'.
+        """
+        svc, guard, audit_repo, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 5,
+            "tree_data": {"id": "root", "label": "Акт", "children": []},  # пустая структура → error
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        saved = {}
+
+        async def _save_content(act_id, data, username, **kwargs):
+            saved.update(kwargs)
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock(side_effect=_save_content)
+            instance.get_content = AsyncMock(return_value=None)
+            await svc.restore_version(act_id=42, version_id=5, username="12345")
+
+        assert saved.get("validation_status") == "error"
+        assert saved.get("validation_issues")  # непустой список замечаний
+
+    async def test_restore_valid_content_yields_ok_status(self):
+        """Восстановление валидной структуры (разделы 1–5) → статус 'ok'."""
+        svc, guard, audit_repo, versions_repo = self._make_service()
+        valid_tree = {
+            "id": "root", "label": "Акт", "children": [
+                {"id": str(i), "label": f"Раздел {i}", "type": "item",
+                 "protected": True, "deletable": False, "children": []}
+                for i in range(1, 6)
+            ],
+        }
+        versions_repo.get_version.return_value = {
+            "version_number": 6,
+            "tree_data": valid_tree,
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        saved = {}
+
+        async def _save_content(act_id, data, username, **kwargs):
+            saved.update(kwargs)
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock(side_effect=_save_content)
+            instance.get_content = AsyncMock(return_value=None)
+            await svc.restore_version(act_id=42, version_id=6, username="12345")
+
+        assert saved.get("validation_status") == "ok"
+        assert saved.get("validation_issues") == []
+
     async def test_restore_version_swallow_audit_log_db_error_does_not_fail_caller(self):
         """Аудит-лог глушит DB-ошибку → restore_version всё равно завершается успехом.
 
@@ -526,7 +592,7 @@ class TestRestoreVersionPreSnapshot:
             return {"tree": {"id": "root", "label": "wip"}, "tables": {},
                     "textBlocks": {}, "violations": {}}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             call_log.append("save_content")
 
         async def _create_version(**kwargs):

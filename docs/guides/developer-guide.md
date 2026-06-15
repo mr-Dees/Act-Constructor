@@ -1214,11 +1214,11 @@ CONSTRAINT check_inspection_dates
 CONSTRAINT check_service_note_consistency
     CHECK (service_note IS NULL OR sent_for_review = true),
 CONSTRAINT check_acts_validation_status_values
-    CHECK (validation_status IN ('ok', 'needs_review')),
+    CHECK (validation_status IN ('ok', 'warning', 'error')),
 UNIQUE(km_number_digit, part_number)  -- только в PG-схеме; на GP — app-level (см. §6.5)
 ```
 
-> **Колонки статуса валидации содержимого** (фича #8, обе схемы PG+GP): `validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'` (CHECK `ok`/`needs_review`) + `validation_issues JSONB`. Статус вычисляется на бэке при сохранении содержимого (`services/content_validation.py::collect_validation_issues` — **не бросает**, зеркалит фронт-правила структуры 1–5 и заголовков/данных таблиц; `needs_review` при любом замечании error/warning). Возвращается в `SaveContentResponse` и выставляется в `ActListItem`/`ActResponse`. CHECK замаплен в `CHECK_CONSTRAINT_MESSAGES` (`app/core/exceptions.py`). Подробнее — §10.5a.
+> **Колонки статуса валидации содержимого** (фича #8, обе схемы PG+GP): `validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'` (CHECK `ok`/`warning`/`error`) + `validation_issues JSONB`. Статус вычисляется на бэке при сохранении содержимого (`services/content_validation.py::collect_validation_issues` — **не бросает**, зеркалит фронт-правила структуры 1–5 и заголовков/данных таблиц; `error` при любом замечании `severity='error'`, иначе `warning` при только мягких замечаниях, иначе `ok`). Возвращается в `SaveContentResponse` и выставляется в `ActListItem`/`ActResponse`. CHECK замаплен в `CHECK_CONSTRAINT_MESSAGES` (`app/core/exceptions.py`). Подробнее — §10.5a.
 
 > **Уникальность `(km_number_digit, part_number)` на Greenplum обеспечивается на уровне приложения** (`ActCrudService.create_act` проверяет наличие активного дубля перед INSERT), а не БД-констрейнтом. Причина — правило `DISTRIBUTED BY ⊆ UNIQUE` (§6.5): для DB-UNIQUE пришлось бы либо `DISTRIBUTED REPLICATED` (копия на каждом сегменте — приемлемо для маленьких таблиц, но требует миграции данных), либо composite-PK с обязательным `id` (меняет distribution). Это сознательный выбор, не баг.
 
@@ -3508,12 +3508,16 @@ LIMIT 20;
 
 ### 10.5a Статус валидации содержимого акта
 
-Отдельная от блокировки/верификации система-сигнал «в акте есть что проверить». Колонки `acts.validation_status` (`ok`/`needs_review`) + `acts.validation_issues` (JSONB) (см. §6.1).
+Отдельная от блокировки/верификации система-сигнал «в акте есть что проверить». Колонки `acts.validation_status` (`ok`/`warning`/`error`) + `acts.validation_issues` (JSONB) (см. §6.1).
 
-- **Источник истины — бэк.** `services/content_validation.py::collect_validation_issues(data)` — **чистая, не бросающая** функция, зеркалит фронт-правила (структура разделов 1–5, заголовки/данные таблиц) и возвращает список замечаний (`code`/`severity`/`message`/`ref`). `status_from_issues(...)` даёт `needs_review` при **любом** замечании (error **или** warning) — максимально полезный сигнал. Жёсткие проверки корня/глубины дерева (`_validate_tree`) по-прежнему **бросают** (их сохранить нельзя). ТБ-проверка на бэк **не** портирована (зависит от фронтовой нумерации `node.number`, не гарантированной в хранимом дереве).
-- **Вычисляется на сохранении**, персистится в `acts`, возвращается в `SaveContentResponse` (`validation_status`/`validation_issues`) и в `ActListItem`/`ActResponse`.
-- **WIP не блокируется.** Фронт-гейт сохранения «только в БД» снят (`navigation-manager.js`): структурно невалидный черновик **сохраняется как есть**. Гейт остался **только на экспорт в файл** (error-level) — битый документ хуже отказа.
-- **Поверхности уведомлений:** внутри-актовый колокольчик конструктора (`notifications-source-validation.js`), портальный колокольчик (`portal/.../notifications-source-acts.js`) + персистентное уведомление автору (через `emit_act_notification`/`notifications_emit.push_notification`, получивший параметр `body` для конкретики; только manual-сохранение + `needs_review`), toast при ручном сохранении. Карточка акта получает класс `needs-review` (левый акцент; текст — в tooltip и уведомлениях, не persistent-badge).
+- **Источник истины — бэк.** `services/content_validation.py::collect_validation_issues(data)` — **чистая, не бросающая** функция, зеркалит фронт-правила (структура разделов 1–5, заголовки/данные таблиц) и возвращает список замечаний (`code`/`severity`/`message`/`ref`). `status_from_issues(...)` даёт **три уровня**: **`error`** при любом замечании `severity='error'` (сломанная структура, таблица без заголовка), иначе **`warning`** при только «мягких» замечаниях (`severity='warning'`, напр. пустая таблица), иначе **`ok`**. Жёсткие проверки корня/глубины дерева (`_validate_tree`) по-прежнему **бросают** (их сохранить нельзя). ТБ-проверка на бэк **не** портирована (зависит от фронтовой нумерации `node.number`, не гарантированной в хранимом дереве).
+- **Вычисляется на сохранении** (любой `saveType`), персистится в `acts`, возвращается в `SaveContentResponse` (`validation_status`/`validation_issues`) и в `ActListItem`/`ActResponse`. **Restore версии** тоже пересчитывает статус из восстановленного содержимого (`audit_log_service.restore_version` → `collect_validation_issues`/`status_from_issues`), а не сбрасывает в `ok`.
+- **WIP не блокируется.** Фронт-гейт сохранения «только в БД» снят (`navigation-manager.js`): структурно невалидный черновик **сохраняется как есть**. Гейт остался **только на экспорт в файл** (error-level, отдельный клиентский контур `ValidationAct`, не поле `validation_status`) — битый документ хуже отказа.
+- **Поверхности уведомлений зависят от уровня** (решение: warning не должен шуметь, error приравнен к фактуре):
+  - **`error` — критично, как проверка фактуры.** Карточка списка краснеет (класс `validation-error`, та же стилизация, что `needs-invoice`); портальный колокольчик (`notifications-source-acts.js`) показывает конкретные ошибки «Проверить: …» (только `severity='error'`, severity элемента — error); при **manual**-сохранении автору шлётся персистентное уведомление (`emit_act_notification`, severity error, тело — только error-замечания); toast при ручном сохранении — красный.
+  - **`warning` — работа не закончена, не критично.** Карточку **НЕ** красит и персистентное уведомление **не** создаёт; в портальном колокольчике — один агрегат «Работа не закончена…» (без перечисления, severity warning); toast при ручном сохранении — жёлтый.
+  - **Полный список замечаний обоих уровней** виден внутри акта в колокольчике конструктора (`notifications-source-validation.js`, читает `validation_issues` последнего сохранения).
+- **Миграция уже развёрнутых БД.** `create_tables_if_not_exist` существующие таблицы не меняет (§6.5). Смена набора значений CHECK на живой PG/GP — ручным `ALTER TABLE ... DROP CONSTRAINT check_acts_validation_status_values; ... ADD CONSTRAINT ... CHECK (validation_status IN ('ok','warning','error'))`; строки со старым `needs_review` предварительно перемапить (напр. `UPDATE ... SET validation_status='error' WHERE validation_status='needs_review'` — консервативно, статус пересчитается при следующем сохранении/restore).
 
 ### 10.6 Экспорт
 
@@ -3883,4 +3887,4 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 Все три секции **реально читаются** фронтом: картинки — в `violation-image-validator.js`, таблицы/текстблоки — через `getStructureLimits()` (раньше `tables`/`textblocks` отдавались «в никуда»). Те же настройки питают Pydantic-валидаторы схемы, так что env-лимит меняется по всей цепочке (см. §9.5).
 
-**`SaveContentResponse`** (`PUT /api/v1/acts/{id}/content`) несёт, помимо `status`/`message`/`updated_at`/`warning`, **статус валидации содержимого**: `validation_status` (`"ok"`/`"needs_review"`) и `validation_issues` (список замечаний). Те же поля выставлены в `ActListItem` (для карточек списка) и `ActResponse`. Семантика и поверхности — §10.5a.
+**`SaveContentResponse`** (`PUT /api/v1/acts/{id}/content`) несёт, помимо `status`/`message`/`updated_at`/`warning`, **статус валидации содержимого**: `validation_status` (`"ok"`/`"warning"`/`"error"`) и `validation_issues` (список замечаний). Те же поля выставлены в `ActListItem` (для карточек списка) и `ActResponse`. Семантика и поверхности — §10.5a.

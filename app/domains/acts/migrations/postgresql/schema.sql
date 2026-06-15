@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
     -- Состояние структурной валидации содержимого (вычисляется при сохранении)
     validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'
         CONSTRAINT check_acts_validation_status_values
-        CHECK (validation_status IN ('ok', 'needs_review')),
+        CHECK (validation_status IN ('ok', 'warning', 'error')),
     validation_issues JSONB,
 
     -- Блокировка для редактирования

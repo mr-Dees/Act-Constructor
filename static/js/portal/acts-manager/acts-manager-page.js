@@ -138,82 +138,64 @@ export class ActsManagerPage {
             };
         }
 
-        // Проверяем есть ли критичный статус (фактура)
+        // Критичный статус (красная карточка): проверка фактуры ИЛИ
+        // структурная ОШИБКА содержимого (#8 — error приравнен к фактуре).
         const needsInvoice = act.needs_invoice_check;
+        const validationError = act.validation_status === 'error';
+        const isCritical = needsInvoice || validationError;
 
-        // Проверяем есть ли обычные требования валидации (поля метаданных)
+        // Жёлтое тело дают только незаполненные поля метаданных. Структурный
+        // warning (напр. пустые таблицы) карточку НЕ красит — он виден лишь
+        // агрегатом в колокольчике лендинга и полным списком внутри акта.
         const hasFieldIssues =
             act.needs_created_date ||
             act.needs_directive_number ||
             act.needs_service_note;
 
-        // Структурная валидация содержимого (#8): бэк пометил акт «требует
-        // проверки». Тянем конкретику из validation_issues.
-        const needsReview = act.validation_status === 'needs_review';
+        // Нормальный статус — ничего не подсвечиваем.
+        if (!isCritical && !hasFieldIssues) {
+            return { type: 'normal', classes: [], tooltip: null, needsHighlight: false };
+        }
 
-        // Любое жёлтое требование → подсветка + объединённый tooltip.
-        const hasAttention = hasFieldIssues || needsReview;
-        const attentionTooltip = () => {
-            const parts = [];
-            const fields = this._buildValidationTooltip(act);
-            if (fields) parts.push('⚠️ Требуется заполнение полей:\n' + fields);
+        const classes = [];
+        if (needsInvoice) classes.push('needs-invoice');
+        if (validationError) classes.push('validation-error');
+        if (hasFieldIssues) classes.push('needs-attention');
+
+        const tooltipParts = [];
+        if (needsInvoice) tooltipParts.push('🚨 КРИТИЧНО: Необходима проверка фактуры!');
+        if (validationError) {
             const review = this._buildReviewTooltip(act);
-            if (review) parts.push('🔎 Акт требует проверки:\n' + review);
-            return parts.join('\n\n');
-        };
-
-        // Оба требования одновременно (красная рамка + желтое тело)
-        if (needsInvoice && hasAttention) {
-            return {
-                type: 'critical-attention',
-                classes: ['needs-invoice', 'needs-attention', ...(needsReview ? ['needs-review'] : [])],
-                tooltip: '🚨 КРИТИЧНО: Необходима проверка фактуры!\n\n' + attentionTooltip(),
-                needsHighlight: true,
-                isCritical: true
-            };
+            tooltipParts.push('🚨 Акт требует проверки:' + (review ? '\n' + review : ''));
+        }
+        if (hasFieldIssues) {
+            const fields = this._buildValidationTooltip(act);
+            if (fields) tooltipParts.push('⚠️ Требуется заполнение полей:\n' + fields);
         }
 
-        // Только фактура (красная)
-        if (needsInvoice) {
-            return {
-                type: 'critical',
-                classes: ['needs-invoice'],
-                tooltip: '🚨 КРИТИЧНО: Необходима проверка фактуры!',
-                needsHighlight: true,
-                isCritical: true
-            };
-        }
-
-        // Только жёлтые требования (поля метаданных и/или структура)
-        if (hasAttention) {
-            return {
-                type: 'attention',
-                classes: ['needs-attention', ...(needsReview ? ['needs-review'] : [])],
-                tooltip: attentionTooltip(),
-                needsHighlight: true,
-                isCritical: false
-            };
-        }
-
-        // Нормальный статус — акт готов
         return {
-            type: 'normal',
-            classes: [],
-            tooltip: null,
-            needsHighlight: false
+            type: isCritical ? 'critical' : 'attention',
+            classes,
+            tooltip: tooltipParts.join('\n\n'),
+            needsHighlight: true,
+            isCritical,
         };
     }
 
     /**
-     * Формирует текст tooltip из конкретных замечаний структурной валидации
-     * (validation_issues с бэка, #8).
+     * Формирует текст tooltip из конкретных ОШИБОК структурной валидации
+     * (validation_issues severity='error' с бэка, #8). Warning'и в tooltip
+     * критичной карточки не выводим — они видны полным списком внутри акта.
      * @private
      * @param {Object} act - Данные акта
      * @returns {string} Многострочный текст или ''
      */
     static _buildReviewTooltip(act) {
         const issues = Array.isArray(act.validation_issues) ? act.validation_issues : [];
-        return issues.map(i => `• ${i.message}`).join('\n');
+        return issues
+            .filter(i => i && i.severity === 'error')
+            .map(i => `• ${i.message}`)
+            .join('\n');
     }
 
     /**

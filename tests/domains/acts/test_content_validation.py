@@ -38,7 +38,7 @@ def test_empty_tree_is_error():
     data = ActDataSchema(tree={"id": "root", "label": "Акт", "children": []}, saveType="manual")
     issues = collect_validation_issues(data)
     assert "empty_structure" in _codes(issues)
-    assert status_from_issues(issues) == "needs_review"
+    assert status_from_issues(issues) == "error"
 
 
 def test_missing_base_sections():
@@ -72,7 +72,7 @@ def test_table_without_header_is_error():
     }
     issues = collect_validation_issues(_valid_act(t1=table))
     assert "table_no_header" in _codes(issues)
-    assert status_from_issues(issues) == "needs_review"
+    assert status_from_issues(issues) == "error"
 
 
 def test_table_empty_header_is_error():
@@ -96,8 +96,17 @@ def test_table_no_data_is_warning():
     }
     issues = collect_validation_issues(_valid_act(t1=table))
     assert "table_no_data" in _codes(issues)
-    # Любое замечание (в т.ч. warning) → needs_review.
-    assert status_from_issues(issues) == "needs_review"
+    # Только warning-замечание (пустая таблица) → статус 'warning', не 'error'.
+    assert status_from_issues(issues) == "warning"
+
+
+def test_status_from_issues_levels():
+    """status_from_issues: error доминирует; только warning → warning; пусто → ok."""
+    assert status_from_issues([]) == "ok"
+    assert status_from_issues([{"severity": "warning"}]) == "warning"
+    assert status_from_issues([{"severity": "error"}]) == "error"
+    # Смесь error+warning → error (error доминирует).
+    assert status_from_issues([{"severity": "warning"}, {"severity": "error"}]) == "error"
 
 
 def test_complete_table_no_issues():
@@ -178,7 +187,7 @@ async def test_valid_act_status_ok_no_notification():
     emit.assert_not_called()
 
 
-async def test_broken_act_status_needs_review_and_notifies():
+async def test_broken_act_status_error_and_notifies():
     svc, saved = _svc()
     data = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": []}, saveType="manual",
@@ -188,8 +197,8 @@ async def test_broken_act_status_needs_review_and_notifies():
         new=AsyncMock(),
     ) as emit:
         result = await svc.save_content(act_id=1, data=data, username="12345")
-    assert result["validation_status"] == "needs_review"
-    assert saved["validation_status"] == "needs_review"
+    assert result["validation_status"] == "error"
+    assert saved["validation_status"] == "error"
     assert result["validation_issues"]
     emit.assert_awaited_once()
 
@@ -204,5 +213,25 @@ async def test_broken_act_auto_save_does_not_notify():
         new=AsyncMock(),
     ) as emit:
         result = await svc.save_content(act_id=1, data=data, username="12345")
-    assert result["validation_status"] == "needs_review"
+    assert result["validation_status"] == "error"
+    emit.assert_not_called()
+
+
+async def test_warning_act_manual_save_does_not_notify():
+    """Статус warning (только пустые таблицы) портальное уведомление НЕ шлёт —
+    даже при ручном сохранении: warning не критичен (решение пользователя)."""
+    svc, saved = _svc()
+    table = {
+        "id": "t1", "nodeId": "5",
+        "grid": [[{"content": "Заголовок", "isHeader": True}]],
+        "colWidths": [100],
+    }
+    data = _valid_act(t1=table)  # валидная структура + пустая таблица → warning
+    with patch(
+        "app.domains.acts.services.notifications_producer.emit_act_notification",
+        new=AsyncMock(),
+    ) as emit:
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+    assert result["validation_status"] == "warning"
+    assert saved["validation_status"] == "warning"
     emit.assert_not_called()

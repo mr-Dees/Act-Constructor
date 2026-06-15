@@ -4,6 +4,10 @@ import logging
 
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.repositories.act_content import ActContentRepository
+from app.domains.acts.services.content_validation import (
+    collect_validation_issues,
+    status_from_issues,
+)
 from app.domains.acts.utils.html_sanitizer import sanitize_act_content_dict, sanitize_act_data
 
 logger = logging.getLogger("audit_workstation.service.acts.audit_log")
@@ -78,7 +82,18 @@ class AuditLogService:
                     violations=current.get("violations", {}),
                 )
 
-            await content_repo.save_content(act_id, restore_data, username)
+            # Пересчитываем состояние валидации из ВОССТАНОВЛЕННОГО содержимого
+            # (тот же источник истины, что и обычное сохранение). Иначе restore
+            # слепо сбрасывал бы статус в 'ok', даже если восстановлена дефектная
+            # структура. collect_validation_issues работает по уже
+            # санитизированному restore_data (санитайз структуру не меняет).
+            restore_issues = collect_validation_issues(restore_data)
+            restore_status = status_from_issues(restore_issues)
+            await content_repo.save_content(
+                act_id, restore_data, username,
+                validation_status=restore_status,
+                validation_issues=restore_issues,
+            )
 
             await self.audit_repo.log("restore", username, act_id, {
                 "from_version": version["version_number"],

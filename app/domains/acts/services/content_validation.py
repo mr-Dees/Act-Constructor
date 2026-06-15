@@ -128,11 +128,28 @@ def collect_validation_issues(data: ActDataSchema) -> list[dict[str, Any]]:
     return issues
 
 
-def status_from_issues(issues: list[dict[str, Any]]) -> str:
-    """Статус акта по замечаниям: любое замечание → needs_review, иначе ok.
+# Уровни состояния структурной валидации содержимого (фича #8):
+#   'error'   — акт структурно сломан (среди замечаний есть severity='error':
+#               пустая/повреждённая структура разделов, таблица без заголовка).
+#               Критично — приравнен к требованию проверки фактуры (красная карточка).
+#   'warning' — заполнен не полностью (только severity='warning', напр. таблица
+#               без данных): работа не закончена, но не критично — карточку НЕ
+#               красит, виден агрегатом в колокольчике лендинга и полным списком
+#               внутри акта.
+#   'ok'      — замечаний нет.
+VALIDATION_OK = "ok"
+VALIDATION_WARNING = "warning"
+VALIDATION_ERROR = "error"
 
-    Любое замечание (error или warning) помечает акт «требует проверки» — это
-    максимально полезный сигнал «есть что проверить» (решение #8): и сломанная
-    структура, и незаполненность выводят карточку/уведомление с конкретикой.
+
+def status_from_issues(issues: list[dict[str, Any]]) -> str:
+    """Статус акта по замечаниям (три уровня, решение #8).
+
+    Любое замечание severity='error' → 'error'. Иначе при наличии только
+    «мягких» замечаний (severity='warning') → 'warning'. Нет замечаний → 'ok'.
     """
-    return "needs_review" if issues else "ok"
+    if any(i.get("severity") == "error" for i in issues):
+        return VALIDATION_ERROR
+    if issues:
+        return VALIDATION_WARNING
+    return VALIDATION_OK

@@ -774,18 +774,24 @@ export class APIClient {
             // замечания для колокольчика конструктора и, при ручном сохранении,
             // показываем краткий toast с конкретикой (что именно проверить).
             const issues = Array.isArray(result?.validation_issues) ? result.validation_issues : [];
+            const validationStatus = result?.validation_status || 'ok';
             if (window.AppState) {
-                window.AppState.validationStatus = result?.validation_status || 'ok';
+                window.AppState.validationStatus = validationStatus;
                 window.AppState.validationIssues = issues;
             }
             document.dispatchEvent(new CustomEvent('act:validation-updated', {
-                detail: { status: result?.validation_status || 'ok', issues },
+                detail: { status: validationStatus, issues },
             }));
-            if (result?.validation_status === 'needs_review' && saveType !== 'periodic') {
+            // Тост по статусу (#8): error — критично (красный), warning — работа
+            // не закончена (жёлтый). Полный список замечаний — в колокольчике
+            // акта. На периодическом (фоновом) сохранении тост не показываем.
+            if (saveType !== 'periodic' && validationStatus !== 'ok') {
                 const head = issues.slice(0, 3).map(i => i.message).join('; ');
-                Notifications.warning(
-                    `Акт требует проверки${head ? ': ' + head : ''}`
-                );
+                if (validationStatus === 'error') {
+                    Notifications.error(`Акт требует проверки${head ? ': ' + head : ''}`);
+                } else {
+                    Notifications.warning(`Работа не закончена${head ? ': ' + head : ''}`);
+                }
             }
 
             Notifications.success('Акт сохранен в базу данных');

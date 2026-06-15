@@ -84,7 +84,7 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "mainMetrics, regularRisk, operationalRisk, taxRisk, otherRisk"
     ),
     "check_acts_validation_status_values": (
-        "Недопустимое состояние валидации акта. Допустимые значения: ok, needs_review"
+        "Недопустимое состояние валидации акта. Допустимые значения: ok, warning, error"
     ),
     # ── acts: act_textblocks ─────────────────────────────────────────────────
     "check_formatting_is_object": "Данные форматирования должны быть объектом JSON",
