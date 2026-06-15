@@ -97,6 +97,7 @@
   - [10.3 Жизненный цикл акта](#103-жизненный-цикл-акта)
   - [10.4 Lock-механизм и inactivity dialog](#104-lock-механизм-и-inactivity-dialog)
   - [10.5 Версионирование и аудит-лог](#105-версионирование-и-аудит-лог)
+  - [10.5a Статус валидации содержимого акта](#105a-статус-валидации-содержимого-акта)
   - [10.6 Экспорт](#106-экспорт)
   - [10.7 Фактуры (invoice attachment)](#107-фактуры-invoice-attachment)
   - [10.8 URL страницы акта](#108-url-страницы-акта)
@@ -117,6 +118,7 @@
   - [14.2 Pagination limits и UI-паттерн Load More](#142-pagination-limits-и-ui-паттерн-load-more)
   - [14.3 Error envelope](#143-error-envelope)
   - [14.4 Kerberos handler — special-case](#144-kerberos-handler--special-case)
+  - [14.5 Acts: GET /limits и SaveContentResponse](#145-acts-get-limits-и-savecontentresponse)
 
 ---
 
@@ -1211,8 +1213,12 @@ CONSTRAINT check_inspection_dates
     CHECK (inspection_end_date >= inspection_start_date),
 CONSTRAINT check_service_note_consistency
     CHECK (service_note IS NULL OR sent_for_review = true),
+CONSTRAINT check_acts_validation_status_values
+    CHECK (validation_status IN ('ok', 'needs_review')),
 UNIQUE(km_number_digit, part_number)  -- только в PG-схеме; на GP — app-level (см. §6.5)
 ```
+
+> **Колонки статуса валидации содержимого** (фича #8, обе схемы PG+GP): `validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'` (CHECK `ok`/`needs_review`) + `validation_issues JSONB`. Статус вычисляется на бэке при сохранении содержимого (`services/content_validation.py::collect_validation_issues` — **не бросает**, зеркалит фронт-правила структуры 1–5 и заголовков/данных таблиц; `needs_review` при любом замечании error/warning). Возвращается в `SaveContentResponse` и выставляется в `ActListItem`/`ActResponse`. CHECK замаплен в `CHECK_CONSTRAINT_MESSAGES` (`app/core/exceptions.py`). Подробнее — §10.5a.
 
 > **Уникальность `(km_number_digit, part_number)` на Greenplum обеспечивается на уровне приложения** (`ActCrudService.create_act` проверяет наличие активного дубля перед INSERT), а не БД-констрейнтом. Причина — правило `DISTRIBUTED BY ⊆ UNIQUE` (§6.5): для DB-UNIQUE пришлось бы либо `DISTRIBUTED REPLICATED` (копия на каждом сегменте — приемлемо для маленьких таблиц, но требует миграции данных), либо composite-PK с обязательным `id` (меняет distribution). Это сознательный выбор, не баг.
 
@@ -2404,12 +2410,14 @@ async def open_act_page_handler(
 
 | Инструмент | Назначение |
 |-----------|-----------|
-| pytest | Фреймворк (1378 тестов в проекте) |
+| pytest | Фреймворк (~1864 backend-теста в проекте) |
 | pytest-asyncio | Async-тесты |
 | httpx / TestClient | API-тесты (через `dependency_overrides`) |
 | unittest.mock (AsyncMock, MagicMock) | Моки репозиториев и сервисов |
+| node:test (`*.test.mjs`) | JS-юнит-тесты фронта (~572 теста) |
+| Playwright (`*.spec.*`) | E2E-сценарии конструктора (требуют поднятого сервера + seed) |
 
-**Иерархия тестов** (≈94 файла, ~1378 тестов):
+**Иерархия тестов** (backend ~1864 теста pytest; фронт ~572 теста node:test):
 
 ```
 tests/
@@ -2795,7 +2803,9 @@ ActsSettings (BaseModel) — префикс ACTS__
 ├── resource: ResourceSettings
 ├── invoice: InvoiceSettings
 ├── audit_log: AuditLogSettings
-└── images: ImagesSettings (ACTS__IMAGES__* — лимиты картинок нарушений; фронт читает их через GET /api/v1/acts/limits вместе с границами таблиц/текстблоков)
+├── images: ImagesSettings (ACTS__IMAGES__* — лимиты картинок нарушений; фронт читает их через GET /api/v1/acts/limits вместе с границами таблиц/текстблоков)
+├── tables: TablesSettings (ACTS__TABLES__* — max_rows/max_cols/min_col_width_px; источник истины лимитов таблиц для UI-гейта, /limits и Pydantic-валидаторов схемы)
+└── textblocks: TextblocksSettings (ACTS__TEXTBLOCKS__* — font_size_min/font_size_max; источник истины границ шрифта текстблоков)
 ```
 
 **Правила:**
@@ -3178,8 +3188,13 @@ def test_chat_settings_defaults():
 | `ACTS__IMAGES__ALLOWED_MIME_TYPES` | list | `jpeg/png/gif` | Whitelist MIME картинок (без SVG; без webp — python-docx не встраивает его в DOCX) |
 | `ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION` | int | `50` | Макс. элементов additionalContent на нарушение |
 | `ACTS__IMAGES__PREVIEW_MAX_HEIGHT_PERCENT` | int | `40` | Макс. высота картинки в превью (% листа A4) |
+| `ACTS__TABLES__MAX_ROWS` | int | `64` | Макс. строк таблицы |
+| `ACTS__TABLES__MAX_COLS` | int | `16` | Макс. колонок таблицы |
+| `ACTS__TABLES__MIN_COL_WIDTH_PX` | int | `80` | Мин. ширина колонки (px) |
+| `ACTS__TEXTBLOCKS__FONT_SIZE_MIN` | int | `8` | Мин. размер шрифта текстблока |
+| `ACTS__TEXTBLOCKS__FONT_SIZE_MAX` | int | `72` | Макс. размер шрифта текстблока |
 
-Лимиты картинок и жёсткие границы таблиц/текстблоков фронт получает через `GET /api/v1/acts/limits` (образец — chat `GET /limits`).
+Лимиты картинок и жёсткие границы таблиц/текстблоков фронт получает через `GET /api/v1/acts/limits` (образец — chat `GET /limits`). Эти настройки — **единый источник истины** end-to-end: и UI-гейты, и `/limits`, и Pydantic-валидаторы схемы (`grid`/`colWidths`/`colSpan`/`rowSpan`/`fontSize`, число элементов нарушения, whitelist MIME картинок) читают их в рантайме. Статические константы в `schemas/act_content.py` (`VIOLATION_CONTENT_ITEMS_MAX`, `IMAGE_DATA_URL_PATTERN`, и т.п.) остаются только как фолбэк на импорт-тайм/тесты; whitelist-регекс MIME выводится из `ACTS__IMAGES__ALLOWED_MIME_TYPES` (с сохранённым алиасом `jpe?g` для `image/jpg`).
 
 #### Admin и Observability
 
@@ -3471,6 +3486,15 @@ LIMIT 20;
 
 Чистка просроченных записей — на стороне DBA (по аналогии с agent-bridge-таблицами, §9.6), в коде нет background-job ретеншена.
 
+### 10.5a Статус валидации содержимого акта
+
+Отдельная от блокировки/верификации система-сигнал «в акте есть что проверить». Колонки `acts.validation_status` (`ok`/`needs_review`) + `acts.validation_issues` (JSONB) (см. §6.1).
+
+- **Источник истины — бэк.** `services/content_validation.py::collect_validation_issues(data)` — **чистая, не бросающая** функция, зеркалит фронт-правила (структура разделов 1–5, заголовки/данные таблиц) и возвращает список замечаний (`code`/`severity`/`message`/`ref`). `status_from_issues(...)` даёт `needs_review` при **любом** замечании (error **или** warning) — максимально полезный сигнал. Жёсткие проверки корня/глубины дерева (`_validate_tree`) по-прежнему **бросают** (их сохранить нельзя). ТБ-проверка на бэк **не** портирована (зависит от фронтовой нумерации `node.number`, не гарантированной в хранимом дереве).
+- **Вычисляется на сохранении**, персистится в `acts`, возвращается в `SaveContentResponse` (`validation_status`/`validation_issues`) и в `ActListItem`/`ActResponse`.
+- **WIP не блокируется.** Фронт-гейт сохранения «только в БД» снят (`navigation-manager.js`): структурно невалидный черновик **сохраняется как есть**. Гейт остался **только на экспорт в файл** (error-level) — битый документ хуже отказа.
+- **Поверхности уведомлений:** внутри-актовый колокольчик конструктора (`notifications-source-validation.js`), портальный колокольчик (`portal/.../notifications-source-acts.js`) + персистентное уведомление автору (через `emit_act_notification`/`notifications_emit.push_notification`, получивший параметр `body` для конкретики; только manual-сохранение + `needs_review`), toast при ручном сохранении. Карточка акта получает класс `needs-review` (левый акцент; текст — в tooltip и уведомлениях, не persistent-badge).
+
 ### 10.6 Экспорт
 
 Сервис — `app/domains/acts/services/export_service.py`. Поддерживаемые форматы: **DOCX**, **Markdown**, **HTML**, **plain text**. Конкретный формат выбирается query-параметром эндпоинта экспорта.
@@ -3482,6 +3506,13 @@ LIMIT 20;
 - **HTML**: `HTML_PARSE_TIMEOUT=30`, `MAX_HTML_DEPTH=100`, `HTML_PARSE_CHUNK_SIZE=1000` — защита от bomb-нагрузки на парсер.
 - **Plain text**: `TEXT_HEADER_WIDTH=80`, `TEXT_INDENT_SIZE=2`.
 - Общие retry: `MAX_RETRIES=3`, `RETRY_DELAY=0.5` для нестабильных операций (например, загрузка картинок).
+
+**Особенности форматтеров (важно при правке):**
+
+- **Извлечение ссылок/сносок в TXT/MD** (`formatters/utils/html_utils.py`) — **сканер с учётом вложенности `<span>`** (depth-tracking парный `</span>`), а не нежадная регулярка `(.*?)</span>`. Регулярка обрывала ссылку/сноску на первом *внутреннем* `</span>` (вложенный жирный/размерный span внутри ссылки), вываливая часть текста наружу. Жадный матч до последнего `</span>` склеивал бы соседние ссылки.
+- **`_PX_TO_PT` определён единственный раз** в `formatters/docx/builders/inline.py`; `docx/formatter.py` его **импортирует**, своего определения не держит.
+- **Размер шрифта текстблоков в DOCX**: если форматирование отличается от дефолтного, размер = `fontSize * _PX_TO_PT`, **но** при дефолтном `fontSize` берётся `body_pt` (12pt) — текстблок с дефолтным размером, но изменённым выравниванием/жирностью **не** мельчает (раньше уезжал в 10.5pt). alignment/b/i/u считаются независимо от размера.
+- **`_scale_picture`** (`docx/builders/violation.py`) — ранний `return` при нулевой ширине картинки (`if not int(shape.width): return`), иначе масштабирование делило бы на 0 и роняло весь экспорт.
 
 ### 10.7 Фактуры (invoice attachment)
 
@@ -3516,6 +3547,10 @@ LIMIT 20;
 Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md):
 - §4 «AppState и состояние конструктора» — рекурсивная Proxy-обёртка через `_wrapStateWithProxy` / `_wrapDeep`, `_stateProxyCache: WeakMap` для защиты от двойной обёртки, `Object.assign(AppState, ...)` расширение из `state-tree.js`/`state-content.js`, pinned tables (`isPinnedTable`, `_getFirstNonPinnedIndex`), protected nodes (секции 1-5).
 - §5 «StorageManager и persistence» — state machine `saved` / `local-only` / `unsaved` (Wave 3), debounce 3 сек + periodic 2 мин, `_dragInProgress` guard, `forceSaveAsync` для Ctrl+S, navigation interception (popstate + `confirmNavigation` + `_lockNavGuard`), per-act LS-ключи с префиксом `actId`.
+
+> **Защита `_trackingDepth` от утечки.** `forceSaveAsync` синхронно отключает трекинг (`disableTracking`), а включает обратно в `release()` через `released`-флаг — декремент гарантирован даже если RAF-кадр не наступит (вкладка ушла в фон / `destroy()` до кадра). Дополнительно `destroy()` принудительно сбрасывает `_trackingDepth=0`. Иначе при переоткрытии конструктора без полной перезагрузки страницы трекинг оставался бы выключенным → правки молча не помечались грязными (тихая потеря данных).
+
+> **Лимиты структуры — из настроек через `/limits`.** Границы таблиц (`max_rows`/`max_cols`/`min_col_width_px`) и шрифта текстблоков (`font_size_min`/`font_size_max`) фронт получает тем же GET `/api/v1/acts/limits`, что и лимиты картинок (`violation-image-validator.js`, `getStructureLimits()`). Гейты таблиц (`table-cells-operations.js`, `table-sizes.js`) и клампинг шрифта (textblock-тулбар) читают именно его. `AppConfig.limits` остаётся синхронным фолбэком/контрактом (пин-тесты). Источник истины этих чисел — настройки `ACTS__TABLES__*`/`ACTS__TEXTBLOCKS__*`, end-to-end (UI-гейт → /limits → Pydantic-валидаторы схемы).
 
 **Связь с lock-механизмом**: при 409 на `PUT /content` `APIClient` бросает `LockLostError`, `NavigationManager._handleSaveAndExport` ловит и делает жёсткий редирект на `/acts` (без `confirmNavigation`-диалога — сессия уже потеряна). Детали — §6 в `frontend-architecture.md`.
 
@@ -3812,3 +3847,20 @@ class PaginatedResponse(BaseModel, Generic[T]):
 ```
 
 Причина: UI показывает пользователю пошаговую инструкцию по `kinit` (массив `instructions`), формат жёстко завязан на этот UX и шире, чем `{detail, code, extra}`. Менять Kerberos-формат «ради консистентности» нельзя — сломается шаблон ошибки. Если добавляешь новый infra-handler с похожей UX-нагрузкой (инструкции для админа) — рассмотри тот же приём, но **не** распространяй его на доменные ошибки: для них envelope `{detail, code, extra}` обязателен.
+
+### 14.5 Acts: `GET /limits` и `SaveContentResponse`
+
+**`GET /api/v1/acts/limits`** (`app/domains/acts/api/limits.py`) — единый источник лимитов конструктора для фронта. Отдаёт три секции, читаемые из настроек (`ACTS__IMAGES__*`/`ACTS__TABLES__*`/`ACTS__TEXTBLOCKS__*`):
+
+```json
+{
+  "images":     { "max_file_size", "max_total_size_per_act", "allowed_mime_types",
+                  "max_items_per_violation", "preview_max_height_percent" },
+  "tables":     { "max_rows", "max_cols", "min_col_width_px" },
+  "textblocks": { "font_size_min", "font_size_max" }
+}
+```
+
+Все три секции **реально читаются** фронтом: картинки — в `violation-image-validator.js`, таблицы/текстблоки — через `getStructureLimits()` (раньше `tables`/`textblocks` отдавались «в никуда»). Те же настройки питают Pydantic-валидаторы схемы, так что env-лимит меняется по всей цепочке (см. §9.5).
+
+**`SaveContentResponse`** (`PUT /api/v1/acts/{id}/content`) несёт, помимо `status`/`message`/`updated_at`/`warning`, **статус валидации содержимого**: `validation_status` (`"ok"`/`"needs_review"`) и `validation_issues` (список замечаний). Те же поля выставлены в `ActListItem` (для карточек списка) и `ActResponse`. Семантика и поверхности — §10.5a.

@@ -402,7 +402,9 @@ UI:
 
 Оба периодических таймера пропускают тик при `AppState._dragInProgress` — иначе во время DnD получим лишнюю запись с промежуточным состоянием.
 
-`forceSaveAsync()` (`storage-manager.js:473-489`) — синхронный hotkey Ctrl+S: пишет в LS немедленно, дожидается ответа и возвращает Promise.
+`forceSaveAsync()` — синхронный hotkey Ctrl+S: пишет в LS немедленно, дожидается ответа и возвращает Promise.
+
+> **Гарантированный декремент `_trackingDepth`.** На время сохранения `forceSaveAsync` отключает deep-tracking (`disableTracking`) и включает его обратно через `release()` с `released`-флагом — декремент выполняется **даже если RAF-кадр re-enable никогда не наступит** (вкладка ушла в фон / `destroy()` до кадра). Дополнительно `destroy()` принудительно сбрасывает `_trackingDepth=0`. Без этого счётчик «утекал» вверх → `markAsUnsaved()` уходил в no-op, и при переоткрытии конструктора без полной перезагрузки страницы правки молча не помечались грязными (тихая потеря данных).
 
 ### 5.3 Navigation interception
 
@@ -847,6 +849,7 @@ window.SafeHTML = { set, sanitize, escapeHtml };
 
 - Дефолт-профиль (blocklist, используется чатом/diff-renderer): `USE_PROFILES: { html: true }` (SVG/MathML отключены), `FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']`, `FORBID_ATTR` — полный список 60+ inline event-handlers (`onerror`, `onclick`, и т.п.).
 - Профиль `'acts'` (strict allowlist, используется рендером текстблоков конструктора): `ALLOWED_TAGS`/`ALLOWED_ATTR`, зеркальные бэк-whitelist'у `html_sanitizer.py` (включая `s/strike/del` и data-атрибуты ссылок/сносок). Вызов: `SafeHTML.set(el, html, 'acts')`. Состав закреплён стражем `tests/js/sanitize-profiles.test.mjs`.
+  - **Allowlist CSS-свойств для inline-`style`.** Профиль `'acts'` дополнительно фильтрует атрибут `style`, оставляя только свойства из `ACTS_CSS_PROPERTIES` (`font-size`, `color`, `background-color`, `font-weight`, `font-style`, `text-decoration`, `text-decoration-line`) — **зеркало бэкендового `html_sanitizer.ALLOWED_CSS_PROPERTIES`**. Реализация — хук `afterSanitizeAttributes` + модульная переменная активного allowlist'а, выставляемая на время синхронного `DOMPurify.sanitize` (реентрантности нет; кастомный ключ конфига в хук-арг DOMPurify надёжно не пробрасывается). Без этого превью показывало бы инлайн-CSS (`font-family`/`position`/`display`/…), который бэк потом срезает → расхождение превью ↔ сохранённого акта/экспорта. **Список свойств синхронизируется с бэком вручную.**
 
 **Потребители**: `textblock-editor.js`, `preview-violation-renderer.js`, `preview-textblock-renderer.js`, `diff-renderer.js`, `chat-renderer.js`. Все `innerHTML`-sink'и в коде обязаны идти через `SafeHTML.set` или (если HTML заведомо безопасен) через `textContent` напрямую.
 
