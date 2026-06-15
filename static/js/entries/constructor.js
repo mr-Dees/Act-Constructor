@@ -124,6 +124,7 @@ import '../constructor/header/preview-menu.js';
 // Центр уведомлений (shared) + живой источник замечаний по таблицам.
 import { NotificationCenter } from '../shared/notifications-center/notification-center.js';
 import { registerTablesSource } from '../constructor/header/notifications-source-tables.js';
+import { registerValidationSource } from '../constructor/header/notifications-source-validation.js';
 
 // Bootstrap конструктора. Раньше app.js и state-core.js сами вешали
 // DOMContentLoaded на module-level, но shared/api.js косвенно тянет
@@ -142,6 +143,7 @@ function _initNotificationCenter() {
     const center = new NotificationCenter({ enablePersisted: true });
     center.init();
     registerTablesSource(center);
+    registerValidationSource(center);
     window.notificationCenter = center;
 }
 

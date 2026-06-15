@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
     needs_invoice_check BOOLEAN DEFAULT FALSE,
     needs_service_note BOOLEAN DEFAULT FALSE,
 
+    -- Состояние структурной валидации содержимого (вычисляется при сохранении)
+    validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'
+        CONSTRAINT check_acts_validation_status_values
+        CHECK (validation_status IN ('ok', 'needs_review')),
+    validation_issues JSONB,
+
     -- Блокировка для редактирования
     locked_by VARCHAR(50) DEFAULT NULL,
     locked_at TIMESTAMP DEFAULT NULL,

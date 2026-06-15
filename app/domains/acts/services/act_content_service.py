@@ -19,6 +19,10 @@ from app.domains.acts.repositories.act_content_version import ActContentVersionR
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
+from app.domains.acts.services.content_validation import (
+    collect_validation_issues,
+    status_from_issues,
+)
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.utils.html_sanitizer import sanitize_act_data, sanitize_tree_nodes
@@ -113,6 +117,14 @@ class ActContentService:
         # контент и не оставляет пустых блоков в экспорте.
         stripped_refs = self._strip_dangling_refs(data)
 
+        # Состояние структурной валидации (фича #8): бэк — источник истины.
+        # WIP-сохранение НЕ блокируется (в отличие от старого фронт-гейта):
+        # акт сохраняется и помечается статусом, конкретику покажут карточка
+        # и уведомления. _validate_tree выше всё ещё бросает на жёстких
+        # дефектах (нет корня/превышена глубина) — их сохранить нельзя.
+        validation_issues = collect_validation_issues(data)
+        validation_status = status_from_issues(validation_issues)
+
         async with self.conn.transaction():
             # Вычисляем diff ДО сохранения
             diff = await self._audit.compute_content_diff(act_id, data)
@@ -131,7 +143,11 @@ class ActContentService:
 
             # Сохраняем содержимое; репозиторий возвращает число записей
             # словарей, отброшенных orphan-фильтром (нет узла-владельца).
-            result = await self._content.save_content(act_id, data, username)
+            result = await self._content.save_content(
+                act_id, data, username,
+                validation_status=validation_status,
+                validation_issues=validation_issues,
+            )
 
             # Записываем в аудит-лог
             await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
@@ -154,8 +170,38 @@ class ActContentService:
         # записи словарей без узла-владельца. null, если чистить было нечего.
         dropped_orphans = result.pop("dropped_orphans", 0)
         result["warning"] = self._build_cleanup_warning(stripped_refs, dropped_orphans)
+        result["validation_status"] = validation_status
+        result["validation_issues"] = validation_issues
+
+        # Уведомление «акт требует проверки» с конкретикой — только при ручном
+        # сохранении (не на авто/periodic, чтобы не спамить), адресовано автору.
+        if validation_status == "needs_review" and data.saveType == "manual":
+            await self._emit_needs_review_notification(act_id, username, validation_issues)
 
         return result
+
+    async def _emit_needs_review_notification(
+        self, act_id: int, username: str, issues: list[dict],
+    ) -> None:
+        """Шлёт автору портальное уведомление со списком замечаний акта (#8).
+
+        Soft-fail: сбой уведомления не должен валить уже успешное сохранение.
+        """
+        from app.domains.acts.services.notifications_producer import emit_act_notification
+
+        try:
+            act = await self._crud.get_act_by_id(act_id)
+            km_number = getattr(act, "km_number", None) or act_id
+            body = "; ".join(i["message"] for i in issues[:5])
+            await emit_act_notification(
+                title=f"Акт требует проверки: {km_number}",
+                body=body,
+                severity="warning",
+                link=f"/constructor?act_id={act_id}",
+                recipient_user_id=username,
+            )
+        except Exception:
+            logger.warning("Не удалось отправить уведомление о замечаниях акта ID=%s", act_id)
 
     def _strip_dangling_refs(self, data: ActDataSchema) -> int:
         """Удаляет листовые узлы-зомби с висячей ссылкой на отсутствующую запись.

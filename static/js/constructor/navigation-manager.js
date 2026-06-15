@@ -92,10 +92,15 @@ export class NavigationManager {
             return;
         }
 
-        // Валидация структуры акта — всегда, перед любым действием:
-        // сохранение «только в БД» проходит те же проверки, что и экспорт.
-        if (!this._validateStructure()) return;
-        if (!this._validateTables()) return;
+        // Предупреждения о незаполненности (пустые таблицы, ТБ) — всегда,
+        // не блокируют (#8: WIP-акт сохраняется в БД как есть).
+        this._showContentWarnings();
+
+        // Экспорт в файл требует валидной структуры: сломанная структура даёт
+        // битый документ. Сохранение «только в БД» НЕ блокируется — акт
+        // сохраняется и помечается статусом валидации на бэке (источник истины),
+        // конкретику покажут уведомления и карточка акта.
+        if (exportFormats.length > 0 && !this._validateForExport()) return;
 
         // Блокируем кнопку
         generateBtn.disabled = true;
@@ -197,12 +202,14 @@ export class NavigationManager {
     }
 
     /**
-     * Валидация таблиц
+     * Валидация ПЕРЕД ЭКСПОРТОМ в файл: только error-уровень (структура +
+     * заголовки таблиц). Сломанная структура даёт битый документ — экспорт
+     * блокируем. Сохранение в БД эту проверку НЕ проходит (#8).
      * @private
-     * @returns {boolean} true если валидация прошла успешно
+     * @returns {boolean} true если структура пригодна для экспорта
      */
-    static _validateTables() {
-        // Критическая проверка заголовков таблиц
+    static _validateForExport() {
+        if (!this._validateStructure()) return false;
         const headerCheckResult = ValidationTable.validateHeaders();
         if (!headerCheckResult.valid) {
             Notifications.error(
@@ -211,8 +218,15 @@ export class NavigationManager {
             );
             return false;
         }
+        return true;
+    }
 
-        // Предупреждение о пустых таблицах (не блокирует, уровень warning)
+    /**
+     * Показывает НЕблокирующие предупреждения о незаполненности (пустые
+     * таблицы, не назначенные ТБ). Сохранение не прерывается.
+     * @private
+     */
+    static _showContentWarnings() {
         const dataCheckResult = ValidationTable.validateData();
         if (dataCheckResult.isWarning) {
             Notifications.show(
@@ -221,8 +235,6 @@ export class NavigationManager {
                 AppConfig.notifications.duration.warning
             );
         }
-
-        // Предупреждение о незаполненных ТБ (не блокирует, уровень warning)
         const tbCheckResult = ValidationAct.validateTb();
         if (tbCheckResult.isWarning) {
             Notifications.show(
@@ -231,8 +243,6 @@ export class NavigationManager {
                 AppConfig.notifications.duration.warning
             );
         }
-
-        return true;
     }
 }
 

@@ -37,16 +37,25 @@ export function buildActsNotificationItems(acts, opts = {}) {
     if (act.needs_directive_number) otherNeeds.push('номера поручений');
     if (act.needs_service_note) otherNeeds.push('служебная записка');
 
-    if (!needsInvoice && otherNeeds.length === 0) continue;
+    // Структурная валидация содержимого (#8): конкретные замечания с бэка.
+    const reviewIssues = act.validation_status === 'needs_review'
+      && Array.isArray(act.validation_issues)
+      ? act.validation_issues.map((i) => i && i.message).filter(Boolean)
+      : [];
 
+    if (!needsInvoice && otherNeeds.length === 0 && reviewIssues.length === 0) continue;
+
+    const lines = [];
     const parts = [];
     if (needsInvoice) parts.push('проверка фактуры');
     parts.push(...otherNeeds);
+    if (parts.length) lines.push(`Требуется: ${parts.join(', ')}`);
+    if (reviewIssues.length) lines.push(`Проверить: ${reviewIssues.join('; ')}`);
 
     items.push({
       id: `acts:${act.id}`,
       title: act.inspection_name || `Акт ${act.id}`,
-      body: `Требуется: ${parts.join(', ')}`,
+      body: lines.join('\n'),
       severity: needsInvoice ? 'error' : 'warning',
       onClick: typeof onOpen === 'function' ? () => onOpen(act.id) : undefined,
     });

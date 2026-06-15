@@ -61,12 +61,22 @@ class ActContentRepository(BaseRepository):
             "violations": violations,
         }
 
-    async def save_content(self, act_id: int, data: ActDataSchema, username: str) -> dict:
+    async def save_content(
+        self,
+        act_id: int,
+        data: ActDataSchema,
+        username: str,
+        *,
+        validation_status: str = "ok",
+        validation_issues: list[dict] | None = None,
+    ) -> dict:
         """
         Сохраняет содержимое акта.
 
         Обновляет дерево, пересоздаёт таблицы/текстовые блоки/нарушения,
-        синхронизирует фактуры и поручения, обновляет метку редактирования.
+        синхронизирует фактуры и поручения, обновляет метку редактирования и
+        состояние структурной валидации (validation_status/validation_issues,
+        вычислены сервисом — фича #8).
 
         КОНТРАКТ: вызывается внутри УЖЕ ОТКРЫТОЙ транзакции вызывающего
         сервиса (ActContentService.save_content / AuditLogService.
@@ -106,7 +116,11 @@ class ActContentRepository(BaseRepository):
         )
         await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
         await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
-        updated_at = await self._update_edit_timestamp(act_id, username)
+        updated_at = await self._update_edit_timestamp(
+            act_id, username,
+            validation_status=validation_status,
+            validation_issues=validation_issues or [],
+        )
 
         logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
 
@@ -624,8 +638,15 @@ class ActContentRepository(BaseRepository):
             kind,
         )
 
-    async def _update_edit_timestamp(self, act_id: int, username: str):
-        """Обновляет метку последнего редактирования.
+    async def _update_edit_timestamp(
+        self,
+        act_id: int,
+        username: str,
+        *,
+        validation_status: str = "ok",
+        validation_issues: list[dict] | None = None,
+    ):
+        """Обновляет метку редактирования и состояние валидации акта.
 
         Возвращает фактическое значение updated_at отдельным SELECT
         (не UPDATE ... RETURNING — для совместимости с Greenplum).
@@ -635,11 +656,15 @@ class ActContentRepository(BaseRepository):
             UPDATE {self.acts}
             SET last_edited_by = $1,
                 last_edited_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CURRENT_TIMESTAMP,
+                validation_status = $3,
+                validation_issues = $4::jsonb
             WHERE id = $2
             """,
             username,
-            act_id
+            act_id,
+            validation_status,
+            json.dumps(validation_issues or [], ensure_ascii=False),
         )
         return await self.conn.fetchval(
             f"SELECT updated_at FROM {self.acts} WHERE id = $1",

@@ -80,3 +80,36 @@ test('без onOpen onClick отсутствует', () => {
   const items = buildActsNotificationItems([{ id: 12, needs_service_note: true }]);
   assert.equal(items[0].onClick, undefined);
 });
+
+test('акт needs_review → элемент с конкретикой «Проверить: …» (#8)', () => {
+  const acts = [{
+    id: 7, inspection_name: 'Проверка КМ-07',
+    validation_status: 'needs_review',
+    validation_issues: [
+      { code: 'table_no_header', severity: 'error', message: 'Таблица «X» без строки заголовка' },
+      { code: 'table_no_data', severity: 'warning', message: 'Таблица «Y» без данных' },
+    ],
+  }];
+  const items = buildActsNotificationItems(acts);
+  assert.equal(items.length, 1);
+  assert.match(items[0].body, /Проверить:/);
+  assert.match(items[0].body, /без строки заголовка/);
+  assert.equal(items[0].severity, 'warning');
+});
+
+test('needs_review без замечаний и без других требований → пропускается', () => {
+  const acts = [{ id: 8, inspection_name: 'Пусто', validation_status: 'ok', validation_issues: [] }];
+  assert.deepEqual(buildActsNotificationItems(acts), []);
+});
+
+test('фактура + needs_review → severity error, обе строки в body', () => {
+  const acts = [{
+    id: 9, inspection_name: 'Критичный', needs_invoice_check: true,
+    validation_status: 'needs_review',
+    validation_issues: [{ code: 'empty_structure', severity: 'error', message: 'Структура акта пуста' }],
+  }];
+  const items = buildActsNotificationItems(acts);
+  assert.equal(items[0].severity, 'error');
+  assert.match(items[0].body, /проверка фактуры/);
+  assert.match(items[0].body, /Структура акта пуста/);
+});

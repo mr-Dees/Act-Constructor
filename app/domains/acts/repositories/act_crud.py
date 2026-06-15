@@ -21,6 +21,18 @@ from app.domains.acts.schemas.act_metadata import (
 logger = logging.getLogger("audit_workstation.db.repository.crud")
 
 
+def _parse_validation_issues(value) -> list[dict] | None:
+    """JSONB validation_issues → list[dict]. asyncpg может вернуть str/None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    return value
+
+
 class ActCrudRepository(BaseRepository):
     """CRUD операции с актами и их связанными сущностями."""
 
@@ -488,7 +500,9 @@ class ActCrudRepository(BaseRepository):
                 a.needs_created_date,
                 a.needs_directive_number,
                 a.needs_invoice_check,
-                a.needs_service_note
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
             FROM {self.acts} a
             INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
             WHERE atm.username = $1
@@ -510,7 +524,9 @@ class ActCrudRepository(BaseRepository):
                 a.needs_created_date,
                 a.needs_directive_number,
                 a.needs_invoice_check,
-                a.needs_service_note
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
             ORDER BY
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
@@ -541,6 +557,8 @@ class ActCrudRepository(BaseRepository):
                 needs_directive_number=row["needs_directive_number"],
                 needs_invoice_check=row["needs_invoice_check"],
                 needs_service_note=row["needs_service_note"],
+                validation_status=row["validation_status"],
+                validation_issues=_parse_validation_issues(row["validation_issues"]),
             )
             for row in rows
         ]
@@ -564,6 +582,7 @@ class ActCrudRepository(BaseRepository):
                 inspection_start_date, inspection_end_date,
                 needs_created_date, needs_directive_number,
                 needs_invoice_check, needs_service_note,
+                validation_status, validation_issues,
                 created_at, updated_at, created_by,
                 last_edited_by, last_edited_at
             FROM {self.acts}
@@ -637,6 +656,8 @@ class ActCrudRepository(BaseRepository):
             needs_directive_number=act_row["needs_directive_number"],
             needs_invoice_check=act_row["needs_invoice_check"],
             needs_service_note=act_row["needs_service_note"],
+            validation_status=act_row["validation_status"],
+            validation_issues=_parse_validation_issues(act_row["validation_issues"]),
             created_at=act_row["created_at"],
             updated_at=act_row["updated_at"],
             created_by=act_row["created_by"],
