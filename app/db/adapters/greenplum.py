@@ -91,6 +91,10 @@ class GreenplumAdapter(DatabaseAdapter):
                     f"Greenplum: все таблицы домена '{domain_name}' существуют "
                     f"({len(expected)} шт.)"
                 )
+                await self._warn_on_stale_tables(
+                    conn, schema_sql, domain_name,
+                    db_label="Greenplum", default_schema=self.schema,
+                )
                 continue
 
             missing_short = [t.split('.')[-1] for t in missing]

@@ -86,6 +86,10 @@ class PostgreSQLAdapter(DatabaseAdapter):
                     f"PostgreSQL: все таблицы домена '{domain_name}' существуют "
                     f"({len(expected)} шт.)"
                 )
+                await self._warn_on_stale_tables(
+                    conn, schema_sql, domain_name,
+                    db_label="PostgreSQL", default_schema="public",
+                )
                 continue
 
             logger.info(

@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import asyncpg
@@ -17,6 +19,9 @@ import pytest
 from app.db.adapters.base import DatabaseAdapter
 from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.adapters.postgresql import PostgreSQLAdapter
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ACTS_PG_SCHEMA = _REPO_ROOT / "app/domains/acts/migrations/postgresql/schema.sql"
 
 PG_PREFIX = "test_"
 GP_SCHEMA = "public_test"
@@ -409,3 +414,160 @@ def test_capabilities_diverge():
 
     assert pg.get_serial_type() == "SERIAL"
     assert gp.get_serial_type() == "BIGSERIAL"
+
+
+# ---------------------------------------------------------------------------
+# 8. _extract_columns_from_sql — парсер колонок для диагностики дрейфа схемы.
+#    Должен извлекать ИМЕНА КОЛОНОК и отсекать строки-ограничения таблицы,
+#    игнорируя инлайн-комментарии, строковые литералы и вложенные скобки.
+# ---------------------------------------------------------------------------
+
+class TestExtractColumns:
+
+    def test_simple_table(self):
+        cols = DatabaseAdapter._extract_columns_from_sql(
+            "CREATE TABLE public.foo (id INT, name TEXT);"
+        )
+        assert cols == {"public.foo": {"id", "name"}}
+
+    def test_excludes_table_constraints(self):
+        sql = (
+            "CREATE TABLE t (\n"
+            "  id BIGSERIAL PRIMARY KEY,\n"
+            "  a INT,\n"
+            "  CONSTRAINT chk_a CHECK (a > 0),\n"
+            "  UNIQUE(a),\n"
+            "  PRIMARY KEY (id),\n"
+            "  FOREIGN KEY (a) REFERENCES other(id)\n"
+            ");"
+        )
+        # id и a — колонки; CONSTRAINT/UNIQUE/PRIMARY/FOREIGN — нет.
+        assert DatabaseAdapter._extract_columns_from_sql(sql)["t"] == {"id", "a"}
+
+    def test_inline_check_with_commas_parens_strings(self):
+        # Запятые и скобки внутри инлайн-CHECK/строк не должны дробить сегмент.
+        sql = (
+            "CREATE TABLE t (\n"
+            "  pt VARCHAR(50) NOT NULL CHECK (pt ~ '^5\\.([0-9]+\\.)*[0-9]+$'),\n"
+            "  status VARCHAR(20) DEFAULT 'ok' CHECK (status IN ('ok','bad')),\n"
+            "  val JSONB\n"
+            ");"
+        )
+        assert DatabaseAdapter._extract_columns_from_sql(sql)["t"] == {"pt", "status", "val"}
+
+    def test_column_preceded_by_inline_comment(self):
+        # Колонка с ведущим '--'-комментарием в сегменте — частый кейс в schema.sql.
+        sql = (
+            "CREATE TABLE t (\n"
+            "  id INT,\n"
+            "  -- Состояние валидации (вычисляется при сохранении)\n"
+            "  validation_status VARCHAR(20) NOT NULL DEFAULT 'ok'\n"
+            ");"
+        )
+        assert DatabaseAdapter._extract_columns_from_sql(sql)["t"] == {"id", "validation_status"}
+
+    def test_leading_statement_comment_ignored(self):
+        sql = (
+            "-- комментарий c CREATE TABLE внутри, который не должен сбивать парсер\n"
+            "CREATE TABLE IF NOT EXISTS public.bar (x INT);"
+        )
+        assert DatabaseAdapter._extract_columns_from_sql(sql) == {"public.bar": {"x"}}
+
+    def test_real_acts_schema_has_validation_columns(self):
+        """Регрессия: парсер обязан видеть validation_status/validation_issues
+        в реальной acts-схеме (иначе дрейф этой таблицы не отловится)."""
+        sql = _ACTS_PG_SCHEMA.read_text(encoding="utf-8")
+        sql = sql.replace("{PREFIX}", "t_").replace("{SCHEMA}.", "")
+        sql = sql.replace("{REF_HADOOP_TABLES}", "ref_hadoop")
+        cols = DatabaseAdapter._extract_columns_from_sql(sql)["t_acts"]
+        assert {"validation_status", "validation_issues"} <= cols
+        # ключевые «обычные» колонки на месте
+        assert {"id", "km_number", "created_by"} <= cols
+        # имена CHECK-ограничений НЕ просочились как колонки
+        assert not any(c.startswith("check_") for c in cols)
+
+
+# ---------------------------------------------------------------------------
+# 9. _warn_on_stale_tables — startup-диагностика дрейфа колонок.
+#    Только WARNING (старт не блокируется), пропускает отсутствующие таблицы,
+#    не падает на ошибке диагностики.
+# ---------------------------------------------------------------------------
+
+class TestStaleTableWarning:
+
+    @staticmethod
+    def _rows(*pairs):
+        return [{"table_name": t, "column_name": c} for t, c in pairs]
+
+    async def test_warns_on_missing_column(self, mock_conn, caplog):
+        a = PostgreSQLAdapter(table_prefix="t_")
+        # В БД у таблицы t_acts есть только id (нет validation_status).
+        mock_conn.fetch.return_value = self._rows(("t_acts", "id"))
+        schema = "CREATE TABLE t_acts (id INT, validation_status VARCHAR(20));"
+
+        with caplog.at_level(logging.WARNING, logger="audit_workstation.db.adapters.base"):
+            await a._warn_on_stale_tables(
+                mock_conn, schema, "acts", db_label="PostgreSQL", default_schema="public",
+            )
+
+        assert any(
+            "validation_status" in r.getMessage() and "устарела" in r.getMessage()
+            for r in caplog.records
+        )
+
+    async def test_no_warning_when_all_columns_present(self, mock_conn, caplog):
+        a = PostgreSQLAdapter(table_prefix="t_")
+        mock_conn.fetch.return_value = self._rows(("t_acts", "id"), ("t_acts", "validation_status"))
+        schema = "CREATE TABLE t_acts (id INT, validation_status VARCHAR(20));"
+
+        with caplog.at_level(logging.WARNING, logger="audit_workstation.db.adapters.base"):
+            await a._warn_on_stale_tables(
+                mock_conn, schema, "acts", db_label="PostgreSQL", default_schema="public",
+            )
+
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    async def test_skips_table_absent_from_db(self, mock_conn, caplog):
+        # Таблицы нет в БД (actual пуст) → это ветка create_tables, не дрейф.
+        a = PostgreSQLAdapter(table_prefix="t_")
+        mock_conn.fetch.return_value = []
+        schema = "CREATE TABLE t_new (id INT, foo TEXT);"
+
+        with caplog.at_level(logging.WARNING, logger="audit_workstation.db.adapters.base"):
+            await a._warn_on_stale_tables(
+                mock_conn, schema, "x", db_label="PostgreSQL", default_schema="public",
+            )
+
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    async def test_never_raises_on_diagnostic_error(self, mock_conn):
+        # Если диагностика падает (например, fetch кинул) — старт не должен упасть.
+        a = PostgreSQLAdapter(table_prefix="t_")
+        mock_conn.fetch.side_effect = asyncpg.PostgresError("boom")
+        # не должно бросить
+        await a._warn_on_stale_tables(
+            mock_conn, "CREATE TABLE t_acts (id INT, x TEXT);", "acts",
+            db_label="PostgreSQL", default_schema="public",
+        )
+
+    async def test_create_tables_warns_when_existing_table_stale(self, mock_conn, caplog, tmp_path):
+        """Интеграция: когда все таблицы существуют, но одна устарела,
+        create_tables логирует WARNING (а не молча проходит)."""
+        a = PostgreSQLAdapter(table_prefix="t_")
+        schema = tmp_path / "dom" / "migrations" / "postgresql" / "schema.sql"
+        schema.parent.mkdir(parents=True)
+        schema.write_text(
+            "CREATE TABLE {PREFIX}acts (id INT, validation_status VARCHAR(20));",
+            encoding="utf-8",
+        )
+        mock_conn.fetch.side_effect = [
+            [{"tablename": "t_acts"}],                 # pre-check: таблица существует → missing=[]
+            self._rows(("t_acts", "id")),              # actual columns: нет validation_status
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="audit_workstation.db.adapters.base"):
+            await a.create_tables(mock_conn, [schema])
+
+        # Схема НЕ исполнялась (все таблицы есть), но предупреждение о дрейфе вышло.
+        mock_conn.execute.assert_not_called()
+        assert any("validation_status" in r.getMessage() for r in caplog.records)

@@ -1417,7 +1417,7 @@ class ActCrudRepository(BaseRepository):
 
 - SQL-схемы лежат в `app/domains/<name>/migrations/postgresql/schema.sql` и `.../greenplum/schema.sql`.
 - Таблицы создаются на старте через `create_tables_if_not_exist(domains)`. Всё через `CREATE TABLE IF NOT EXISTS` — повторный запуск безопасен.
-- ALTER-миграций (Alembic и т.п.) НЕТ. Новая колонка появится сама на свежей БД; на существующей админ делает `ALTER TABLE` руками. `DEFAULT … NOT NULL` в DDL заполнит старые строки.
+- ALTER-миграций (Alembic и т.п.) НЕТ. Новая колонка появится сама на свежей БД; на существующей админ делает `ALTER TABLE` руками. `DEFAULT … NOT NULL` в DDL заполнит старые строки. Рассинхрон «таблица есть, но без новой колонки» ловится startup-предупреждением — см. §6.5.4.
 - Плейсхолдеры в SQL: `{SCHEMA}.` (префикс схемы), `{PREFIX}` (`DATABASE__TABLE_PREFIX`), `{REF_*}` (ссылки на внешние таблицы из `migration_substitutions`). Bare-имена без `{PREFIX}` — баг: имена разойдутся PG/GP.
 - UUID-id хранятся как `VARCHAR(36)`, не как PG-тип `UUID`. Python шлёт `str(uuid.uuid4())` строкой; одно правило для PG и GP.
 - В Greenplum 6.x (= PG 9.4) НЕЛЬЗЯ: `CREATE INDEX/SEQUENCE IF NOT EXISTS`, `ON CONFLICT DO UPDATE`, `ADD COLUMN IF NOT EXISTS`, `jsonb_set/jsonb_pretty`, `gen_random_uuid()`, `EXECUTE FUNCTION` в триггерах, `BIGSERIAL` вместе с `DISTRIBUTED BY`. GP-адаптер исполняет SQL по одному statement и глотает `DuplicateTableError`/`DuplicateObjectError`. Регрессии — `tests/test_gp_compatibility.py`.
@@ -1443,6 +1443,26 @@ migration_substitutions={
 #### 6.5.3 Как добавить таблицу
 
 См. §6.8 — пошаговый рецепт.
+
+#### 6.5.4 Startup-диагностика дрейфа колонок (рассинхрон схемы ↔ кода)
+
+**Проблема.** `create_tables_if_not_exist` проверяет только **наличие таблиц**: если все таблицы домена существуют, его `schema.sql` не исполняется вообще (`CREATE TABLE IF NOT EXISTS` всё равно был бы no-op). ALTER-миграций нет (§6.5.1). Значит новая колонка, добавленная в `schema.sql` существующей таблицы, **не появится** в уже развёрнутой БД. Раньше это всплывало рантайм-ошибкой `asyncpg.UndefinedColumnError` при первом запросе с новой колонкой — без всякого сигнала на старте.
+
+**Решение.** В ветке «все таблицы домена существуют» адаптер дополнительно сверяет колонки. Если у существующей таблицы не хватает колонок, объявленных в `schema.sql`, в лог пишется **WARNING** с перечнем недостающих колонок и подсказкой (`ALTER TABLE` или `docs/migrations/drop-all-tables.md`). Это превращает немой рантайм-500 в понятное сообщение при старте.
+
+Реализация — общий код в `app/db/adapters/base.py` (используют оба адаптера):
+- `_extract_columns_from_sql(sql)` — best-effort парсер: `{полное_имя_таблицы: {колонка}}`. Отсекает строки-ограничения таблицы (`CONSTRAINT/PRIMARY/FOREIGN/UNIQUE/CHECK/EXCLUDE/LIKE`), игнорирует строковые литералы, комментарии и вложенные скобки (`VARCHAR(20)`, инлайн `CHECK (a IN (1,2))`). Опирается на проверенный `_split_sql_statements`.
+- `_actual_columns_by_schema(conn, names, default_schema)` — читает реальные колонки из `information_schema.columns`, группируя по схеме так же, как `_existing_tables_by_schema` (квалифицированные имена — в своей схеме).
+- `_warn_on_stale_tables(conn, schema_sql, domain, db_label, default_schema)` — сверяет ожидаемые колонки с фактическими и логирует WARNING на расхождение.
+
+**Гарантии безопасности (важно для прод/GP):**
+- **Только диагностика, не блокирует старт.** Весь `_warn_on_stale_tables` обёрнут в `try/except`: любая ошибка (сбой запроса, парсинга, транзиентный сбой) → `logger.debug(...)` и продолжение. Упасть на старте из-за неё нельзя.
+- **Read-only.** Делает только `SELECT` из `information_schema`; ни DDL, ни записи, ни блокировок — повредить данные не может.
+- **Нет ложных срабатываний на ETL-таблицах.** GP-схемы доменов `ck_fin_res`/`ck_client_exp`/`ua_data` не содержат `CREATE TABLE` (внешние данные ETL) → проверяются только app-таблицы (`acts`/`chat`/`admin`/`notifications`).
+- **Паттерн запроса проверен на GP.** `= ANY($2::text[])` уже используется `_existing_tables_by_schema` в проде; `information_schema.columns` стандартен для GP 6.x (= PG 9.4).
+- **Стоимость пренебрежима.** Один дополнительный `SELECT` на домен, только когда все его таблицы уже существуют (обычный старт).
+
+Регрессии — `tests/db/test_adapters.py` (`TestExtractColumns`, `TestStaleTableWarning`), включая интеграционный кейс «таблица есть, но устарела → WARNING, схема не исполняется».
 
 ### 6.5a Как добавить CHECK constraint
 

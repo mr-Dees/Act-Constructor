@@ -4,12 +4,15 @@
 Определяет интерфейс для работы с различными СУБД.
 """
 
+import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
 import asyncpg
+
+logger = logging.getLogger("audit_workstation.db.adapters.base")
 
 
 class DatabaseAdapter(ABC):
@@ -33,6 +36,193 @@ class DatabaseAdapter(ABC):
         """
         pattern = r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s*\('
         return re.findall(pattern, sql, re.IGNORECASE)
+
+    # Ключевые слова, начинающие НЕ-колоночное определение внутри CREATE TABLE.
+    _TABLE_CONSTRAINT_KEYWORDS = frozenset({
+        "CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "EXCLUDE", "LIKE",
+    })
+
+    @staticmethod
+    def _top_level_segments(stmt: str, open_paren_idx: int) -> list[str]:
+        """Сегменты верхнего уровня внутри ``( ... )``, разделённые запятыми.
+
+        Скан с учётом строк (``'...'``), комментариев (``--``, ``/* */``) и
+        вложенных скобок: запятая делит сегмент только на глубине 1 (типы вида
+        ``VARCHAR(20)`` и инлайн ``CHECK (a IN (1,2))`` не дробятся). При
+        несбалансированных скобках возвращает собранные к этому моменту сегменты.
+        """
+        n = len(stmt)
+        i = open_paren_idx + 1
+        depth = 1
+        seg_start = i
+        segments: list[str] = []
+        while i < n and depth > 0:
+            c = stmt[i]
+            if c == '-' and i + 1 < n and stmt[i + 1] == '-':
+                j = stmt.find('\n', i)
+                i = n if j == -1 else j + 1
+                continue
+            if c == '/' and i + 1 < n and stmt[i + 1] == '*':
+                j = stmt.find('*/', i + 2)
+                i = n if j == -1 else j + 2
+                continue
+            if c == "'":
+                i += 1
+                while i < n:
+                    if stmt[i] == "'":
+                        if i + 1 < n and stmt[i + 1] == "'":
+                            i += 2
+                            continue
+                        i += 1
+                        break
+                    i += 1
+                continue
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    segments.append(stmt[seg_start:i])
+                    break
+            elif c == ',' and depth == 1:
+                segments.append(stmt[seg_start:i])
+                seg_start = i + 1
+            i += 1
+        return segments
+
+    @staticmethod
+    def _extract_columns_from_sql(sql: str) -> dict[str, set[str]]:
+        """Извлекает имена колонок каждой ``CREATE TABLE`` из SQL.
+
+        Возвращает ``{полное_имя_таблицы: {колонка, ...}}``. Best-effort парсер
+        для диагностики рассинхрона схемы (см. ``_warn_on_stale_tables``), НЕ для
+        DDL: строки-ограничения таблицы отсекаются по ведущему ключевому слову,
+        строковые литералы/комментарии и вложенные скобки игнорируются.
+        """
+        result: dict[str, set[str]] = {}
+        for stmt in DatabaseAdapter._split_sql_statements(sql):
+            # search, а не match: _split_sql_statements оставляет ведущие
+            # комментарии/пробелы перед оператором (как и _extract_table_names_from_sql).
+            m = re.search(
+                r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s*\(',
+                stmt, re.IGNORECASE,
+            )
+            if not m:
+                continue
+            table = m.group(1)
+            open_idx = m.end() - 1  # позиция открывающей '('
+            cols: set[str] = set()
+            for segment in DatabaseAdapter._top_level_segments(stmt, open_idx):
+                name = DatabaseAdapter._leading_identifier(segment)
+                if name is None:
+                    continue
+                if name.upper() in DatabaseAdapter._TABLE_CONSTRAINT_KEYWORDS:
+                    continue
+                cols.add(name)
+            result[table] = cols
+        return result
+
+    @staticmethod
+    def _leading_identifier(segment: str) -> str | None:
+        """Первый идентификатор сегмента — имя колонки.
+
+        Сегмент от ``_top_level_segments`` может начинаться с ведущих
+        комментариев (``-- ...`` перед колонкой в schema.sql их сохраняет),
+        поэтому сначала отбрасываем пробелы и комментарии, затем читаем имя.
+        """
+        seg = segment
+        while True:
+            seg = seg.lstrip()
+            if seg.startswith('--'):
+                nl = seg.find('\n')
+                seg = '' if nl == -1 else seg[nl + 1:]
+                continue
+            if seg.startswith('/*'):
+                end = seg.find('*/')
+                seg = '' if end == -1 else seg[end + 2:]
+                continue
+            break
+        m = re.match(r'"?([A-Za-z_]\w*)"?', seg)
+        return m.group(1) if m else None
+
+    @staticmethod
+    async def _actual_columns_by_schema(
+        conn: asyncpg.Connection,
+        table_names: list[str],
+        *,
+        default_schema: str,
+    ) -> dict[str, set[str]]:
+        """``{полное_имя: {колонка, ...}}`` из ``information_schema.columns``.
+
+        Группирует имена по схеме так же, как ``_existing_tables_by_schema``:
+        квалифицированные читаются в своей схеме, неквалифицированные — в
+        ``default_schema``.
+        """
+        if not table_names:
+            return {}
+
+        by_schema: dict[str, dict[str, str]] = {}
+        for name in table_names:
+            parts = name.split(".")
+            if len(parts) > 1:
+                schema, simple = parts[-2], parts[-1]
+            else:
+                schema, simple = default_schema, name
+            by_schema.setdefault(schema, {})[simple] = name
+
+        result: dict[str, set[str]] = {}
+        for schema, name_map in by_schema.items():
+            rows = await conn.fetch(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = $1 AND table_name = ANY($2::text[])",
+                schema, list(name_map.keys()),
+            )
+            for r in rows:
+                full = name_map.get(r["table_name"])
+                if full is not None:
+                    result.setdefault(full, set()).add(r["column_name"])
+        return result
+
+    async def _warn_on_stale_tables(
+        self,
+        conn: asyncpg.Connection,
+        schema_sql: str,
+        domain_name: str,
+        *,
+        db_label: str,
+        default_schema: str,
+    ) -> None:
+        """Предупреждает, если существующая таблица устарела (нет новых колонок).
+
+        Вызывается, когда все таблицы домена существуют: existence-check проходит,
+        но таблица могла быть создана старой версией схемы. Без этой проверки
+        приложение стартует «успешно» и падает уже в рантайме
+        (``UndefinedColumnError`` на отсутствующей колонке). Только WARNING —
+        старт не блокируется; миграцию выполняет человек (``ALTER TABLE`` или
+        пересоздание БД, ``docs/migrations/drop-all-tables.md``).
+        """
+        try:
+            expected_cols = self._extract_columns_from_sql(schema_sql)
+            if not expected_cols:
+                return
+            actual_cols = await self._actual_columns_by_schema(
+                conn, list(expected_cols.keys()), default_schema=default_schema,
+            )
+            for table, cols in expected_cols.items():
+                actual = actual_cols.get(table)
+                if not actual:
+                    continue  # таблицы нет в БД — обрабатывается отдельной веткой create_tables
+                missing_cols = cols - actual
+                if missing_cols:
+                    logger.warning(
+                        f"{db_label}: таблица '{table.split('.')[-1]}' домена "
+                        f"'{domain_name}' устарела — в БД отсутствуют колонки: "
+                        f"{', '.join(sorted(missing_cols))}. Схема рассинхронизирована "
+                        f"с кодом; примените ALTER TABLE или пересоздайте БД "
+                        f"(docs/migrations/drop-all-tables.md)."
+                    )
+        except Exception as e:  # диагностика не должна ронять старт
+            logger.debug(f"{db_label}: проверка дрейфа колонок пропущена: {e}")
 
     @staticmethod
     async def _existing_tables_by_schema(
