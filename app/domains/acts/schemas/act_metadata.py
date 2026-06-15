@@ -282,6 +282,11 @@ class ActListItem(BaseModel):
     needs_directive_number: bool = False
     needs_invoice_check: bool = False
     needs_service_note: bool = False
+    # Состояние структурной валидации содержимого (вычисляется при сохранении).
+    # validation_issues несём в список — карточка/колокольчик портала показывают
+    # конкретику без загрузки полного содержимого акта.
+    validation_status: str = "ok"
+    validation_issues: list[dict] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -315,6 +320,9 @@ class ActResponse(BaseModel):
     needs_directive_number: bool = False
     needs_invoice_check: bool = False
     needs_service_note: bool = False
+    # Состояние структурной валидации содержимого + конкретные замечания.
+    validation_status: str = "ok"
+    validation_issues: list[dict] | None = None
 
     created_at: datetime
     updated_at: datetime

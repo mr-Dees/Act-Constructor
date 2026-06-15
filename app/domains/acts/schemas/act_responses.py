@@ -53,8 +53,17 @@ class SaveContentResponse(BaseModel):
     Сохранение в обоих случаях успешно (status='success'): обе стороны
     рассогласования лечатся мягко, а не отбивают весь PUT 422. Фронт читает
     result.warning.
+
+    validation_status / validation_issues — состояние структурной валидации
+    акта, вычисленное бэком на этом сохранении (источник истины). 'ok' —
+    акт заполнен корректно; 'needs_review' — есть замечания (список issues с
+    code/severity/message/ref). WIP-сохранение в БД НЕ блокируется: акт
+    сохраняется и помечается статусом, конкретику фронт показывает в
+    уведомлениях и на карточке.
     """
     status: str
     message: str
     updated_at: datetime | None = None
     warning: str | None = None
+    validation_status: str = "ok"
+    validation_issues: list[dict] = []
