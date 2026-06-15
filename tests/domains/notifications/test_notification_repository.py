@@ -182,6 +182,51 @@ async def test_mark_read_raises_404_when_not_visible(mock_conn):
     assert exists_params == ["ghost", "user1"]
 
 
+# ── mark_unread (lazy upsert, зеркало mark_read) ────────────────────────────
+
+
+async def test_mark_unread_updates_existing_state(mock_conn):
+    """mark_unread: UPDATE затронул строку — без INSERT, is_read=FALSE."""
+    mock_conn.execute.return_value = "UPDATE 1"
+    repo = NotificationRepository(mock_conn)
+    await repo.mark_unread("n1", "user1")
+
+    assert mock_conn.execute.call_count == 1
+    sql, nid, uid = mock_conn.execute.call_args.args
+    assert "UPDATE notification_state" in sql
+    assert "is_read = FALSE" in sql
+    assert "updated_at = CURRENT_TIMESTAMP" in sql
+    assert nid == "n1"
+    assert uid == "user1"
+
+
+async def test_mark_unread_inserts_when_no_state(mock_conn):
+    """mark_unread: UPDATE 0 → fetchval(EXISTS)=True → INSERT с is_read=FALSE."""
+    mock_conn.execute.side_effect = ["UPDATE 0", "INSERT 0 1"]
+    mock_conn.fetchval.return_value = True
+    repo = NotificationRepository(mock_conn)
+    await repo.mark_unread("n1", "user1")
+
+    assert mock_conn.execute.call_count == 2
+    insert_sql, *insert_params = mock_conn.execute.call_args_list[1].args
+    assert "INSERT INTO notification_state" in insert_sql
+    assert "FALSE, FALSE" in insert_sql  # is_read=FALSE, is_dismissed=FALSE
+    assert insert_params == ["n1", "user1"]
+
+
+async def test_mark_unread_raises_404_when_not_visible(mock_conn):
+    """mark_unread: UPDATE 0 и невидимое уведомление → 404, без INSERT."""
+    mock_conn.execute.side_effect = ["UPDATE 0"]
+    mock_conn.fetchval.return_value = False
+    repo = NotificationRepository(mock_conn)
+
+    with pytest.raises(NotificationNotFoundError) as exc_info:
+        await repo.mark_unread("ghost", "user1")
+
+    assert exc_info.value.status_code == 404
+    assert mock_conn.execute.call_count == 1
+
+
 # ── dismiss (lazy upsert) ───────────────────────────────────────────────────
 
 

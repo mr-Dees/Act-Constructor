@@ -291,6 +291,30 @@ class ActListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ActAttentionItem(BaseModel):
+    """Срез акта, требующего внимания (GET /api/v1/acts/attention-summary).
+
+    Узкая схема для колокольчика лендинга: серверная сводка «мои акты, по
+    которым нужно ещё поработать» (незакрытые требования фактура/СЗ/дата/
+    поручения + структурная валидация содержимого). Поля совпадают по именам с
+    подмножеством ActListItem, которое читает фронт-форматтер
+    buildActsNotificationItems — клиент не пересчитывает статусы по сотне актов,
+    а получает уже отфильтрованный список. Флаги needs_* поддерживаются ETL
+    (приложение их только читает), validation_status пишется при сохранении.
+    """
+
+    id: int
+    inspection_name: str
+    needs_created_date: bool = False
+    needs_directive_number: bool = False
+    needs_invoice_check: bool = False
+    needs_service_note: bool = False
+    validation_status: str = "ok"
+    validation_issues: list[dict] | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ActResponse(BaseModel):
     """Полная информация об акте"""
     id: int

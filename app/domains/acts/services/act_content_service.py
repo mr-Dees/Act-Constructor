@@ -173,41 +173,13 @@ class ActContentService:
         result["validation_status"] = validation_status
         result["validation_issues"] = validation_issues
 
-        # Портальное уведомление «акт требует проверки» с конкретикой — только
-        # при структурной ОШИБКЕ (error, критично — как фактура) и ручном
-        # сохранении (не на авто/periodic, чтобы не спамить), адресовано автору.
-        # Warning (заполнен не полностью) портальное уведомление НЕ создаёт —
-        # его видно агрегатом в колокольчике лендинга и полным списком в акте.
-        if validation_status == "error" and data.saveType == "manual":
-            await self._emit_validation_error_notification(act_id, username, validation_issues)
-
+        # Структурный статус акта (error/warning) НЕ создаёт персистентного
+        # уведомления. На лендинге его показывает серверная сводка attention
+        # (GET /acts/attention-summary, колокольчик), внутри акта — живой
+        # источник validation. Прежний error-push дублировал эту сводку и при
+        # каждом ручном сохранении плодил записи (INSERT без дедупликации) —
+        # поэтому убран. Toast о статусе остаётся на фронте (api.js).
         return result
-
-    async def _emit_validation_error_notification(
-        self, act_id: int, username: str, issues: list[dict],
-    ) -> None:
-        """Шлёт автору портальное уведомление о структурных ОШИБКАХ акта (#8).
-
-        Только для статуса 'error' (критично). В тело попадают error-замечания
-        (warning'и не выносим — они не критичны). Soft-fail: сбой уведомления
-        не должен валить уже успешное сохранение.
-        """
-        from app.domains.acts.services.notifications_producer import emit_act_notification
-
-        try:
-            act = await self._crud.get_act_by_id(act_id)
-            km_number = getattr(act, "km_number", None) or act_id
-            errors = [i for i in issues if i.get("severity") == "error"] or issues
-            body = "; ".join(i["message"] for i in errors[:5])
-            await emit_act_notification(
-                title=f"Акт требует проверки: {km_number}",
-                body=body,
-                severity="error",
-                link=f"/constructor?act_id={act_id}",
-                recipient_user_id=username,
-            )
-        except Exception:
-            logger.warning("Не удалось отправить уведомление об ошибках валидации акта ID=%s", act_id)
 
     def _strip_dangling_refs(self, data: ActDataSchema) -> int:
         """Удаляет листовые узлы-зомби с висячей ссылкой на отсутствующую запись.

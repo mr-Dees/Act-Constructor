@@ -77,6 +77,7 @@ def _build_app(
 def _make_crud_service() -> MagicMock:
     svc = MagicMock()
     svc.list_acts = AsyncMock(return_value=([], 0))
+    svc.get_attention_summary = AsyncMock(return_value=[])
     svc.get_act = AsyncMock()
     svc.create_act = AsyncMock()
     svc.update_act_metadata = AsyncMock()
@@ -247,6 +248,68 @@ class TestListActs:
 
         assert resp.status_code == 200
         crud.list_acts.assert_awaited_once_with(USERNAME, limit=200, offset=0)
+
+
+# -------------------------------------------------------------------------
+# GET /attention-summary — сводка «мои акты, требующие внимания»
+# -------------------------------------------------------------------------
+
+
+class TestAttentionSummary:
+    """GET /api/v1/acts/attention-summary возвращает срез актов для колокольчика."""
+
+    def test_attention_summary_returns_array(self):
+        """Сводка — 200, массив ActAttentionItem; сервис вызван с username."""
+        crud = _make_crud_service()
+        from app.domains.acts.schemas.act_metadata import ActAttentionItem
+        crud.get_attention_summary.return_value = [
+            ActAttentionItem(
+                id=42, inspection_name="Акт А", needs_invoice_check=True,
+                validation_status="ok",
+            ),
+            ActAttentionItem(
+                id=43, inspection_name="Акт Б", validation_status="warning",
+            ),
+        ]
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/attention-summary")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [it["id"] for it in body] == [42, 43]
+        assert body[0]["needs_invoice_check"] is True
+        assert body[1]["validation_status"] == "warning"
+        crud.get_attention_summary.assert_awaited_once_with(USERNAME)
+
+    def test_attention_summary_empty(self):
+        """Нет актов, требующих внимания → пустой массив."""
+        crud = _make_crud_service()
+        crud.get_attention_summary.return_value = []
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/attention-summary")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == []
+
+    def test_attention_summary_unauthorized_returns_401(self):
+        """Без авторизации — 401, сервис не вызван."""
+        crud = _make_crud_service()
+        app = _build_app(crud_service=crud)
+
+        def _no_user() -> str:
+            raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+        app.dependency_overrides[get_username] = _no_user
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/attention-summary")
+
+        assert resp.status_code == 401
+        crud.get_attention_summary.assert_not_awaited()
 
 
 # -------------------------------------------------------------------------

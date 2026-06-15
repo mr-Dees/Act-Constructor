@@ -82,15 +82,16 @@
     display: none;
 }
 
-/* Шапка меню */
+/* Шапка меню. Единый светлый стиль для портала И конструктора (решение:
+   колокольчик везде как на лендинге; конструктор перестал быть исключением). */
 .notifications-menu-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--spacing-md);
     padding: var(--spacing-xl) var(--spacing-2xl);
-    background: var(--gradient-header);
-    color: var(--text-on-primary);
+    background: var(--bg-primary);
+    color: var(--text-primary);
     border-bottom: var(--border-width-thin) solid var(--border-light);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
@@ -111,12 +112,12 @@
     margin-left: auto;
 }
 
-/* Кнопка «Прочитать все» */
+/* Кнопка «Прочитать все» (на светлой шапке) */
 .notifications-read-all {
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--text-on-primary);
+    color: var(--text-secondary);
     font-size: var(--font-size-sm);
     line-height: 1;
     padding: var(--spacing-xs) var(--spacing-sm);
@@ -128,16 +129,17 @@
 
 .notifications-read-all:hover {
     opacity: 1;
-    background: var(--help-close-hover);
+    background: var(--gray-100);
+    color: var(--primary);
 }
 
-/* Кнопка закрытия */
+/* Кнопка закрытия (на светлой шапке) */
 .notifications-menu-close {
     background: none;
     border: none;
     font-size: var(--font-size-3xl);
     cursor: pointer;
-    color: var(--text-on-primary);
+    color: var(--text-secondary);
     line-height: 1;
     padding: 0;
     display: flex;
@@ -148,7 +150,8 @@
 }
 
 .notifications-menu-close:hover {
-    background: var(--help-close-hover);
+    background: var(--gray-100);
+    color: var(--primary);
     transform: rotate(var(--rotate-close-button));
 }
 
@@ -200,24 +203,87 @@
     word-break: break-word;
 }
 
-/* Крестик скрытия (только у персистентных) */
-.notification-item-dismiss {
+/* Кнопка «⋮» — открывает контекстное меню записи (заменила крестик dismiss) */
+.notification-item-menu-btn {
     background: none;
     border: none;
     cursor: pointer;
     color: var(--text-secondary);
     font-size: var(--font-size-lg);
     line-height: 1;
-    padding: 0 2px;
+    padding: 0 4px;
     flex: 0 0 auto;
     border-radius: var(--radius-sm);
-    opacity: 0.6;
+    opacity: 0.5;
     transition: var(--transition-all);
 }
 
-.notification-item-dismiss:hover {
+.notification-item:hover .notification-item-menu-btn {
+    opacity: 0.85;
+}
+
+.notification-item-menu-btn:hover {
     opacity: 1;
-    color: var(--error, #d33);
+    color: var(--primary);
+    background: var(--gray-100);
+}
+
+/* ============================================================================
+ * Контекстное меню записи (Прочитать / Отметить непрочитанным / Удалить).
+ * Один общий элемент на body, позиционируется fixed в точке клика.
+ * ============================================================================ */
+.notif-context-menu {
+    position: fixed;
+    min-width: 180px;
+    background: var(--modal-bg, var(--bg-primary));
+    border: var(--border-width-thin) solid var(--border, var(--border-light));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg, var(--shadow));
+    padding: var(--spacing-xs);
+    z-index: var(--z-modal, 1100);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    animation: scaleIn var(--transition-fast) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notif-context-menu.hidden {
+    display: none;
+}
+
+.notif-context-menu-item {
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-tight);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+    white-space: nowrap;
+}
+
+.notif-context-menu-item:hover {
+    background: var(--primary-subtle, var(--bg-secondary));
+}
+
+.notif-context-menu-item--danger {
+    color: var(--danger, var(--error, #d33));
+}
+
+.notif-context-menu-item--danger:hover {
+    background: var(--danger-subtle, var(--bg-secondary));
+}
+
+/* Заглушка для записей без действий («вечно горящие» замечания) */
+.notif-context-menu-empty {
+    padding: var(--spacing-sm) var(--spacing-md);
+    color: var(--text-tertiary, var(--text-secondary));
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    white-space: nowrap;
 }
 
 /* Цветная точка-индикатор критичности */
@@ -250,33 +316,11 @@
 }
 
 /* ============================================================================
- * Портал/лендинг: своя стилистика дропдауна.
- * Topbar портала светлый (.landing-topbar: белый фон, серый текст), поэтому
- * фиолетовая шапка конструктора (--gradient-header + белый текст) на нём
- * выглядит чужеродно. Под .landing-topbar-actions делаем светлую шапку в тон
- * портала и прижимаем меню ближе к topbar. В конструкторе остаётся градиент.
+ * Портал/лендинг: только позиционная правка дропдауна.
+ * Стиль шапки теперь единый и светлый в базе (см. .notifications-menu-header) —
+ * отдельных цветовых override'ов для портала больше нет. У портала topbar ниже,
+ * чем у конструктора, поэтому прижимаем меню чуть плотнее к нему.
  * ============================================================================ */
-
-/* Чуть плотнее к topbar (у портала шапка ниже, чем у конструктора). */
 .landing-topbar-actions .notifications-menu {
     top: calc(100% + var(--spacing-sm));
-}
-
-/* Светлая шапка вместо градиента конструктора. */
-.landing-topbar-actions .notifications-menu-header {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    border-bottom: var(--border-width-thin) solid var(--border-light);
-}
-
-/* На светлой шапке белые «Прочитать все»/крестик невидимы — перекрашиваем. */
-.landing-topbar-actions .notifications-read-all,
-.landing-topbar-actions .notifications-menu-close {
-    color: var(--text-secondary);
-}
-
-.landing-topbar-actions .notifications-read-all:hover,
-.landing-topbar-actions .notifications-menu-close:hover {
-    background: var(--gray-100);
-    color: var(--primary);
 }

@@ -23,10 +23,6 @@ export class ActsManagerPage {
     static _total = 0;
     static _loadingMore = false;
 
-    /* Последний загруженный список актов — источник живых уведомлений
-     * колокольчика (см. notifications-source-acts.js). */
-    static _acts = [];
-
     /* --- Утилиты форматирования --- */
 
     /**
@@ -260,35 +256,17 @@ export class ActsManagerPage {
             this._offset = acts.length;
 
             if (!acts.length) {
-                this._setActsForNotifications([]);
                 this._showEmptyState(container);
                 return;
             }
 
-            this._setActsForNotifications(acts);
             this._renderActsGrid(acts, container);
             this._renderLoadMore(container);
 
         } catch (error) {
             console.error('Ошибка загрузки актов:', error);
-            this._setActsForNotifications([]);
             this._showErrorState(container);
             Notifications.error('Ошибка загрузки списка актов');
-        }
-    }
-
-    /**
-     * Сохраняет текущий список актов и обновляет живой источник «acts»
-     * shared-колокольчика. Источник pull-based: при refresh() он перечитает
-     * this._acts. Если колокольчика на странице нет — тихо пропускаем.
-     * @private
-     * @param {Array<Object>} acts
-     */
-    static _setActsForNotifications(acts) {
-        this._acts = Array.isArray(acts) ? acts : [];
-        const center = window.notificationCenter;
-        if (center && typeof center.refresh === 'function') {
-            center.refresh();
         }
     }
 
@@ -331,7 +309,6 @@ export class ActsManagerPage {
                 if (card) grid.appendChild(card);
             });
 
-            this._setActsForNotifications(this._acts.concat(acts));
             this._renderLoadMore(container);
         } catch (error) {
             console.error('Ошибка подгрузки актов:', error);
@@ -832,10 +809,10 @@ export class ActsManagerPage {
 
         // Живой источник уведомлений «acts»: акты с незакрытыми требованиями
         // (фактура/СЗ/дата/поручения) попадают в shared-колокольчик. Центр
-        // создаётся в portal-common.js; collect — pull-based по this._acts.
+        // создаётся в portal-common.js; источник сам тянет серверную сводку
+        // (GET /acts/attention-summary) — по всем актам, не только загруженным.
         if (window.notificationCenter) {
             registerActsSource(window.notificationCenter, {
-                getActs: () => this._acts,
                 onOpen: (actId) => this.openAct(actId),
             });
         }

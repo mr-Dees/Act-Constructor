@@ -25,6 +25,7 @@ def service():
             return_value={"count": 5, "severity": "warning"}
         )
         repo.mark_read = AsyncMock()
+        repo.mark_unread = AsyncMock()
         repo.mark_all_read = AsyncMock()
         repo.dismiss = AsyncMock()
         repo.create = AsyncMock(return_value="generated-id")
@@ -54,6 +55,12 @@ async def test_mark_read_delegates(service):
     """mark_read делегирует в repo."""
     await service.mark_read("n1", "user1")
     service._repo_mock.mark_read.assert_awaited_once_with("n1", "user1")
+
+
+async def test_mark_unread_delegates(service):
+    """mark_unread делегирует в repo."""
+    await service.mark_unread("n1", "user1")
+    service._repo_mock.mark_unread.assert_awaited_once_with("n1", "user1")
 
 
 async def test_mark_all_read_delegates(service):

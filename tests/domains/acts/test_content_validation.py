@@ -187,7 +187,11 @@ async def test_valid_act_status_ok_no_notification():
     emit.assert_not_called()
 
 
-async def test_broken_act_status_error_and_notifies():
+async def test_broken_act_status_error_no_notification():
+    """Структурная ошибка фиксирует статус 'error' и замечания, но НЕ создаёт
+    персистентного уведомления: на лендинге ошибку показывает серверная сводка
+    attention (колокольчик), внутри акта — живой источник validation. Прежний
+    error-push убран (дублировал сводку и плодил записи при каждом сохранении)."""
     svc, saved = _svc()
     data = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": []}, saveType="manual",
@@ -200,7 +204,7 @@ async def test_broken_act_status_error_and_notifies():
     assert result["validation_status"] == "error"
     assert saved["validation_status"] == "error"
     assert result["validation_issues"]
-    emit.assert_awaited_once()
+    emit.assert_not_called()
 
 
 async def test_broken_act_auto_save_does_not_notify():

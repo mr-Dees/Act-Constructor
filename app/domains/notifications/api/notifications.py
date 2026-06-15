@@ -91,6 +91,17 @@ async def mark_read(
     return {"ok": True}
 
 
+@router.post("/{notification_id}/unread", summary="Вернуть в непрочитанное")
+async def mark_unread(
+    notification_id: str,
+    username: str = Depends(get_username),
+    service: NotificationService = Depends(get_notification_service),
+):
+    """Возвращает уведомление в непрочитанное для текущего пользователя."""
+    await service.mark_unread(notification_id, username)
+    return {"ok": True}
+
+
 @router.post("/read-all", summary="Пометить все прочитанными")
 async def mark_all_read(
     username: str = Depends(get_username),

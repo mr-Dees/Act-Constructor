@@ -22,6 +22,7 @@ import {
   formatBadgeCount,
   mergeFeed,
   countPersistedUnread,
+  countUnreadLive,
   resolvePollIntervalMs,
 } from './notification-center-core.js';
 
@@ -49,6 +50,12 @@ export class NotificationCenter {
     this.isOpen = false;
     this._escapeUnsub = null;
     this._pollTimer = null;
+
+    // Контекстное меню записи (Прочитать/Непрочитанным/Удалить). Один общий
+    // элемент на body, переиспользуется. Заменяет прежний крестик dismiss.
+    this._ctxMenu = null;
+    this._ctxOpen = false;
+    this._ctxEscapeUnsub = null;
     // Интервал поллинга (мс). Фолбэк до загрузки конфига с бэкенда
     // (GET /config отдаёт значение из NOTIFICATIONS__POLL_INTERVAL_SECONDS).
     this._pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
@@ -79,6 +86,11 @@ export class NotificationCenter {
     this._onDocClick = (e) => this._handleOutsideClick(e);
     this._onVisibilityChange = () => this._handleVisibilityChange();
     this._onRefreshEvent = () => this.refresh();
+    // Прокрутка (любого контейнера или окна) и ресайз сдвигают якорь
+    // контекстного меню (position:fixed) — закрываем его. Скролл слушаем на
+    // window в capture-фазе: ловит и прокрутку внутреннего списка, и страницы.
+    this._onScroll = () => this._closeContextMenu();
+    this._onWinResize = () => this._closeContextMenu();
   }
 
   /**
@@ -106,6 +118,8 @@ export class NotificationCenter {
     document.addEventListener('click', this._onDocClick);
     document.addEventListener('visibilitychange', this._onVisibilityChange);
     document.addEventListener('notifications:refresh', this._onRefreshEvent);
+    window.addEventListener('scroll', this._onScroll, true);
+    window.addEventListener('resize', this._onWinResize);
 
     if (this.enablePersisted) {
       // Сначала тянем интервал из конфига, затем запускаем поллинг. Сбой
@@ -191,7 +205,10 @@ export class NotificationCenter {
     const persistedUnread = (this._persistedUnreadCount != null)
       ? this._persistedUnreadCount
       : countPersistedUnread(persisted);
-    const { count, hidden } = computeBadge(persistedUnread, live.length);
+    // Бейдж считает только НЕпрочитанные живые: прочитанные клиентом (сводка
+    // актов) выпадают из счётчика, «вечно горящие» (внутри акта, без состояния)
+    // считаются всегда.
+    const { count, hidden } = computeBadge(persistedUnread, countUnreadLive(live));
 
     if (hidden) {
       this.badge.classList.add('hidden');
@@ -207,7 +224,8 @@ export class NotificationCenter {
     // severity непрочитанных видимых: критичный элемент в хвосте за снимком
     // (limit=50) иначе не покрасил бы бейдж.
     const unreadPersisted = persisted.filter((n) => n && n.is_read !== true);
-    const sev = pickBadgeSeverityWithServer(live, unreadPersisted, this._persistedUnreadSeverity);
+    const unreadLive = live.filter((it) => it && it.is_read !== true);
+    const sev = pickBadgeSeverityWithServer(unreadLive, unreadPersisted, this._persistedUnreadSeverity);
     this.badge.classList.toggle('notif-badge--error', sev === 'error');
     this.badge.classList.toggle('notif-badge--warning', sev === 'warning');
     this.badge.classList.toggle('notif-badge--info', sev === 'info');
@@ -240,6 +258,7 @@ export class NotificationCenter {
     this.menu.classList.add('hidden');
     this.btn.classList.remove('active');
     this.isOpen = false;
+    this._closeContextMenu();
     if (this._escapeUnsub) {
       this._escapeUnsub();
       this._escapeUnsub = null;
@@ -252,12 +271,19 @@ export class NotificationCenter {
   destroy() {
     this._destroyed = true;
     this._stopPolling();
+    this._closeContextMenu();
     if (this.btn) this.btn.removeEventListener('click', this._onBtnClick);
     if (this.closeBtn) this.closeBtn.removeEventListener('click', this._onCloseClick);
     if (this.readAllBtn) this.readAllBtn.removeEventListener('click', this._onReadAllClick);
+    window.removeEventListener('scroll', this._onScroll, true);
+    window.removeEventListener('resize', this._onWinResize);
     document.removeEventListener('click', this._onDocClick);
     document.removeEventListener('visibilitychange', this._onVisibilityChange);
     document.removeEventListener('notifications:refresh', this._onRefreshEvent);
+    if (this._ctxMenu && this._ctxMenu.parentNode) {
+      this._ctxMenu.parentNode.removeChild(this._ctxMenu);
+    }
+    this._ctxMenu = null;
     if (this._escapeUnsub) {
       this._escapeUnsub();
       this._escapeUnsub = null;
@@ -369,6 +395,29 @@ export class NotificationCenter {
   }
 
   /**
+   * POST mark-unread для персистентного уведомления + локальное обновление.
+   * @private
+   * @param {string} id
+   */
+  async _markUnread(id) {
+    const item = this._persisted.find((n) => n && n.id === id);
+    // Оптимистично увеличиваем серверный счётчик только при реальном переходе
+    // прочитано→непрочитано.
+    if (item && item.is_read === true && this._persistedUnreadCount != null) {
+      this._persistedUnreadCount += 1;
+    }
+    if (item) item.is_read = false; // оптимистично
+    this.refresh();
+    try {
+      await fetch(AppConfig.api.getUrl(`/api/v1/notifications/${encodeURIComponent(id)}/unread`), {
+        method: 'POST',
+      });
+    } catch (e) {
+      // не критично — снимок освежится поллингом
+    }
+  }
+
+  /**
    * POST dismiss для персистентного уведомления + удаление из снимка.
    * @private
    * @param {string} id
@@ -410,6 +459,144 @@ export class NotificationCenter {
     }
   }
 
+  // ── Контекстное меню записи ──────────────────────────────────────────────
+
+  /**
+   * Возвращает доступные действия для записи в виде [{label, run, danger?}].
+   *
+   * Персистентные поддерживают всё (read/unread/delete через API). Живые — лишь
+   * то, для чего источник дал обработчик (onMarkRead/onMarkUnread/onDelete):
+   * сводка актов выдаёт их для warning-записей, замечания внутри акта — нет
+   * (тогда меню пустое — «вечно горящие»). Пункт read/unread зависит от is_read.
+   * @private
+   * @param {Object} item
+   * @returns {Array<{label: string, run: Function, danger?: boolean}>}
+   */
+  _actionsFor(item) {
+    const isPersisted = item.kind === 'persisted';
+    const canRead = isPersisted || typeof item.onMarkRead === 'function';
+    const canUnread = isPersisted || typeof item.onMarkUnread === 'function';
+    const canDelete = isPersisted || typeof item.onDelete === 'function';
+
+    const actions = [];
+    if (item.is_read) {
+      if (canUnread) actions.push({ label: 'Отметить непрочитанным', run: () => this._setItemRead(item, false) });
+    } else if (canRead) {
+      actions.push({ label: 'Прочитать', run: () => this._setItemRead(item, true) });
+    }
+    if (canDelete) actions.push({ label: 'Удалить', danger: true, run: () => this._deleteItem(item) });
+    return actions;
+  }
+
+  /**
+   * Помечает запись прочитанной/непрочитанной (персистентная → API, живая →
+   * обработчик источника).
+   * @private
+   */
+  _setItemRead(item, read) {
+    if (item.kind === 'persisted') {
+      if (read) this._markRead(item.id);
+      else this._markUnread(item.id);
+      return;
+    }
+    try {
+      if (read && typeof item.onMarkRead === 'function') item.onMarkRead();
+      else if (!read && typeof item.onMarkUnread === 'function') item.onMarkUnread();
+    } catch (e) {
+      console.warn('[NotificationCenter] переключение прочтения живой записи упало:', e);
+    }
+    this.refresh();
+  }
+
+  /**
+   * Удаляет запись (персистентная → dismiss API, живая → обработчик источника).
+   * @private
+   */
+  _deleteItem(item) {
+    if (item.kind === 'persisted') {
+      this._dismiss(item.id);
+      return;
+    }
+    try {
+      if (typeof item.onDelete === 'function') item.onDelete();
+    } catch (e) {
+      console.warn('[NotificationCenter] удаление живой записи упало:', e);
+    }
+    this.refresh();
+  }
+
+  /** @private Создаёт (лениво) контейнер контекстного меню на body. */
+  _ensureContextMenu() {
+    if (this._ctxMenu) return this._ctxMenu;
+    const menu = document.createElement('div');
+    menu.className = 'notif-context-menu hidden';
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    this._ctxMenu = menu;
+    return menu;
+  }
+
+  /**
+   * Открывает контекстное меню записи в точке (x, y) вьюпорта. Пустой набор
+   * действий показывает заглушку «Нет доступных действий».
+   * @private
+   * @param {Object} item
+   * @param {number} x
+   * @param {number} y
+   */
+  _openContextMenu(item, x, y) {
+    this._closeContextMenu(); // сбрасываем прежнее меню/escape-подписку
+    const menu = this._ensureContextMenu();
+    menu.innerHTML = '';
+
+    const actions = this._actionsFor(item);
+    if (!actions.length) {
+      const empty = document.createElement('div');
+      empty.className = 'notif-context-menu-empty';
+      empty.textContent = 'Нет доступных действий';
+      menu.appendChild(empty);
+    } else {
+      for (const a of actions) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'notif-context-menu-item' + (a.danger ? ' notif-context-menu-item--danger' : '');
+        btn.setAttribute('role', 'menuitem');
+        btn.textContent = a.label;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._closeContextMenu();
+          try { a.run(); } catch (err) { console.warn('[NotificationCenter] действие меню упало:', err); }
+        });
+        menu.appendChild(btn);
+      }
+    }
+
+    // Показываем, замеряем, корректируем позицию чтобы не вылезти за вьюпорт.
+    menu.classList.remove('hidden');
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x;
+    let top = y;
+    if (left + rect.width > vw - 8) left = Math.max(8, vw - rect.width - 8);
+    if (top + rect.height > vh - 8) top = Math.max(8, vh - rect.height - 8);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    this._ctxOpen = true;
+    this._ctxEscapeUnsub = EscapeStack.push(() => this._closeContextMenu());
+  }
+
+  /** @private Закрывает контекстное меню записи. */
+  _closeContextMenu() {
+    if (this._ctxMenu) this._ctxMenu.classList.add('hidden');
+    this._ctxOpen = false;
+    if (this._ctxEscapeUnsub) {
+      this._ctxEscapeUnsub();
+      this._ctxEscapeUnsub = null;
+    }
+  }
+
   // ── Рендер ──────────────────────────────────────────────────────────────
 
   /**
@@ -444,7 +631,9 @@ export class NotificationCenter {
   _buildItem(item) {
     const row = document.createElement('div');
     row.className = 'notification-item';
-    if (item.kind === 'persisted' && item.is_read) {
+    // Прочитанное приглушается и у персистентных, и у живых с клиентским
+    // состоянием (сводка актов). Живые без состояния всегда непрочитаны.
+    if (item.is_read) {
       row.classList.add('notification-item--read');
     }
 
@@ -468,18 +657,26 @@ export class NotificationCenter {
     }
     row.appendChild(textWrap);
 
-    // Крестик dismiss — только у персистентных.
-    if (item.kind === 'persisted') {
-      const close = document.createElement('button');
-      close.className = 'notification-item-dismiss';
-      close.setAttribute('aria-label', 'Скрыть уведомление');
-      close.textContent = '×'; // ×
-      close.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._dismiss(item.id);
-      });
-      row.appendChild(close);
-    }
+    // Кнопка «⋮» открывает контекстное меню записи (Прочитать/Непрочитанным/
+    // Удалить) — заменяет прежний крестик dismiss. Меню одно для всех видов;
+    // набор пунктов зависит от возможностей записи (см. _actionsFor).
+    const kebab = document.createElement('button');
+    kebab.className = 'notification-item-menu-btn';
+    kebab.type = 'button';
+    kebab.setAttribute('aria-label', 'Действия с уведомлением');
+    kebab.textContent = '⋮';
+    kebab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = kebab.getBoundingClientRect();
+      this._openContextMenu(item, r.right, r.bottom);
+    });
+    row.appendChild(kebab);
+
+    // Правый клик по строке — то же контекстное меню в точке курсора.
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this._openContextMenu(item, e.clientX, e.clientY);
+    });
 
     row.addEventListener('click', () => this._handleItemClick(item));
     return row;
@@ -487,12 +684,20 @@ export class NotificationCenter {
 
   /**
    * Обработчик клика по записи.
-   *   - живая → её onClick (например, переход к таблице);
-   *   - персистентная → mark-read, затем переход по link (если задан).
+   *
+   * Клик помечает уведомление прочитанным, если оно это поддерживает и ещё не
+   * прочитано — независимо от того, есть переход или нет. Затем выполняется
+   * навигация: у живых — их onClick (переход к таблице/акту), у персистентных —
+   * переход по link. «Вечно горящие» живые (без onMarkRead) клик не гасит.
    * @private
    * @param {Object} item
    */
   _handleItemClick(item) {
+    const canRead = item.kind === 'persisted' || typeof item.onMarkRead === 'function';
+    if (canRead && !item.is_read) {
+      this._setItemRead(item, true);
+    }
+
     if (item.kind === 'live') {
       if (typeof item.onClick === 'function') {
         try { item.onClick(); } catch (e) { console.warn('[NotificationCenter] onClick упал:', e); }
@@ -500,8 +705,7 @@ export class NotificationCenter {
       return;
     }
 
-    // persisted
-    this._markRead(item.id);
+    // persisted: переход по link (mark-read уже сделан выше).
     if (item.link) {
       let url = AppConfig.api.getUrl(item.link);
       if (item.element_ref) {
@@ -521,6 +725,11 @@ export class NotificationCenter {
    * @param {MouseEvent} e
    */
   _handleOutsideClick(e) {
+    // Клик вне открытого контекстного меню — закрываем его (клики по самим
+    // пунктам гасят всплытие, сюда не доходят).
+    if (this._ctxOpen && this._ctxMenu && !this._ctxMenu.contains(e.target)) {
+      this._closeContextMenu();
+    }
     if (!this.isOpen) return;
     const container = this.btn.closest('.notifications-menu-container');
     const insideMenu = this.menu.contains(e.target);

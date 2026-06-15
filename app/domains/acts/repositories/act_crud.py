@@ -12,6 +12,7 @@ from app.db.repositories.base import BaseRepository
 from app.db.utils.json_db_utils import JSONDBUtils
 from app.domains.acts.utils import KMUtils, ActDirectivesValidator
 from app.domains.acts.schemas.act_metadata import (
+    ActAttentionItem,
     ActListItem,
     ActResponse,
     AuditTeamMember,
@@ -553,6 +554,72 @@ class ActCrudRepository(BaseRepository):
                 audit_act_id=row["audit_act_id"],
                 locked_by=row["locked_by"],
                 is_locked=row["is_locked"],
+                needs_created_date=row["needs_created_date"],
+                needs_directive_number=row["needs_directive_number"],
+                needs_invoice_check=row["needs_invoice_check"],
+                needs_service_note=row["needs_service_note"],
+                validation_status=row["validation_status"],
+                validation_issues=_parse_validation_issues(row["validation_issues"]),
+            )
+            for row in rows
+        ]
+
+    async def get_user_acts_needing_attention(
+        self, username: str, *, limit: int = 200,
+    ) -> list[ActAttentionItem]:
+        """Возвращает ВСЕ акты пользователя, требующие внимания (без пагинации).
+
+        Сводка для колокольчика лендинга: акты с незакрытыми требованиями
+        (needs_* — фактура/дата/поручения/СЗ; поддерживаются ETL) ИЛИ
+        со структурной валидацией не 'ok' (validation_status пишется при
+        сохранении). Заблокированные (живой lock) исключаем — как делал прежний
+        клиентский живой источник. Один дешёвый запрос вместо клиентского
+        пересчёта по сотне актов; читает те же колонки, что и список.
+
+        ``limit`` — потолок размера ответа (защита от патологического payload);
+        реалистично у пользователя их кратно меньше.
+        """
+        rows = await self.conn.fetch(
+            f"""
+            SELECT
+                a.id,
+                a.inspection_name,
+                a.needs_created_date,
+                a.needs_directive_number,
+                a.needs_invoice_check,
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
+            FROM {self.acts} a
+            WHERE EXISTS (
+                SELECT 1 FROM {self.audit_team} atm
+                WHERE atm.act_id = a.id AND atm.username = $1
+            )
+              AND NOT (
+                a.locked_by IS NOT NULL
+                AND a.lock_expires_at IS NOT NULL
+                AND a.lock_expires_at > CURRENT_TIMESTAMP
+              )
+              AND (
+                a.needs_created_date
+                OR a.needs_directive_number
+                OR a.needs_invoice_check
+                OR a.needs_service_note
+                OR a.validation_status <> 'ok'
+              )
+            ORDER BY
+                COALESCE(a.last_edited_at, a.created_at) DESC,
+                a.created_at DESC
+            LIMIT $2
+            """,
+            username,
+            limit,
+        )
+
+        return [
+            ActAttentionItem(
+                id=row["id"],
+                inspection_name=row["inspection_name"],
                 needs_created_date=row["needs_created_date"],
                 needs_directive_number=row["needs_directive_number"],
                 needs_invoice_check=row["needs_invoice_check"],

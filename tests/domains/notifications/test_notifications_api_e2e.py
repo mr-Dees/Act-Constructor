@@ -78,6 +78,7 @@ def _make_service() -> MagicMock:
     svc.list_for_user = AsyncMock(return_value=[])
     svc.unread_summary = AsyncMock(return_value={"count": 0, "severity": None})
     svc.mark_read = AsyncMock()
+    svc.mark_unread = AsyncMock()
     svc.mark_all_read = AsyncMock()
     svc.dismiss = AsyncMock()
     svc.push = AsyncMock(return_value="new-id")
@@ -198,6 +199,20 @@ def test_mark_read():
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"ok": True}
     svc.mark_read.assert_awaited_once_with("n1", USERNAME)
+
+
+# ── POST /notifications/{id}/unread ──────────────────────────────────────────
+
+
+def test_mark_unread():
+    """POST /{id}/unread возвращает уведомление в непрочитанное."""
+    svc = _make_service()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/notifications/n1/unread")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+    svc.mark_unread.assert_awaited_once_with("n1", USERNAME)
 
 
 # ── POST /notifications/read-all ─────────────────────────────────────────────
