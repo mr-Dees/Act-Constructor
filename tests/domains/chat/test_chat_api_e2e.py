@@ -645,6 +645,132 @@ class TestGetSingleMessage:
 
         assert resp.status_code == 404, resp.text
 
+    def test_get_message_streaming_with_agent_ref_returns_status_details(self):
+        """streaming + agent_ref: GET возвращает status_details от AgentChannelService."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "m1",
+            "conversation_id": "conv-1",
+            "status": "streaming",
+            "content": [],
+            "agent_ref": "q-uid",
+        })
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with (
+            patch(
+                "app.domains.chat.api.messages.get_chat_settings",
+                return_value=settings,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService.get_queue_details",
+                new=AsyncMock(return_value={"bus_status": "pending", "queue_ahead": 2}),
+            ),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/api/v1/chat/conversations/conv-1/messages/m1")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == "m1"
+        assert body["status"] == "streaming"
+        assert body["status_details"] == {"bus_status": "pending", "queue_ahead": 2}
+
+    def test_get_message_streaming_without_agent_ref_no_status_details(self):
+        """streaming без agent_ref: ключа status_details нет в ответе."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "m2",
+            "conversation_id": "conv-1",
+            "status": "streaming",
+            "content": [],
+        })
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/conv-1/messages/m2")
+
+        assert resp.status_code == 200, resp.text
+        assert "status_details" not in resp.json()
+
+    def test_get_message_complete_with_agent_ref_no_status_details(self):
+        """status='complete' + agent_ref: ключа status_details нет в ответе."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "m3",
+            "conversation_id": "conv-1",
+            "status": "complete",
+            "content": [{"type": "text", "content": "Готово"}],
+            "agent_ref": "q-uid",
+        })
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/conv-1/messages/m3")
+
+        assert resp.status_code == 200, resp.text
+        assert "status_details" not in resp.json()
+
+    def test_get_message_status_details_best_effort_on_error(self):
+        """get_queue_details бросает Exception → 200, status/content на месте, status_details отсутствует."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "m4",
+            "conversation_id": "conv-1",
+            "status": "streaming",
+            "content": [],
+            "agent_ref": "q-uid",
+        })
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with (
+            patch(
+                "app.domains.chat.api.messages.get_chat_settings",
+                return_value=settings,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService.get_queue_details",
+                new=AsyncMock(side_effect=RuntimeError("БД недоступна")),
+            ),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/api/v1/chat/conversations/conv-1/messages/m4")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == "m4"
+        assert body["status"] == "streaming"
+        assert body["content"] == []
+        assert "status_details" not in body
+
 
 # -------------------------------------------------------------------------
 # POST /api/v1/chat/conversations/{id}/messages — загрузка файла в сообщении

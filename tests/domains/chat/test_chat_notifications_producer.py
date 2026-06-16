@@ -1,14 +1,14 @@
 """Тесты продьюсера уведомлений домена chat (T4).
 
-Проверяют, что ``AgentChannelService.try_finalize`` после успешной
+Проверяют, что ``AgentChannelService.poll_once`` после успешной
 финализации ответа внешнего агента эмитит персистентное уведомление через
 фабрику ``notifications.push`` — и делает это мягко:
 - при наличии фабрики push зовётся с source='chat' и recipient_user_id
   автора вопроса;
-- при отсутствии фабрики try_finalize отрабатывает как раньше (без push,
+- при отсутствии фабрики poll_once отрабатывает как раньше (без push,
   без ошибок) — это страхует от регрессии существующих юнит-тестов, где
   домен notifications не зарегистрирован;
-- сбой push не ломает try_finalize (возвращается 'done').
+- сбой push не ломает poll_once (outcome='done').
 """
 
 import pytest
@@ -62,31 +62,29 @@ def _make_finalizable_service(mock_conn, settings, *, question_user_id="user1"):
     """Возвращает (svc, fake_agent_repo, fake_msg_repo) с готовым к финализации
     ответом агента (status='complete', без ошибки)."""
     question = {
-        "id": "q-1",
-        "conversation_id": "q-uid",
+        "id": "q-uid",
         "user_id": question_user_id,
-        "status": "complete",
-        "reply_to": "a-uid",
+        "status": "completed",
+        "reply_to": None,
     }
     answer = {
-        "id": "a-1",
-        "conversation_id": "a-uid",
+        "id": "a-uid",
         "role": "assistant",
         "content": "Ответ от агента",
         "metadata": {},
         "buttons": None,
         "media": None,
-        "status": "complete",
+        "reply_to": "q-uid",
+        "status": "completed",
     }
     fake_agent_repo = AsyncMock()
-    fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-        "q-uid": question,
-        "a-uid": answer,
-    }.get(uid))
+    fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+    fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
     fake_msg_repo = AsyncMock()
     fake_msg_repo.finalize = AsyncMock(return_value=True)
     fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+    fake_msg_repo.upsert_block = AsyncMock(return_value=True)
 
     svc = AgentChannelService(mock_conn, settings)
     svc._agent_repo = lambda: fake_agent_repo
@@ -122,12 +120,12 @@ class TestChatNotificationsProducer:
         push_mock = AsyncMock(return_value="notif-1")
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
         push_mock.assert_awaited_once()
         kwargs = push_mock.call_args.kwargs
@@ -142,7 +140,7 @@ class TestChatNotificationsProducer:
     async def test_no_factory_finalizes_without_push_and_no_error(
         self, mock_conn, settings
     ):
-        """Без фабрики notifications.push try_finalize отрабатывает как раньше:
+        """Без фабрики notifications.push poll_once отрабатывает как раньше:
         финализация проходит, ошибок нет, push не вызывается (no-regression)."""
         svc, fake_agent_repo, fake_msg_repo = _make_finalizable_service(
             mock_conn, settings
@@ -150,34 +148,33 @@ class TestChatNotificationsProducer:
         # Фабрика НЕ зарегистрирована (reset_registry в фикстуре).
         assert not domain_registry.has_factory("notifications.push")
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="complete",
+            uid="q-uid", status="completed",
         )
 
     async def test_push_failure_does_not_break_finalize(
         self, mock_conn, settings
     ):
-        """Сбой push не ломает try_finalize: возвращается 'done', финализация
-        выполнена."""
+        """Сбой push не ломает poll_once: outcome='done', финализация выполнена."""
         svc, fake_agent_repo, fake_msg_repo = _make_finalizable_service(
             mock_conn, settings
         )
         push_mock = AsyncMock(side_effect=RuntimeError("push упал"))
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
         push_mock.assert_awaited_once()
 
@@ -187,30 +184,28 @@ class TestChatNotificationsProducer:
         """Ветка ошибки: после mark_failed эмитится уведомление severity='error'
         с заголовком «Ошибка ответа базы знаний»."""
         question = {
-            "id": "q-2",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "user_id": "asker-7",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
-            "id": "a-2",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ошибка в агенте",
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "error",
+            "reply_to": "q-uid",
+            "status": "failed",
         }
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
         fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+        fake_msg_repo.upsert_block = AsyncMock(return_value=True)
 
         svc = AgentChannelService(mock_conn, settings)
         svc._agent_repo = lambda: fake_agent_repo
@@ -219,12 +214,12 @@ class TestChatNotificationsProducer:
         push_mock = AsyncMock(return_value="notif-err")
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-2",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.mark_failed.assert_called_once()
         fake_msg_repo.finalize.assert_not_called()
         push_mock.assert_awaited_once()
@@ -245,12 +240,12 @@ class TestChatNotificationsProducer:
         push_mock = AsyncMock(return_value="notif")
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
         push_mock.assert_not_awaited()
 
@@ -267,17 +262,17 @@ class TestChatNotificationsProducer:
         push_mock = AsyncMock(return_value="notif")
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
         push_mock.assert_not_awaited()
         # set_status всё равно вызывается (закрытие вопроса идемпотентно).
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="complete",
+            uid="q-uid", status="completed",
         )
 
     async def test_no_push_when_mark_failed_idempotent_noop(
@@ -287,30 +282,28 @@ class TestChatNotificationsProducer:
         уведомление об ошибке НЕ эмитим: эмиссия в ветке ошибки тоже гейтится
         возвратом mark_failed."""
         question = {
-            "id": "q-9",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "user_id": "asker-9",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
-            "id": "a-9",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ошибка в агенте",
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "error",
+            "reply_to": "q-uid",
+            "status": "failed",
         }
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
         fake_msg_repo.mark_failed = AsyncMock(return_value=False)
+        fake_msg_repo.upsert_block = AsyncMock(return_value=True)
 
         svc = AgentChannelService(mock_conn, settings)
         svc._agent_repo = lambda: fake_agent_repo
@@ -319,14 +312,14 @@ class TestChatNotificationsProducer:
         push_mock = AsyncMock(return_value="notif")
         _register_push_factory(push_mock)
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-9",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.mark_failed.assert_called_once()
         push_mock.assert_not_awaited()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="error",
+            uid="q-uid", status="failed",
         )

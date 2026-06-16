@@ -10,7 +10,75 @@ import { AuthManager } from '../auth.js';
 import { ClientActionsRegistry } from './chat-client-actions.js';
 import { EscapeStack } from '../escape-stack.js';
 import { formatFileSize } from '../format-units.js';
-import { SafeHTML } from '../sanitize.js';
+import { SafeHTML, CHAT_MD_CONFIG } from '../sanitize.js';
+import { marked } from '../../../vendor/marked/marked.esm.min.js';
+import hljs from '../../../vendor/highlightjs/highlight.min.js';
+
+// Конфигурация marked: GFM целиком, одиночные \n — переносы (LLM-текст).
+// Переопределения: код подсвечивается hljs (вывод — спаны class="hljs-*",
+// проходит DOMPurify с разрешённым class); чекбоксы task-list — символами,
+// чтобы не разрешать <input> в санитайзере.
+// ВАЖНО: use() конфигурирует ГЛОБАЛЬНЫЙ инстанс vendored-marked. Если
+// понадобится второй контекст рендеринга (не-чат) — использовать
+// new marked.Marked() со своими опциями, а не менять эти.
+marked.use({
+    gfm: true,
+    breaks: true,
+    renderer: {
+        code({ text, lang }) {
+            const language = (lang || '').trim().split(/\s+/)[0];
+            let highlighted;
+            let cls = 'hljs';
+            try {
+                if (language && hljs.getLanguage(language)) {
+                    highlighted = hljs.highlight(text, { language }).value;
+                    cls += ' language-' + language;
+                } else {
+                    highlighted = hljs.highlightAuto(text).value;
+                }
+            } catch {
+                highlighted = SafeHTML.escapeHtml(text);
+            }
+            return '<pre><code class="' + cls + '">' + highlighted + '</code></pre>\n';
+        },
+        checkbox({ checked }) {
+            return checked ? '☑ ' : '☐ ';
+        },
+    },
+});
+
+/**
+ * Замыкание прогрессивного markdown-рендера для streaming-блока:
+ * аккумулирует текст и перерисовывает targetEl с троттлингом.
+ * finalize всегда рендерит финальное состояние — потерянных хвостов нет.
+ *
+ * @param {HTMLElement} targetEl — элемент, в который пишется HTML
+ * @returns {{ appendText: function(string): void, finalize: function(): void }}
+ */
+function makeStreamingClosure(targetEl) {
+    let accumulated = '';
+    let lastRender = 0;
+    // Re-parse — O(всего накопленного текста), поэтому интервал перерисовки
+    // растёт вместе с ним: до ~5 КБ — 80мс (~12 раз/сек, глазу неотличимо),
+    // дальше пропорционально длине с потолком 1000мс — иначе на длинных
+    // reasoning каждый тик парсил бы десятки КБ. Визуально безопасно: чем
+    // длиннее текст, тем незаметнее дискретность дорисовки, а finalize
+    // всегда рендерит точное финальное состояние.
+    const renderIntervalMs = () => Math.min(1000, Math.max(80, accumulated.length / 64));
+
+    return {
+        appendText(text) {
+            accumulated += text;
+            const now = performance.now();
+            if (now - lastRender < renderIntervalMs()) return;
+            lastRender = now;
+            ChatRenderer._safeSetHtml(targetEl, ChatRenderer._markdownToHtml(accumulated));
+        },
+        finalize() {
+            ChatRenderer._safeSetHtml(targetEl, ChatRenderer._markdownToHtml(accumulated));
+        },
+    };
+}
 
 export const ChatRenderer = {
 
@@ -24,7 +92,13 @@ export const ChatRenderer = {
      * @private
      */
     _safeSetHtml(el, html) {
-        SafeHTML.set(el, html);
+        SafeHTML.set(el, html, CHAT_MD_CONFIG);
+        // Внешние ссылки — в новую вкладку без opener (постобработка контейнера,
+        // а не глобальный DOMPurify-hook: хук задел бы другие зоны приложения).
+        el.querySelectorAll('a[href]').forEach((a) => {
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+        });
     },
 
     /**
@@ -95,6 +169,8 @@ export const ChatRenderer = {
      * @param {Object} [options]
      * @param {number} [options.speed=8] — символов за кадр (16 мс)
      * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     * @returns {Promise<void>|undefined} — promise завершения анимации
+     *          (мгновенные ветки возвращают undefined; await безопасен)
      */
     typeOutBlocks(container, blocks, options = {}) {
         const { speed = 8, signal } = options;
@@ -108,7 +184,7 @@ export const ChatRenderer = {
         }
 
         // Запускаем асинхронную очередь
-        this._typeOutQueue(container, blocks, speed, signal);
+        return this._typeOutQueue(container, blocks, speed, signal);
     },
 
     /**
@@ -125,40 +201,17 @@ export const ChatRenderer = {
                 return;
             }
 
-            const type = block && block.type;
+            // typeOutSingleBlock сам дописывает остаток текущего блока при abort
+            // (через _animateText), поэтому после него проверяем abort и
+            // дорисовываем ТОЛЬКО хвост очереди (index + 1).
+            await this.typeOutSingleBlock(container, block, { speed, signal });
 
-            if (type === 'text' || type === 'reasoning') {
-                const text = block.content || '';
-                if (!text) {
-                    // Пустой блок — рендерим мгновенно
-                    const el = this.renderBlock(block, { execute: false });
-                    if (el) this.appendBlock(container, el);
-                    continue;
-                }
-
-                const sb = this.createStreamingBlock(
-                    type,
-                    typeof block.block_id === 'string' ? block.block_id : undefined,
-                );
-                this.appendBlock(container, sb.element);
-
-                // Посимвольная анимация
-                await this._animateText(sb, text, speed, signal);
-                sb.finalize();
-
-                if (signal && signal.aborted) {
-                    // Дорисовываем остаток
-                    const idx = blocks.indexOf(block);
-                    const remaining = blocks.slice(idx + 1);
-                    this.renderBlocks(container, remaining, { execute: true });
-                    return;
-                }
-            } else {
-                // Нестримуемые блоки — мгновенно
-                const el = this.renderBlock(block, { execute: true });
-                if (el) this.appendBlock(container, el);
+            if (signal && signal.aborted) {
+                const idx = blocks.indexOf(block);
+                const remaining = blocks.slice(idx + 1);
+                this.renderBlocks(container, remaining, { execute: true });
+                return;
             }
-
         }
     },
 
@@ -192,6 +245,68 @@ export const ChatRenderer = {
 
             requestAnimationFrame(step);
         });
+    },
+
+    /**
+     * Допечатывает текст в существующий streaming-блок с анимацией и финализирует.
+     * Используется инкрементальным рендером рассуждений агента (chat-messages.js).
+     * При прерывании сигналом текст допечатывается мгновенно; finalize вызывается в любом случае.
+     *
+     * @param {{appendText: function, finalize: function}} sb — streaming-блок
+     * @param {string} text — допечатываемый фрагмент
+     * @param {Object} [options]
+     * @param {number} [options.speed=8] — символов за кадр
+     * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     */
+    async appendTextAnimated(sb, text, { speed = 8, signal } = {}) {
+        await this._animateText(sb, text, speed, signal);
+        sb.finalize();
+    },
+
+    /**
+     * Стримящийся ли тип блока: text/reasoning печатаются посимвольно и
+     * допечатываются дельтами (инкрементальный рендер, посев при resume).
+     * Единая точка истины для chat-renderer и chat-messages — новый
+     * стримящийся тип добавляется только здесь.
+     *
+     * @param {string} type — block.type
+     * @returns {boolean}
+     */
+    isStreamingBlockType(type) {
+        return type === 'text' || type === 'reasoning';
+    },
+
+    /**
+     * Печатает ОДИН блок: text/reasoning — посимвольно через streaming-блок,
+     * прочие типы — мгновенный рендер. Вынесен из _typeOutQueue, чтобы
+     * финальный рендер после инкрементального мог допечатывать выборочно.
+     *
+     * @param {HTMLElement} container — контейнер бот-сообщения
+     * @param {Object} block — блок {type, ...data}
+     * @param {Object} [options]
+     * @param {number} [options.speed=8] — символов за кадр
+     * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     */
+    async typeOutSingleBlock(container, block, { speed = 8, signal } = {}) {
+        const type = block && block.type;
+        if (this.isStreamingBlockType(type)) {
+            const text = block.content || '';
+            if (!text) {
+                const el = this.renderBlock(block, { execute: false });
+                if (el) this.appendBlock(container, el);
+                return;
+            }
+            const sb = this.createStreamingBlock(
+                type,
+                typeof block.block_id === 'string' ? block.block_id : undefined,
+            );
+            this.appendBlock(container, sb.element);
+            await this._animateText(sb, text, speed, signal);
+            sb.finalize();
+        } else {
+            const el = this.renderBlock(block, { execute: true });
+            if (el) this.appendBlock(container, el);
+        }
     },
 
     /**
@@ -421,39 +536,17 @@ export const ChatRenderer = {
             details.appendChild(summary);
 
             const content = document.createElement('div');
-            content.className = 'chat-block-reasoning-content';
+            content.className = 'chat-block-reasoning-content chat-md';
             details.appendChild(content);
 
-            let accumulated = '';
-
-            return {
-                element: details,
-                appendText(text) {
-                    accumulated += text;
-                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
-                },
-                finalize() {
-                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
-                },
-            };
+            return { element: details, ...makeStreamingClosure(content) };
         }
 
         // По умолчанию — текстовый блок
         const div = document.createElement('div');
-        div.className = 'chat-block chat-block-text';
+        div.className = 'chat-block chat-block-text chat-md';
 
-        let accumulated = '';
-
-        return {
-            element: div,
-            appendText(text) {
-                accumulated += text;
-                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
-            },
-            finalize() {
-                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
-            },
-        };
+        return { element: div, ...makeStreamingClosure(div) };
     },
 
     /**
@@ -503,7 +596,7 @@ export const ChatRenderer = {
      */
     _renderText(block) {
         const div = document.createElement('div');
-        div.className = 'chat-block chat-block-text';
+        div.className = 'chat-block chat-block-text chat-md';
         this._safeSetHtml(div, this._markdownToHtml(block.content || ''));
         return div;
     },
@@ -538,6 +631,15 @@ export const ChatRenderer = {
         code.textContent = block.content || '';
         pre.appendChild(code);
 
+        // Подсветка hljs: вход уже экранирован (textContent), highlightElement
+        // безопасно заменит содержимое на размеченные спаны.
+        try {
+            if (block.language && hljs.getLanguage(block.language)) {
+                code.classList.add('language-' + block.language);
+            }
+            hljs.highlightElement(code);
+        } catch { /* подсветка — некритичное украшение */ }
+
         wrapper.appendChild(header);
         wrapper.appendChild(pre);
 
@@ -566,7 +668,7 @@ export const ChatRenderer = {
         details.appendChild(summary);
 
         const content = document.createElement('div');
-        content.className = 'chat-block-reasoning-content';
+        content.className = 'chat-block-reasoning-content chat-md';
         this._safeSetHtml(content, this._markdownToHtml(block.content || ''));
         details.appendChild(content);
 
@@ -985,8 +1087,9 @@ export const ChatRenderer = {
     },
 
     /**
-     * Базовый markdown → HTML (bold, italic, inline code, переносы строк)
-     * Сначала экранирует HTML, затем применяет форматирование.
+     * Markdown → HTML через marked (GFM). Экранирование выполняют marked и
+     * DOMPurify (см. _safeSetHtml + CHAT_MD_CONFIG). При ошибке парсера —
+     * fallback на экранированный текст с переносами.
      *
      * @param {string} text
      * @returns {string}
@@ -994,37 +1097,29 @@ export const ChatRenderer = {
      */
     _markdownToHtml(text) {
         if (!text) return '';
-
-        let html = this._escapeHtml(text);
-
-        // Inline code (одинарные обратные кавычки)
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-        // Bold: **text** или __text__
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
-
-        // Italic: *text* или _text_
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        html = html.replace(/_(.+?)_/g, '<em>$1</em>');
-
-        // Переносы строк
-        html = html.replace(/\n/g, '<br>');
-
-        return html;
+        try {
+            return marked.parse(this._closeDanglingFences(String(text)));
+        } catch (e) {
+            console.warn('ChatRenderer: ошибка markdown-парсинга, fallback на plain', e);
+            return SafeHTML.escapeHtml(String(text)).replace(/\n/g, '<br>');
+        }
     },
 
     /**
-     * Экранирует HTML-спецсимволы
+     * Дозакрывает незакрытый код-фенс у ЧАСТИЧНОГО текста (эффект печати,
+     * инкрементальный reasoning): без этого хвост сообщения мигает код-блоком.
+     * На полном корректном тексте — no-op (чётное число фенсов).
      *
      * @param {string} text
      * @returns {string}
      * @private
      */
-    _escapeHtml(text) {
-        const el = document.createElement('div');
-        el.textContent = text;
-        return el.innerHTML;
+    _closeDanglingFences(text) {
+        // Отступ ≤ 3 пробелов — по CommonMark; фенс с большим отступом блок не
+        // открывает, и для частичного текста ложное «закрытие» даёт лишь
+        // безвредный пустой код-блок в самом хвосте.
+        const fences = (text.match(/^\s{0,3}(`{3,}|~{3,})/gm) || []).length;
+        return (fences % 2 === 1) ? text + '\n```' : text;
     },
 
     /**

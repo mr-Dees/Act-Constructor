@@ -11,7 +11,7 @@
 - Режим работы задаётся form-параметром `agent_mode`:
   - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).
   - `always` — прямой проброс вопроса в агента, минуя LLM.
-- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
+- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.poll_once` дозаполняет reasoning инкрементально и финализирует черновик (`complete`/`failed`).
 - Тумблер «База знаний ОАРБ» в UI — 3 позиции: Выключен / Адаптивный / Всегда (localStorage-ключ `assistant_oarb_mode`). Две другие БЗ («источников», «инструментов») в UI выключены.
 
 ## Подготовка
@@ -51,8 +51,8 @@
 - Перевести тумблер в позицию «Всегда».
 - Написать: «Расскажи про регламент 2024 года».
 - Ожидаемо: появилась строка `role='user'`, `status='pending'` в `chat_agent_messages_bus`; в чате — облако-черновик с эффектом печати.
-- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента + закрыть вопрос: `reply_to`, `status='complete'`).
-- Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.thinking` отрисованы reasoning-блоком.
+- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента с `reply_to=<id вопроса>` и `status='completed'` + закрыть вопрос `status='completed'`).
+- Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.reasoning` отрисованы reasoning-блоком.
 
 ### 3. Адаптивный форвард (тумблер «Адаптивный»)
 - Перевести тумблер в позицию «Адаптивный».
@@ -72,7 +72,7 @@
 
 ### 6. Таймаут агента
 - Форварднуть вопрос, но НЕ имитировать ответ агента дольше `ANSWER_TIMEOUT_SEC` (по умолчанию 600с).
-- Ожидаемо: `AgentChannelService.mark_timeout` проставляет `status='timeout'` строке-вопросу; черновик `chat_messages` финализируется error-блоком («Внешний агент не ответил вовремя» — `build_timeout_error_block`).
+- Ожидаемо: черновик `chat_messages` финализируется error-блоком («Внешний агент не ответил вовремя» — `build_timeout_error_block`); `AgentChannelService.mark_timeout` best-effort ставит строке-вопросу `status='failed'`.
 
 ### 7. Восстановление после reload
 - Форварднуть вопрос, во время ожидания перезагрузить страницу.

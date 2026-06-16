@@ -7,6 +7,7 @@
 
 import { ChatContext } from './chat-context.js';
 import { ChatEventBus } from './chat-event-bus.js';
+import { ChatFeedback } from './chat-feedback.js';
 import { ChatFiles } from './chat-files.js';
 import { ChatRenderer } from './chat-renderer.js';
 import { ChatStream } from './chat-stream.js';
@@ -48,6 +49,13 @@ export const ChatMessages = {
      * @type {AbortController|null}
      */
     _pollController: null,
+
+    /**
+     * Реестр инкрементально отрисованных блоков: контейнер → Map
+     * (block_id → {sb, renderedLen, queue}). WeakMap — контейнеры умирают
+     * при перерисовке беседы, реестр уходит с ними.
+     */
+    _incrementalRegistry: new WeakMap(),
 
     /**
      * Инициализация: кеширование DOM, подписка на события
@@ -173,6 +181,9 @@ export const ChatMessages = {
                     this._renderReadyMessage(botContainer, msg);
                     ChatEventBus.emit('ui:scroll-bottom');
                 },
+                onProgress: (msg) => {
+                    this._renderProgress(botContainer, msg);
+                },
                 onError: (err) => {
                     this._renderError(botContainer, err);
                     ChatEventBus.emit('ui:scroll-bottom');
@@ -194,20 +205,207 @@ export const ChatMessages = {
      * @param {Object} msg — {id, status, content}
      * @private
      */
-    _renderReadyMessage(botContainer, msg) {
+    async _renderReadyMessage(botContainer, msg) {
         ChatRenderer.removeTypingPlaceholder(botContainer);
+        this._updateQueueStatus(botContainer, null); // снять строку статуса очереди
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
+        const blocks = Array.isArray(msg.content) ? msg.content : [];
+        const reg = this._incrementalRegistry.get(botContainer);
+
         if (msg.status === 'failed') {
             if (msgEl) msgEl.classList.add('chat-message--failed');
-            // Блоки из failed-сообщения (обычно error-блок) — без анимации
-            const blocks = Array.isArray(msg.content) ? msg.content : [];
-            ChatRenderer.renderBlocks(botContainer, blocks, { execute: false });
+            // Уже допечатанные блоки не перерисовываем; новые (включая error) —
+            // мгновенно, без анимации.
+            const fresh = reg
+                ? blocks.filter((b) => !(b && b.block_id && reg.has(b.block_id)))
+                : blocks;
+            ChatRenderer.renderBlocks(botContainer, fresh, { execute: false });
+        } else if (!reg || reg.size === 0) {
+            // Инкрементального рендера не было (обычный LLM-ответ) — как раньше.
+            // Дожидаемся конца анимации, чтобы панель реакций встала ПОД ответом.
+            await ChatRenderer.typeOutBlocks(botContainer, blocks);
         } else {
-            const blocks = Array.isArray(msg.content) ? msg.content : [];
-            ChatRenderer.typeOutBlocks(botContainer, blocks);
+            await this._typeOutRemaining(botContainer, blocks, reg);
         }
+        this._incrementalRegistry.delete(botContainer);
+        // Панель обратной связи под ответом ассистента — включая failed:
+        // дизлайк на ошибочном ответе — первичный сигнал «почему ошибка»
+        // (см. docs/guides/chat-observability-and-feedback.md).
+        // Свежий ответ оценок ещё не имеет (initial=null); conversationId
+        // берём из активного контекста (poll-ответ его не содержит).
+        if (msg.id) {
+            ChatFeedback.attach(botContainer, {
+                conversationId: ChatContext.getCurrentConversationId(),
+                messageId: msg.id,
+                initial: msg.feedback || null,
+            });
+            ChatEventBus.emit('ui:scroll-bottom');
+        }
+    },
+
+    /**
+     * Прогресс ожидания ответа: строка статуса очереди + допечатывание
+     * частичных блоков (reasoning агента) по мере роста.
+     *
+     * @param {HTMLElement} botContainer
+     * @param {Object} msg — {id, status, content, status_details?}
+     * @private
+     */
+    _renderProgress(botContainer, msg) {
+        this._updateQueueStatus(botContainer, msg.status_details || null);
+        const blocks = Array.isArray(msg.content) ? msg.content : [];
+        if (blocks.length) this._renderIncrementalBlocks(botContainer, blocks);
+    },
+
+    /**
+     * Создаёт/обновляет/удаляет строку статуса очереди над typing-индикатором.
+     * details=null или неизвестный bus_status → строка удаляется.
+     * @private
+     */
+    _updateQueueStatus(botContainer, details) {
+        const text = this._queueStatusText(details);
+        let label = botContainer.querySelector(':scope > .chat-typing-status');
+        if (!text) {
+            if (label) label.remove();
+            return;
+        }
+        if (!label) {
+            label = document.createElement('div');
+            label.className = 'chat-typing-status';
+            const placeholder = botContainer.querySelector(':scope > .chat-typing-placeholder');
+            if (placeholder) {
+                botContainer.insertBefore(label, placeholder);
+            } else {
+                botContainer.appendChild(label);
+            }
+        }
+        if (label.textContent !== text) label.textContent = text;
+    },
+
+    /**
+     * Текст статуса по status_details из GET-ответа.
+     * @private
+     */
+    _queueStatusText(details) {
+        if (!details || !details.bus_status) return '';
+        if (details.bus_status === 'pending') {
+            const n = details.queue_ahead;
+            if (typeof n === 'number' && n > 0) {
+                return `В очереди: впереди ${n} ${this._pluralizeRequests(n)}`;
+            }
+            return 'В очереди: вы следующий';
+        }
+        if (details.bus_status === 'processing' || details.bus_status === 'in_progress') {
+            return 'Агент работает над ответом…';
+        }
+        return '';
+    },
+
+    /**
+     * Русская плюрализация слова «запрос».
+     * @private
+     */
+    _pluralizeRequests(n) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return 'запрос';
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'запроса';
+        return 'запросов';
+    },
+
+    /**
+     * Допечатывает дельты частичных блоков (по block_id). Накопление без
+     * дублей: рендерим только text.slice(renderedLen); анимации на один блок
+     * выстраиваются в очередь promise'ов, чтобы дельты не перемешивались.
+     * @private
+     */
+    _renderIncrementalBlocks(botContainer, blocks) {
+        let reg = this._incrementalRegistry.get(botContainer);
+        if (!reg) {
+            reg = new Map();
+            this._incrementalRegistry.set(botContainer, reg);
+        }
+        const signal = this._pollController && this._pollController.signal;
+        let appended = false;
+
+        for (const block of blocks) {
+            if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
+            if (!ChatRenderer.isStreamingBlockType(block.type)) continue;
+            const text = block.content || '';
+            let entry = reg.get(block.block_id);
+            if (!entry) {
+                const sb = ChatRenderer.createStreamingBlock(block.type, block.block_id);
+                ChatRenderer.appendBlock(botContainer, sb.element);
+                entry = { sb, renderedLen: 0, queue: Promise.resolve() };
+                reg.set(block.block_id, entry);
+                appended = true;
+            }
+            if (text.length > entry.renderedLen) {
+                const delta = text.slice(entry.renderedLen);
+                entry.renderedLen = text.length;
+                entry.queue = entry.queue.then(
+                    () => ChatRenderer.appendTextAnimated(entry.sb, delta, { signal }),
+                );
+            }
+        }
+        if (appended) ChatEventBus.emit('ui:scroll-bottom');
+    },
+
+    /**
+     * Посев инкрементального рендера при resume (reload/переключение беседы
+     * во время ожидания ответа): накопленные text/reasoning-блоки черновика
+     * рендерятся МГНОВЕННО, а реестр запоминает их длину — последующий
+     * поллинг допечатает только новые дельты, не переанимируя всё с нуля.
+     * @private
+     */
+    _seedIncrementalBlocks(botContainer, blocks) {
+        let reg = this._incrementalRegistry.get(botContainer);
+        if (!reg) {
+            reg = new Map();
+            this._incrementalRegistry.set(botContainer, reg);
+        }
+        for (const block of blocks) {
+            if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
+            if (!ChatRenderer.isStreamingBlockType(block.type)) continue;
+            if (reg.has(block.block_id)) continue;
+            const text = block.content || '';
+            const sb = ChatRenderer.createStreamingBlock(block.type, block.block_id);
+            ChatRenderer.appendBlock(botContainer, sb.element);
+            sb.appendText(text);
+            sb.finalize();
+            reg.set(block.block_id, { sb, renderedLen: text.length, queue: Promise.resolve() });
+        }
+    },
+
+    /**
+     * Финальный рендер после инкрементального: уже допечатанные блоки получают
+     * только недостающий хвост, новые — печатаются как обычно.
+     * @private
+     */
+    async _typeOutRemaining(botContainer, blocks, reg) {
+        const signal = this._pollController && this._pollController.signal;
+        for (const block of blocks) {
+            const bid = (block && typeof block.block_id === 'string') ? block.block_id : null;
+            const entry = bid ? reg.get(bid) : null;
+            if (entry && ChatRenderer.isStreamingBlockType(block.type)) {
+                const text = block.content || '';
+                if (text.length > entry.renderedLen) {
+                    const delta = text.slice(entry.renderedLen);
+                    entry.renderedLen = text.length;
+                    entry.queue = entry.queue.then(
+                        () => ChatRenderer.appendTextAnimated(entry.sb, delta, { signal }),
+                    );
+                }
+                await entry.queue;
+            } else if (entry) {
+                // Нетекстовый блок уже в DOM (отрисован инкрементально) — пропускаем.
+            } else {
+                await ChatRenderer.typeOutSingleBlock(botContainer, block, { signal });
+            }
+        }
+        ChatEventBus.emit('ui:scroll-bottom');
     },
 
     /**
@@ -221,6 +419,7 @@ export const ChatMessages = {
         if (err && err.name === 'AbortError') return; // отмена — молча
 
         ChatRenderer.removeTypingPlaceholder(botContainer);
+        this._updateQueueStatus(botContainer, null); // снять строку статуса очереди
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
@@ -411,10 +610,25 @@ export const ChatMessages = {
                     });
                     if (!isStreaming) {
                         ChatRenderer.renderBlocks(container, blocks, { execute: false });
+                    } else if (blocks.length > 0) {
+                        // Resume: накопленный черновик показываем сразу (без
+                        // анимации) и seed'им реестр — поллинг допечатает
+                        // только новые дельты.
+                        this._seedIncrementalBlocks(container, blocks);
                     }
                     if (isFailed) {
                         const msgEl = container.parentElement;
                         if (msgEl) msgEl.classList.add('chat-message--failed');
+                    }
+                    // Панель обратной связи + восстановление ранее выставленной
+                    // оценки текущего пользователя (msg.feedback из GET истории).
+                    // failed-сообщения тоже оцениваются («почему ошибка»).
+                    if (!isStreaming && msg.id) {
+                        ChatFeedback.attach(container, {
+                            conversationId: msg.conversation_id || conversationId,
+                            messageId: msg.id,
+                            initial: msg.feedback || null,
+                        });
                     }
                     // Если сообщение ещё в статусе streaming — возобновляем polling
                     if (isStreaming && msg.id) {
@@ -426,6 +640,10 @@ export const ChatMessages = {
                                 this._renderReadyMessage(container, m);
                                 ChatEventBus.emit('ui:scroll-bottom');
                             },
+                            // Resume после reload: накопленный черновик уже отрисован
+                            // мгновенно через _seedIncrementalBlocks, реестр знает
+                            // renderedLen — progress-тики допечатывают только дельты.
+                            onProgress: (m) => this._renderProgress(container, m),
                             onError: (e) => {
                                 this._renderError(container, e);
                                 ChatEventBus.emit('ui:scroll-bottom');

@@ -106,8 +106,23 @@ class GreenplumAdapter(DatabaseAdapter):
             # Разбиваем и выполняем оператор за оператором,
             # чтобы ошибка одного оператора не прерывала весь batch
             statements = self._split_sql_statements(schema_sql)
+            external = self._external_tables_from_sql(schema_sql)
 
             for stmt in statements:
+                # «Спутники» (CREATE INDEX / COMMENT ON) пропускаем только для
+                # уже существующих ВНЕШНИХ таблиц (директива -- @external-table:,
+                # например bus-таблица канала агента): на чужой таблице такие
+                # операторы падают с «must be owner of relation». Спутники
+                # собственных существующих таблиц исполняются (дубликаты глотает
+                # перехват DuplicateObjectError ниже) — иначе новый индекс из
+                # релиза молча не доехал бы до развёрнутых стендов.
+                target = self._companion_target_table(stmt)
+                if target is not None and target in existing and target in external:
+                    logger.debug(
+                        f"Greenplum: внешняя таблица {target} уже существует, "
+                        f"пропускаем сопутствующий оператор"
+                    )
+                    continue
                 try:
                     await conn.execute(stmt)
                 except asyncpg.DuplicateTableError:

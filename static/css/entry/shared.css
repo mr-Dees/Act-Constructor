@@ -24,6 +24,8 @@
 @import '../shared/dialog/dialog-buttons.css';
 
 /* Shared chat */
+@import '../../vendor/highlightjs/github.min.css';
 @import '../shared/chat/chat.css';
 @import '../shared/chat/chat-blocks.css';
+@import '../shared/chat/chat-feedback.css';
 @import '../shared/chat/chat-history.css';

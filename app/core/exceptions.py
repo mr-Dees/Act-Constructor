@@ -132,15 +132,6 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Недопустимый статус сообщения. "
         "Допустимые значения: streaming, complete, failed"
     ),
-    # ── chat: chat_agent_messages_bus ─────────────────────────────────────────────────
-    "check_chat_agent_messages_bus_status_values": (
-        "Недопустимый статус сообщения агента. "
-        "Допустимые значения: pending, in_progress, complete, error, timeout."
-    ),
-    "check_chat_agent_messages_bus_role_values": (
-        "Недопустимая роль сообщения агента. "
-        "Допустимые значения: user, assistant, tool."
-    ),
     # ── chat: chat_tool_metrics ──────────────────────────────────────────────
     "check_chat_tool_metrics_status_values": (
         "Недопустимый статус выполнения tool'а. "
@@ -148,6 +139,23 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     ),
     "check_chat_tool_metrics_latency_nonneg": (
         "Длительность выполнения tool'а не может быть отрицательной"
+    ),
+    # ── chat: chat_agent_messages_bus (dev-имитация шины внешнего агента;
+    #    словари — подтверждённая спека владельца таблицы) ───────────────────
+    "check_chat_agent_messages_bus_role_values": (
+        "Недопустимая роль сообщения шины агента. "
+        "Допустимые значения: user, assistant, system"
+    ),
+    "check_chat_agent_messages_bus_status_values": (
+        "Недопустимый статус сообщения шины агента. "
+        "Допустимые значения: pending, processing, completed, failed"
+    ),
+    # ── chat: chat_message_feedback ──────────────────────────────────────────
+    "check_chat_message_feedback_rating_values": (
+        "Недопустимая оценка сообщения. Допустимые значения: up, down"
+    ),
+    "check_chat_message_feedback_source_values": (
+        "Недопустимый источник оценки. Допустимые значения: user, auto, llm"
     ),
     # ── notifications: notifications ──────────────────────────────────────────
     "check_notifications_severity": (

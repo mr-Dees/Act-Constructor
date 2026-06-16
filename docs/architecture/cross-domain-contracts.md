@@ -119,7 +119,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 
 **`block_id` блоков из ответа внешнего агента** (форвард через шину `chat_agent_messages_bus`):
 - Формат задаётся в `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`): кнопки — `f"{row['id']}:btn:0"`, reasoning — `f"{row['id']}:reasoning:0"`, где `row['id']` — uid строки-ответа в шине.
-- `map_answer_to_blocks` мапит ответ агента в блоки в порядке: reasoning (из `metadata.thinking`) → text → buttons → media (image/file) → error.
+- `map_answer_to_blocks` мапит ответ агента в блоки в порядке: reasoning (из `metadata.reasoning`, legacy `thinking`) → text → buttons → media (image/file) → error.
 - Используется: `ClientActionsRegistry.executeBlock` дедупит исполнённые client-action по `block_id` (см. §5 выше). Стабильность формата важна, чтобы повторный поллинг GET /messages не создавал дублей кнопок.
 
 ---
@@ -144,8 +144,8 @@ SSE в чате нет. Транспорт единый для всех режи
 черновик ассистент-сообщения (`status='streaming'`, `agent_ref` = uid вопроса
 в шине) и запись вопроса в `chat_agent_messages_bus`; фоновый `AgentChannelPoller`
 (`agent_channel_poller.py`) поллит шину adaptive-backoff'ом без удержания
-коннекта в sleep; `AgentChannelService.try_finalize` мапит ответ агента в
-блоки (`map_answer_to_blocks`) и финализирует черновик (`complete`/`failed`),
+коннекта в sleep; `AgentChannelService.poll_once` дозаполняет reasoning-блок
+инкрементально и финализирует черновик (`complete`/`failed`),
 `mark_timeout` закрывает зависший запрос (`build_timeout_error_block`).
 
 | Контракт | Где |
@@ -203,28 +203,30 @@ SSE в чате нет. Транспорт единый для всех режи
 
 ## 10. Контракт шины `chat_agent_messages_bus` (приложение ↔ внешний ИИ-агент)
 
-Единая bus-таблица — единственный канал к внешнему агенту (заменила прежние
-`agent_requests` / `agent_response_events` / `agent_responses`). Polling-only,
-постоянных соединений нет. SQL-стенд имитации агента — [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
+Единая bus-таблица — единственный канал к внешнему агенту. **Структуру задаёт
+и таблицей владеет сторона агента**; наша миграция — dev-имитация её фактической
+структуры. Polling-only, постоянных соединений нет. SQL-стенд имитации агента —
+[`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
 
 | Колонка | Тип | Назначение |
 |---|---|---|
-| `id` | VARCHAR(36) | uid строки шины (вопрос/ответ) |
-| `chat_id`, `user_id`, `conversation_id` | — | привязка к чату |
-| `role` | CHECK(`user`/`assistant`/`tool`) | роль; `tool` разрешена схемой, но приложением не обрабатывается |
-| `content` | TEXT | текст |
-| `media`, `metadata`, `buttons` | JSONB | вложения, служебные данные (`metadata.thinking` → reasoning), кнопки |
-| `reply_to` | VARCHAR(36) | uid вопроса, на который это ответ |
-| `status` | CHECK(`pending`/`in_progress`/`complete`/`error`/`timeout`) | статус обработки |
-| `created_at`, `updated_at` | — | таймстемпы |
+| `id` | UUID | uid одного сообщения шины (его же хранит `chat_messages.agent_ref`) |
+| `chat_id` | TEXT | uid треда (= `chat_messages.conversation_id`); отдельной `conversation_id` в шине НЕТ |
+| `user_id` | TEXT | автор |
+| `role` | TEXT | `user`/`assistant`/`system` (CHECK владельца); `system` приложением не обрабатывается |
+| `content` | TEXT | текст (NOT NULL) |
+| `media`, `metadata`, `buttons` | JSONB | вложения, служебные данные (`metadata.reasoning` → reasoning, legacy `thinking`), кнопки |
+| `reply_to` | UUID | ссылка на id вопроса; агент проставляет его **на строке-ответе** — сигнал «ответ готов» |
+| `status` | TEXT | `pending`/`processing`/`completed`/`failed` (CHECK владельца, подтверждённая спека) — записи статуса от AW best-effort |
+| `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL; у владельца есть DEFAULT'ы, но AW не полагается и передаёт явно |
 
-**GP**: PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)` (DISTRIBUTED BY ⊆ PK).
+**GP**: без PK (у владельца `id` nullable), `DISTRIBUTED BY (chat_id)`.
 
 **Связь с `chat_messages`**: `chat_messages.agent_ref` VARCHAR(36) — ссылка из
 черновика ассистент-сообщения на uid вопроса в шине. Поток submit → poller →
-`try_finalize` описан в §6.
+`poll_once` описан в §6.
 
 | Что сломается | Симптом |
 |---|---|
 | Переименование таблицы без правки `CHAT__AGENT_CHANNEL__TABLE_NAME` | поллер и `AgentChannelService` не найдут шину |
-| Несовпадение значений `status` CHECK с кодом сервиса | агент не сможет записать ответ; см. `CHECK_CONSTRAINT_MESSAGES` |
+| Владелец сменил словарь `status` CHECK | запись статуса от AW отклонится — `_set_status_safe` залогирует warning и пропустит; финализация не пострадает |

@@ -4,6 +4,13 @@
 agent_ref IS NOT NULL) и финализирует их, когда внешний агент заполнит reply_to
 на строке-вопросе.
 
+Таймауты — idle-семантика по двум фазам:
+  pending   — вопрос ждёт взятия в работу; лимит claim_timeout_sec.
+  processing — агент пишет ответ; лимит answer_timeout_sec.
+Отсчёт в обеих фазах ведётся от последнего ПРИЗНАКА ЖИЗНИ агента:
+смены фазы, роста reasoning, изменения answer.updated_at (начиная со
+второго наблюдения), уменьшения числа pending-вопросов впереди.
+
 Adaptive backoff: при активности интервал сбрасывается в min_interval;
 при пустом тике растёт × multiplier до max_interval.
 
@@ -20,6 +27,14 @@ from typing import Any, Callable
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.services.agent_channel_poller")
+
+# Подряд идущих ошибок обработки ОДНОЙ подписки, после которых она снимается
+# аварийно (с best-effort финализацией draft'а). Полный отказ БД сюда не
+# доходит — он ловится в _run ещё на получении коннекта, счётчики не растут.
+# Порог отлавливает «отравленные» подписки (например, сменившуюся структуру
+# bus-таблицы), которые иначе ретраились бы вечно, оставляя draft в
+# 'streaming' до рестарта. При backoff 2-10 сек порог ≈ 1-5 минут сбоев.
+_MAX_CONSECUTIVE_ENTRY_ERRORS = 30
 
 
 class AgentChannelPoller:
@@ -47,7 +62,7 @@ class AgentChannelPoller:
         self._now = now
         self._db = db  # если None — лениво инициализируем в _get_db_cm()
 
-        # Реестр подписок: uid вопроса → {"assistant_message_id": ..., "started": float}
+        # Реестр подписок: uid вопроса → entry-словарь с idle-состоянием.
         self._subscriptions: dict[str, dict] = {}
 
         self._stop = False
@@ -81,6 +96,17 @@ class AgentChannelPoller:
         """Идемпотентно регистрирует ожидание ответа агента.
 
         Повторный вызов с тем же question_uid — no-op.
+
+        Entry хранит idle-состояние двухфазного таймаута:
+          last_activity  — монотонный timestamp последнего признака жизни агента.
+          phase          — 'pending' (ждём взятия в работу) или 'processing'
+                           (агент пишет ответ). Лимиты: claim_timeout_sec /
+                           answer_timeout_sec соответственно.
+          last_reasoning_len   — последняя известная длина reasoning (рост = жив).
+          last_queue_ahead     — число pending-вопросов впереди (уменьшение = жив).
+          last_answer_updated_at — timestamp ответа при последнем наблюдении;
+                           первое ненулевое значение — baseline (не activity),
+                           каждое последующее изменение — activity.
         """
         if question_uid in self._subscriptions:
             logger.debug(
@@ -90,7 +116,18 @@ class AgentChannelPoller:
             return
         self._subscriptions[question_uid] = {
             "assistant_message_id": assistant_message_id,
-            "started": self._now(),
+            # Idle-таймер: момент последнего ПРИЗНАКА ЖИЗНИ агента
+            # (движение очереди, взятие в работу, рост reasoning).
+            "last_activity": self._now(),
+            # Фаза: 'pending' (ждём взятия в работу, лимит claim_timeout_sec)
+            # либо 'processing' (ответ пишется, лимит answer_timeout_sec).
+            "phase": "pending",
+            "last_reasoning_len": 0,
+            "last_queue_ahead": None,
+            "last_answer_updated_at": None,
+            # Ошибок обработки подряд; сбрасывается успешным тиком. По
+            # достижении _MAX_CONSECUTIVE_ENTRY_ERRORS подписка снимается.
+            "consecutive_errors": 0,
         }
         logger.info(
             "agent_channel_poller: подписан question_uid=%s, message_id=%s (всего=%d)",
@@ -110,10 +147,22 @@ class AgentChannelPoller:
 
         Возвращает количество завершённых (done + timeout) за тик.
         Не падает при ошибке одной подписки — оборачивает каждую в try/except.
-        """
-        from app.domains.chat.services.agent_channel import AgentChannelService
 
-        timeout_sec = self._settings.agent_channel.answer_timeout_sec
+        Liveness и idle-таймауты по фазам:
+          Признаки жизни агента: смена фазы pending → processing, рост
+          reasoning_len, изменение answer_updated_at (начиная со второго
+          наблюдения), уменьшение queue_ahead.
+          Пока фаза 'pending' — лимит cfg.claim_timeout_sec от last_activity.
+          Пока фаза 'processing' — лимит cfg.answer_timeout_sec от last_activity.
+          Таймаут: mark_timeout(reason='claim'|'answer'), unsubscribe.
+        """
+        from app.domains.chat.services.agent_channel import (
+            TIMEOUT_REASON_ANSWER,
+            TIMEOUT_REASON_CLAIM,
+            AgentChannelService,
+        )
+
+        cfg = self._settings.agent_channel
         now = self._now()
         done_count = 0
 
@@ -125,38 +174,123 @@ class AgentChannelPoller:
             assistant_message_id = entry["assistant_message_id"]
             try:
                 svc = AgentChannelService(conn, self._settings)
-                if now - entry["started"] >= timeout_sec:
+                res = await svc.poll_once(
+                    assistant_message_id=assistant_message_id,
+                    question_uid=question_uid,
+                    last_reasoning_len=entry["last_reasoning_len"],
+                    want_queue_position=(entry["phase"] == "pending"),
+                )
+                if res["outcome"] == "done":
+                    self.unsubscribe(question_uid)
+                    done_count += 1
+                    logger.info(
+                        "agent_channel_poller: финализирован question_uid=%s, message_id=%s",
+                        question_uid, assistant_message_id,
+                    )
+                    continue
+
+                # ── Признаки жизни агента ──
+                alive = False
+                # Фаза монотонна: только pending → processing. Откат строки
+                # шины назад (владелец удалил ответ / вернул pending) НЕ
+                # возвращает claim-окно и НЕ считается признаком жизни —
+                # иначе флаппинг чужой таблицы продлевал бы ожидание вечно.
+                observed_processing = (
+                    res["answer_exists"]
+                    or res["question_status"] not in (None, "pending")
+                )
+                if entry["phase"] == "pending" and observed_processing:
+                    entry["phase"] = "processing"
+                    alive = True
+                if res["reasoning_len"] > entry["last_reasoning_len"]:
+                    entry["last_reasoning_len"] = res["reasoning_len"]
+                    alive = True
+                if res["answer_updated_at"] is not None:
+                    # Первое наблюдение — baseline, не активность; исчезновение
+                    # строки-ответа (None) активностью тем более не считается.
+                    if (entry["last_answer_updated_at"] is not None
+                            and res["answer_updated_at"] != entry["last_answer_updated_at"]):
+                        alive = True
+                    entry["last_answer_updated_at"] = res["answer_updated_at"]
+                qa = res["queue_ahead"]
+                if entry["phase"] == "pending" and qa is not None:
+                    if entry["last_queue_ahead"] is not None and qa < entry["last_queue_ahead"]:
+                        alive = True  # очередь движется — агент жив
+                    entry["last_queue_ahead"] = qa
+                if alive:
+                    entry["last_activity"] = now
+
+                limit_sec = (
+                    cfg.claim_timeout_sec if entry["phase"] == "pending"
+                    else cfg.answer_timeout_sec
+                )
+                if now - entry["last_activity"] >= limit_sec:
+                    reason = (
+                        TIMEOUT_REASON_CLAIM if entry["phase"] == "pending"
+                        else TIMEOUT_REASON_ANSWER
+                    )
                     await svc.mark_timeout(
                         assistant_message_id=assistant_message_id,
                         question_uid=question_uid,
+                        reason=reason,
                     )
                     self.unsubscribe(question_uid)
                     done_count += 1
                     logger.info(
-                        "agent_channel_poller: таймаут question_uid=%s, message_id=%s",
-                        question_uid,
-                        assistant_message_id,
+                        "agent_channel_poller: таймаут (%s) question_uid=%s, message_id=%s",
+                        reason, question_uid, assistant_message_id,
                     )
-                else:
-                    result = await svc.try_finalize(
-                        assistant_message_id=assistant_message_id,
-                        question_uid=question_uid,
-                    )
-                    if result == "done":
-                        self.unsubscribe(question_uid)
-                        done_count += 1
-                        logger.info(
-                            "agent_channel_poller: финализирован question_uid=%s, message_id=%s",
-                            question_uid,
-                            assistant_message_id,
-                        )
+                entry["consecutive_errors"] = 0
             except Exception:
-                logger.exception(
-                    "agent_channel_poller: ошибка при обработке question_uid=%s — пропускаем",
-                    question_uid,
-                )
+                entry["consecutive_errors"] += 1
+                if entry["consecutive_errors"] >= _MAX_CONSECUTIVE_ENTRY_ERRORS:
+                    logger.exception(
+                        "agent_channel_poller: %d ошибок подряд по question_uid=%s — "
+                        "снимаем подписку аварийно",
+                        entry["consecutive_errors"], question_uid,
+                    )
+                    await self._abandon_subscription(
+                        conn,
+                        question_uid=question_uid,
+                        assistant_message_id=assistant_message_id,
+                    )
+                    done_count += 1
+                else:
+                    logger.exception(
+                        "agent_channel_poller: ошибка при обработке question_uid=%s — пропускаем",
+                        question_uid,
+                    )
 
         return done_count
+
+    async def _abandon_subscription(
+        self, conn, *, question_uid: str, assistant_message_id: str,
+    ) -> None:
+        """Аварийно снимает подписку после серии ошибок подряд.
+
+        Best-effort финализирует draft через mark_timeout (error-блок + статус
+        в шине), чтобы сообщение не висело в 'streaming' до рестарта. Сбой
+        финализации глотается: подписку снимаем в любом случае — застрявший
+        draft подхватит reconcile при следующем старте.
+        """
+        from app.domains.chat.services.agent_channel import (
+            TIMEOUT_REASON_ANSWER,
+            AgentChannelService,
+        )
+
+        self.unsubscribe(question_uid)
+        try:
+            await AgentChannelService(conn, self._settings).mark_timeout(
+                assistant_message_id=assistant_message_id,
+                question_uid=question_uid,
+                reason=TIMEOUT_REASON_ANSWER,
+            )
+        except Exception:
+            logger.exception(
+                "agent_channel_poller: не удалось финализировать draft %s "
+                "при аварийном снятии подписки",
+                assistant_message_id,
+            )
 
     # ── Reconcile ─────────────────────────────────────────────────────────────
 
@@ -166,12 +300,15 @@ class AgentChannelPoller:
         Защищает от потери подписок после рестарта uvicorn: все 'streaming'
         сообщения с непустым agent_ref снова попадают в реестр.
 
-        Таймаут восстановленной подписки отсчитывается заново от момента
-        reconcile (subscribe ставит started=now()): монотонные часы не
-        переживают рестарт, а wall-clock created_at draft'а к ним не привести.
-        Уже отвеченные за время простоя draft'ы финализируются на первом же
-        тике (try_finalize видит reply_to), так что лишнее ожидание касается
-        только реально зависших запросов.
+        После рестарта восстановленная подписка начинается с фазы 'pending' и
+        last_activity=now(): монотонные часы не переживают рестарт, и wall-clock
+        created_at draft'а к ним не привести. Idle-таймер отсчитывается заново
+        с момента reconcile. Уже отвеченные за время простоя draft'ы
+        финализируются на первом же тике (poll_once видит reply_to), так что
+        лишнее idle-ожидание касается только реально зависших запросов.
+        Фаза после reconcile — 'pending', но первый же тик re-derive'ит её из
+        poll_once (строка-ответ существует → сразу 'processing' с answer-лимитом),
+        поэтому транзиентная классификация безвредна.
         """
         from app.domains.chat.repositories.message_repository import MessageRepository
 

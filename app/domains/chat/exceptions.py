@@ -35,6 +35,29 @@ class ChatFileValidationError(AppError):
     code: ClassVar[str] = "chat-file-validation"
 
 
+class ChatFeedbackValidationError(AppError):
+    """Оценка сообщения не проходит валидацию.
+
+    Например: rating не из набора ('up'/'down'), неизвестный код причины
+    дизлайка, слишком длинный комментарий, или сообщение нельзя оценивать
+    (не assistant-роль).
+    """
+    status_code = 422
+    code: ClassVar[str] = "chat-feedback-validation"
+
+
+class AgentChannelUnavailableError(AppError):
+    """Канал к внешнему агенту отклонил запрос.
+
+    Бросается, когда INSERT вопроса в bus-таблицу отклонён констрейнтом
+    владельца шины (имя его CHECK'а на ПРОМе чужое — глобальный маппинг
+    CHECK_CONSTRAINT_MESSAGES его не знает, и без этой ошибки пользователь
+    увидел бы технический fallback вместо понятного сообщения).
+    """
+    status_code = 502
+    code: ClassVar[str] = "chat-agent-channel-unavailable"
+
+
 class ChatToolValidationError(AppError):
     """Вызов ChatTool не прошёл валидацию (например, отсутствует
     обязательный параметр)."""

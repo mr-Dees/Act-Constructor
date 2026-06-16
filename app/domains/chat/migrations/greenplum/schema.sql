@@ -101,44 +101,45 @@ CREATE INDEX idx_{PREFIX}chat_files_conversation
 -- BUS-ТАБЛИЦА КАНАЛА К ВНЕШНЕМУ АГЕНТУ (nanobot)
 -- ============================================================================
 
--- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- «Провод» между AW и агентом. Таблицу на проде создаёт и ВЛАДЕЕТ ею сторона
+-- агента — блок ниже лишь dev-имитация её фактической структуры. Типы
+-- uuid/text/timestamptz — как у владельца (наша конвенция VARCHAR(36) здесь
+-- сознательно не применяется, чтобы dev ловил те же type-ошибки, что и прод).
 -- Имя таблицы — плейсхолдер {BUS_TABLE} (= CHAT__AGENT_CHANNEL__TABLE_NAME),
 -- БЕЗ {PREFIX}: app-префикс к шине не клеится, имя задаётся настройкой целиком.
--- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
--- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
--- его пока не обрабатывает.
+-- id = uid одного сообщения шины (его же хранит chat_messages.agent_ref);
+-- chat_id = uid треда (= chat_messages.conversation_id). Отдельной колонки
+-- conversation_id в шине НЕТ. reply_to агент проставляет НА СТРОКЕ-ОТВЕТЕ —
+-- ссылка на id вопроса. PRIMARY KEY отсутствует (фактическая ПРОМ-таблица
+-- без PK) — DISTRIBUTED BY задаём явно. CHECK'и по role/status зеркалят
+-- подтверждённую спеку владельца (у него DEFAULT'ы тоже есть, но AW на них
+-- не полагается и передаёт status/created_at/updated_at явно).
+-- Директива адаптеру: таблица внешняя — если она уже существует (создана
+-- владельцем), её «спутники» (CREATE INDEX / COMMENT ON) пропускаются.
+-- @external-table: {BUS_SCHEMA_Q}{BUS_TABLE}
 CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
-    id              VARCHAR(36) NOT NULL,
-    chat_id         VARCHAR(36) NOT NULL,
-    user_id         VARCHAR(50) NOT NULL,
-    conversation_id VARCHAR(36) NOT NULL,
-    role            VARCHAR(20) NOT NULL
-                    CONSTRAINT check_chat_agent_messages_bus_role_values
-                    CHECK (role IN ('user','assistant','tool')),
-    content         TEXT,
-    media           JSONB,
-    metadata        JSONB,
-    reply_to        VARCHAR(36),
-    buttons         JSONB,
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
-                    CONSTRAINT check_chat_agent_messages_bus_status_values
-                    CHECK (status IN ('pending','in_progress','complete','error','timeout')),
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: DISTRIBUTED BY ⊆ PK. id ведущий (lookup WHERE id=$1 по PK).
-    PRIMARY KEY (id, chat_id)
+    id          UUID,
+    chat_id     TEXT,
+    user_id     TEXT,
+    role        TEXT NOT NULL
+                CONSTRAINT check_chat_agent_messages_bus_role_values
+                CHECK (role IN ('user','assistant','system')),
+    content     TEXT NOT NULL,
+    media       JSONB,
+    metadata    JSONB,
+    reply_to    UUID,
+    buttons     JSONB,
+    status      TEXT NOT NULL
+                CONSTRAINT check_chat_agent_messages_bus_status_values
+                CHECK (status IN ('pending','processing','completed','failed')),
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (chat_id);
 
-CREATE INDEX idx_{BUS_TABLE}_chat
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(chat_id, created_at);
-CREATE INDEX idx_{BUS_TABLE}_conversation
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(conversation_id);
-CREATE INDEX idx_{BUS_TABLE}_status
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(status, created_at);
-CREATE INDEX idx_{BUS_TABLE}_reply_to
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(reply_to);
+CREATE INDEX idx_{BUS_TABLE}_id
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(id);
 
 -- ============================================================================
 -- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ
@@ -204,3 +205,43 @@ CREATE INDEX idx_{PREFIX}chat_audit_log_action_created
     ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(action, created_at);
 CREATE INDEX idx_{PREFIX}chat_audit_log_conversation_created
     ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(conversation_id, created_at);
+
+-- ============================================================================
+-- ОБРАТНАЯ СВЯЗЬ ПО СООБЩЕНИЯМ АССИСТЕНТА (ЛАЙК/ДИЗЛАЙК)
+-- ============================================================================
+
+-- Идемпотентна по паре (message_id, user_id): одна активная оценка пользователя
+-- на сообщение. Составной PK (message_id, user_id) служит ключом идемпотентности
+-- (UPSERT = read-modify-write в транзакции; upsert-синтаксис в GP 6.x недоступен).
+-- DISTRIBUTED BY (message_id) ⊆ PK — co-location по сообщению, message_id ведущий
+-- (lookup WHERE message_id=$1 по PK-индексу). БЕЗ FK на chat_messages — оценка
+-- переживает удаление беседы. reasons — JSONB-массив кодов причин дизлайка
+-- (валидируется в сервисе).
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback (
+    conversation_id VARCHAR(36) NOT NULL,
+    message_id      VARCHAR(36) NOT NULL,
+    user_id         VARCHAR(50) NOT NULL,
+    rating          VARCHAR(8) NOT NULL
+                    CONSTRAINT check_chat_message_feedback_rating_values
+                    CHECK (rating IN ('up','down')),
+    reasons         JSONB,
+    comment         TEXT,
+    source          VARCHAR(16) NOT NULL DEFAULT 'user'
+                    CONSTRAINT check_chat_message_feedback_source_values
+                    CHECK (source IN ('user','auto','llm')),
+    route_type      VARCHAR(16),
+    agent_mode      VARCHAR(16),
+    model           VARCHAR(100),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (message_id);
+
+CREATE INDEX idx_{PREFIX}chat_message_feedback_conversation
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(conversation_id);
+CREATE INDEX idx_{PREFIX}chat_message_feedback_rating_created
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(rating, created_at);
+CREATE INDEX idx_{PREFIX}chat_message_feedback_user_created
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(user_id, created_at);
