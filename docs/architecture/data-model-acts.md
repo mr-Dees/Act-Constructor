@@ -27,7 +27,7 @@
 - На загрузку: `ActContentRepository.get_content(act_id)` возвращает `{tree, tables, textBlocks, violations}` (`app/domains/acts/repositories/act_content.py:41-61`). Фактуры подмешиваются в `node.invoice` фронт-кодом `APIClient._attachInvoicesToTree` (`static/js/shared/api.js:602-626`).
 - На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Единую плоскую транзакцию (контент + diff аудита + снимок версии) держит сервис `ActContentService.save_content`; репозиторий собственную транзакцию не открывает (контракт в его докстринге). `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT`.
 
-Денормализация (дублирование `node_number`, `audit_point_id`, `audit_act_id` в `act_tables`/`act_textblocks`/`act_violations`/`act_invoices`) нужна для BI/выгрузок и поиска. Источник истины — `tree_data`; при сохранении бэк рассчитывает `node_map` и `audit_point_map` единым обходом дерева (`act_content.py:197-238`) и проставляет денормализованные поля.
+Денормализация (дублирование `node_number`, `audit_point_id`, `audit_act_id` в `act_tables`/`act_textblocks`/`act_violations`/`act_invoices`) нужна для BI/выгрузок и поиска. Источник истины — `tree_data`; при сохранении бэк рассчитывает `node_map` и `audit_point_map` единым обходом дерева (`ActContentService::save_content` → `ActContentRepository::_save_tree`) и проставляет денормализованные поля.
 
 ---
 
@@ -47,7 +47,7 @@
 }
 ```
 
-Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_content.py:319-358`). Поле `saveType` валидируется по regex `^(manual|periodic|auto)$`.
+Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_content.py::ActDataSchema`). Поле `saveType` валидируется по regex `^(manual|periodic|auto)$`.
 
 **Ссылочная целостность (на app-уровне).** Жёсткой FK между узлами и `act_tables`/`act_textblocks`/`act_violations` нет (всё перезаписывается одной транзакцией). Связь идёт по `id` контейнера и `nodeId` узла:
 
@@ -62,7 +62,7 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 
 ## 3. Node-типы
 
-Pydantic-описание узла дерева — `ActItemSchema` (`app/domains/acts/schemas/act_content.py:278-316`). Поле `type` ограничено `Literal["item", "textblock", "violation", "table"]`. С точки зрения семантики узлы делятся на две группы:
+Pydantic-описание узла дерева — `ActItemSchema` (`app/domains/acts/schemas/act_content.py::ActItemSchema`). Поле `type` ограничено `Literal["item", "textblock", "violation", "table"]`. С точки зрения семантики узлы делятся на две группы:
 
 - **Item-узлы** (`type="item"`, либо отсутствие `type` — фронт трактует это как `item`, см. `state-core.js:365`) — структурные пункты. Могут иметь `children`.
 - **Content-узлы** (`type="table" | "textblock" | "violation"`) — «информационные» узлы по фронт-терминологии (`tree-utils.js:225-228`). У них не должно быть `children` (drag-and-drop запрещает делать их родителями: `canAcceptAsChild`, `tree-drag-drop.js:142-146`).
@@ -97,7 +97,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 
 ### 3.1. Подсхемы вложенных сущностей
 
-`TableCellSchema` (`act_content.py:13-34`) — ячейка матричной таблицы:
+`TableCellSchema` (`act_content.py::TableCellSchema`) — ячейка матричной таблицы:
 
 | Поле          | Тип / default       | Назначение                                                                                       |
 |---------------|---------------------|--------------------------------------------------------------------------------------------------|
@@ -110,7 +110,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `originRow`   | int ≥ 0 / null      | строка, где была создана ячейка                                                                   |
 | `originCol`   | int ≥ 0 / null      | колонка, где была создана ячейка                                                                  |
 
-`TableSchema` (`act_content.py:37-139`):
+`TableSchema` (`act_content.py::TableSchema`):
 
 | Поле                      | Тип / default                | Назначение                                                                                              |
 |---------------------------|------------------------------|---------------------------------------------------------------------------------------------------------|
@@ -122,7 +122,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `deletable`               | bool, default true           | можно ли удалить таблицу                                                                                |
 | `kind`                    | `TableKind`, default `'regular'` | подвид таблицы (`act_content.py:60,143`): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`; зеркалит `node.kind`. CHECK `check_table_kind_values` в миграциях PG/GP |
 
-`TextBlockFormattingSchema` (`act_content.py:142-165`):
+`TextBlockFormattingSchema` (`act_content.py::TextBlockFormattingSchema`):
 
 | Поле        | Тип / default                          | Назначение                                  |
 |-------------|-----------------------------------------|---------------------------------------------|
@@ -132,7 +132,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `italic`    | bool, default false                     | курсив                                      |
 | `underline` | bool, default false                     | подчёркивание                                |
 
-`TextBlockSchema` (`act_content.py:168-184`):
+`TextBlockSchema` (`act_content.py::TextBlockSchema`):
 
 | Поле          | Тип / default                              | Назначение                                                            |
 |---------------|---------------------------------------------|-----------------------------------------------------------------------|
@@ -141,7 +141,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `content`     | str, default `""`                           | HTML с inline-форматированием                                          |
 | `formatting`  | `TextBlockFormattingSchema`                 | базовые параметры                                                      |
 
-`ViolationSchema` (`act_content.py:232-275`) — нарушение, прикреплённое к узлу:
+`ViolationSchema` (`act_content.py::ViolationSchema`) — нарушение, прикреплённое к узлу:
 
 | Поле                  | Тип                                       | Назначение                                                  |
 |-----------------------|-------------------------------------------|-------------------------------------------------------------|
@@ -156,7 +156,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
 | `recommendations`     | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
 
-`ViolationContentItemSchema` (`act_content.py:204-223`) — элемент additionalContent:
+`ViolationContentItemSchema` (`act_content.py::ViolationContentItemSchema`) — элемент additionalContent:
 
 | Поле       | Тип                                | Назначение                                |
 |------------|------------------------------------|-------------------------------------------|

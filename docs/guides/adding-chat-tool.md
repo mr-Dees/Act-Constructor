@@ -74,6 +74,7 @@ async def open_act_page_handler(*, km_number: str) -> str:
   Сервер припишет `block_id` детерминированно (`{message_id}:client_action:{i}`).
 - При ошибке валидации параметров `raise ChatToolValidationError(...)` —
   оркестратор поймает и эмитит `tool_error` без падения чата.
+  Импорт: `from app.domains.chat.exceptions import ChatToolValidationError`.
 
 ---
 
@@ -228,14 +229,36 @@ async def test_get_user_acts_returns_json(monkeypatch):
 
 ### 6.2. Integration через оркестратор
 
+Минимальный шаблон — смотри `tests/domains/chat/test_orchestrator_action.py`.
+Суть: подними минимальный `FastAPI()` с нужными роутерами и `dependency_overrides`
+(`get_username`, `get_user_roles`, фабрики сервисов на `AsyncMock`); замокай
+`_completions_create` оркестратора так, чтобы LLM вернул `tool_call` к твоему
+tool'у, затем проверь, что handler был вызван и результат попал в финальный ответ.
+
+### 6.3. Сброс реестра и моки репозитория в тестах
+
+Доменная система использует глобальное состояние. В каждом тест-файле, где
+тестируются инструменты:
+
 ```python
-# tests/domains/chat/test_orchestrator_my_tool.py
-# Мокаем _completions_create чтобы LLM вернул tool_call к нашему tool'у;
-# проверяем, что handler был вызван и result попал в стрим.
-# Пример — tests/domains/chat/test_orchestrator_action.py.
+import pytest
+from app.core.chat.tools import reset, register_tools
+
+@pytest.fixture(autouse=True)
+def _reset_tools():
+    reset()
+    yield
+    reset()
 ```
 
-### 6.3. Проверка совместимости имён
+Регистрируй tool через `register_tools([tool])`, не через `register(tool)`.
+
+Если добавил новый метод в репозиторий, который вызывает handler, — обнови
+мок-объект в `tests/domains/chat/test_chat_services.py` (и соседних файлах),
+добавив явный `mock.<new_method>.return_value`. Иначе `AsyncMock` вернёт
+truthy и сломает существующие тесты.
+
+### 6.4. Проверка совместимости имён
 
 Если изменил константу в `names.py` — пробеги по фронт-реестру и
 тестам:

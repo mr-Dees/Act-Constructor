@@ -85,7 +85,9 @@
 
 **Симптом:** После форварда в «Базу знаний ОАРБ» сообщение ассистента остаётся в статусе «печатает…» и через ~10 минут сменяется блоком ошибки о таймауте.
 
-**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `chat_agent_messages_bus`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до появления строки-ответа агента (`reply_to = <id вопроса>`) с терминальным статусом (`completed`/`failed`). Если агент не отвечает дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин) — `AgentChannelService.mark_timeout` финализирует черновик блоком ошибки (`build_timeout_error_block`).
+**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `chat_agent_messages_bus`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до появления строки-ответа агента (`reply_to = <id вопроса>`) с терминальным статусом (`completed`/`failed`). Таймаут двухфазный:
+- **Claim-фаза** (`status='pending'`): агент ещё не взял вопрос в работу. Лимит `CHAT__AGENT_CHANNEL__CLAIM_TIMEOUT_SEC` (дефолт 1800 = 30 мин). По истечении — `mark_timeout(reason='claim')`.
+- **Answer-фаза** (`status='processing'`): агент пишет ответ. Лимит `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин). По истечении — `mark_timeout(reason='answer')`, черновик финализируется error-блоком (`build_timeout_error_block`).
 
 **Решение:**
 1. Проверь таблицу `chat_agent_messages_bus`: есть ли запись-вопрос (`role='user'`) и появился ли ответ (`role='assistant'` с `reply_to` = id вопроса). Статус ответа должен дойти до `completed`. Если ответа нет — внешний агент не подхватил вопрос.
@@ -228,7 +230,7 @@
 
 **Симптом:** В сообщении ассистента вместо контента видно warning-fallback вида «⚠ Блок неизвестного типа …».
 
-**Причина:** Бэк добавил новый тип блока (например `chart`, `table_grid`), но фронт ещё не знает о нём — он отсутствует в `KNOWN_BLOCK_TYPES`. См. актуальный список: `static/js/shared/chat/chat-messages.js:17` (`KNOWN_BLOCK_TYPES` Set).
+**Причина:** Бэк добавил новый тип блока (например `chart`, `table_grid`), но фронт ещё не знает о нём — он отсутствует в `KNOWN_BLOCK_TYPES`. См. актуальный список: `static/js/shared/chat/chat-messages.js:21` (`KNOWN_BLOCK_TYPES` Set).
 
 **Решение:**
 1. Добавить новый тип в `KNOWN_BLOCK_TYPES` Set.

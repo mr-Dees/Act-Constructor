@@ -9,11 +9,11 @@
 
 | Таблица | Что хранит | Ключевые поля |
 |---|---|---|
-| `<prefix>chat_messages` | сырьё диалога: вопрос (`role='user'`) и ответ (`role='assistant'`) блоками JSONB | `id`, `conversation_id`, `role`, `content`, `model`, `token_usage`, `status` (streaming/complete/failed), `agent_ref`, `created_at` |
+| `<prefix>chat_messages` | сырьё диалога: вопрос (`role='user'`) и ответ (`role='assistant'`) блоками JSONB | `id`, `conversation_id`, `role`, `content`, `model`, `token_usage`, `status` (streaming/complete/failed), `agent_ref` (VARCHAR(36) — uid вопроса в шине, NULL если локальный ответ), `created_at` |
 | `<prefix>chat_message_feedback` | **оценки лайк/дизлайк** | `(message_id, user_id)` PK, `rating` (up/down), `reasons` JSONB, `comment`, `source`, `route_type`, `agent_mode`, `model`, `created_at`, `updated_at` |
 | `<prefix>chat_audit_log` | lifecycle-события | `username`, `action` (`message_sent`/`feedback_submitted`/…), `conversation_id`, `details_json`, `created_at` |
 | `<prefix>chat_tool_metrics` | latency/ошибки вызовов ChatTool | `tool_name`, `status` (success/error/validation_error), `latency_ms`, `username`, `conversation_id`, `error_message` |
-| `<bus>` (`CHAT__AGENT_CHANNEL__TABLE_NAME`) | обмен с внешним БЗ-агентом (таблицей владеет сторона агента) | `id` (=uid сообщения шины), `chat_id` (=тред), `role`, `content`, `metadata`, `reply_to` (на ответе → id вопроса), `status` (pending/processing/completed/failed), `created_at`, `updated_at` |
+| `<bus>` (`CHAT__AGENT_CHANNEL__TABLE_NAME`) | обмен с внешним БЗ-агентом (таблицей владеет сторона агента) | `id` (=uid сообщения шины), `chat_id` (=тред), `user_id`, `role`, `content`, `media` (JSONB), `buttons` (JSONB), `metadata`, `reply_to` (на ответе → id вопроса), `status` (pending/processing/completed/failed), `created_at`, `updated_at` |
 
 **Связи для анализа:**
 - Ответ ассистента → его оценки: `chat_message_feedback.message_id = chat_messages.id`.
@@ -120,7 +120,7 @@ SELECT COUNT(*) FILTER (WHERE status='failed')::numeric / NULLIF(COUNT(*),0) AS 
 FROM <prefix>chat_messages WHERE role='assistant';
 
 -- ошибки внешнего БЗ-агента
-SELECT status, COUNT(*) FROM <bus> WHERE status = 'failed' GROUP BY status;
+SELECT COUNT(*) AS failed_count FROM <bus> WHERE status = 'failed';
 
 -- ошибки tool'ов
 SELECT tool_name, status, COUNT(*), AVG(latency_ms)
@@ -144,6 +144,10 @@ FROM <bus> WHERE status='completed';
 - **Покрытие фидбэка** обычно мало (<5–10%) — метрики на нём шумны; дополняйте ручным разбором логов диалогов (инспектор) и анализом ошибок/таймаутов.
 - **Latency** меряйте перцентилями (p50/p95), не средним; для БЗ-ветки — отдельно время ожидания агента из шины.
 - **Срезы:** по `route_type`, `agent_mode`, `model`, причине дизлайка, дате.
+
+> **Задержка записи:** метрики и lifecycle-события пишутся через фоновые батчеры
+> (`chat.tool_metrics_batcher`, `chat.audit_log_batcher`). При near-realtime дашбордах
+> учитывай задержку в несколько секунд между событием и появлением строки в таблице.
 
 ## 7. Конвенции реализации (для разработчиков)
 

@@ -15,21 +15,25 @@
 
 ## 0. Модель данных и режимы
 
-**Bus-таблица `chat_agent_messages_bus`** (структуру задаёт и таблицей владеет
-сторона внешнего агента; отдельной колонки `conversation_id` нет):
-`id` UUID — uid одного сообщения шины, `chat_id` TEXT — uid треда, `user_id` TEXT,
-`role` (`user`/`assistant`/`system`, CHECK владельца), `content` TEXT NOT NULL,
-`media` JSONB, `metadata` JSONB (`metadata.reasoning` — стримящиеся рассуждения
-агента), `reply_to` UUID — **на строке-ответе**, ссылается на id вопроса,
-`buttons` JSONB, `status` (`pending`/`processing`/`completed`/`failed` — CHECK
-владельца, подтверждённая спека; записи статуса от AW best-effort),
-`created_at`/`updated_at` TIMESTAMPTZ NOT NULL (у владельца есть DEFAULT'ы,
-AW не полагается). GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`. Роль
-`system` приложением не обрабатывается. Сообщения одного `chat_id` агент
-не обрабатывает параллельно.
+**Bus-таблица `chat_agent_messages_bus`** — полная структура описана в
+[`cross-domain-contracts.md §10`](cross-domain-contracts.md#10-контракт-шины-chat_agent_messages_bus-приложение--внешний-ии-агент).
+Здесь — только diff, специфичный для sequence-контекста:
+
+- `reply_to` UUID — **проставляется агентом на строке-ответе**, ссылается на
+  id строки-вопроса. Поллер обнаруживает ответ именно по этому полю.
+- `status` — `pending`/`processing`/`completed`/`failed` (подтверждённая спека
+  CHECK владельца). **`in_progress` — legacy-синоним `processing`**: репозиторий
+  `AgentMessageRepository.count_active_for_user` принимает оба значения
+  (`WHERE status IN ('processing', 'in_progress')`). Новые агенты должны
+  использовать `processing`.
+- `metadata.reasoning` — стримящиеся рассуждения агента (legacy: `metadata.thinking`).
+- GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`.
 
 **Связь с чатом**: `chat_messages.agent_ref VARCHAR(36)` — ссылка из
 ассистент-сообщения (draft) на `id` строки-вопроса в шине.
+`CLAIM_TIMEOUT_SEC=1800` (пока `pending`) / `ANSWER_TIMEOUT_SEC=600` (пока
+`processing`) — двухфазный таймаут поллера; см. `AgentChannelSettings`
+(`CHAT__AGENT_CHANNEL__`).
 
 **Режимы тумблера «База знаний ОАРБ»** (form-параметр `agent_mode`, localStorage
 ключ `assistant_oarb_mode`, 3 позиции):
@@ -217,6 +221,7 @@ sequenceDiagram
 - настройки — `AgentChannelSettings` (`app/domains/chat/settings.py`),
   env-префикс `CHAT__AGENT_CHANNEL__`: `TABLE_NAME=chat_agent_messages_bus`,
   `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`,
-  `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`
+  `POLL_BACKOFF_MULTIPLIER=1.5`, `CLAIM_TIMEOUT_SEC=1800`, `ANSWER_TIMEOUT_SEC=600`,
+  `MAX_BLOCK_TEXT_SIZE=262144`
 - фоновый хук — `chat.agent_channel_poller`
 - Frontend — `static/js/shared/chat/chat-stream.js`, `chat-messages.js`

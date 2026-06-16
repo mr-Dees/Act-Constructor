@@ -54,6 +54,9 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
      | `chat.tool_metrics_batcher` | `MetricsBatcher` метрик tool-вызовов |
      | `chat.audit_log_batcher` | `MetricsBatcher` chat-аудита |
      | `chat.agent_channel_poller` | Polling bus-таблицы `chat_agent_messages_bus`, финализация форвард-черновиков (adaptive-backoff) |
+     | `chat.llm_health_probe` | Периодическая проверка доступности LLM-провайдера |
+
+     Канонический список и детали — dev-guide §11.
 
 2. **Базовый health.**
    ```bash

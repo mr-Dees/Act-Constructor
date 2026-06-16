@@ -113,7 +113,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | Аспект | Значение |
 |---|---|
 | **Формат** | `f"{message_id}:client_action:{i}"` (детерминированный, нумерация через `BlockIdGenerator`) |
-| **Генерируется в** | `Orchestrator._parse_client_action_result` (`agent_loop.py`, non-streaming) и `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`, forward-путь). Per-message экземпляр `BlockIdGenerator` (`app/core/chat/block_id_generator.py`) — единый счётчик для всех источников эмиссии |
+| **Генерируется в** | `Orchestrator._parse_client_action_result` (`orchestrator.py`; вызывается из `agent_loop.py`, non-streaming) и `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`, forward-путь). Per-message экземпляр `BlockIdGenerator` (`app/core/chat/block_id_generator.py`) — единый счётчик для всех источников эмиссии |
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
 | **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](../guides/developer-guide.md#79-action-handlers-и-clientactionblock) |
 
@@ -153,7 +153,7 @@ SSE в чате нет. Транспорт единый для всех режи
 | Шина агента | таблица `chat_agent_messages_bus` (см. §10) |
 | Лимит параллельных запросов | `AgentMessageRepository.count_active_for_user` ≥ `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) → `ChatLimitError` (HTTP 422) до записей в БД |
 | Фоновый хук поллера | `chat.agent_channel_poller` (наряду с `chat.tool_metrics_batcher`, `chat.audit_log_batcher`) |
-| Настройки канала | `AgentChannelSettings`, env-префикс `CHAT__AGENT_CHANNEL__` (`TABLE_NAME=chat_agent_messages_bus`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`) |
+| Настройки канала | `AgentChannelSettings`, env-префикс `CHAT__AGENT_CHANNEL__` (`TABLE_NAME=chat_agent_messages_bus`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `CLAIM_TIMEOUT_SEC=1800`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`) |
 
 ---
 

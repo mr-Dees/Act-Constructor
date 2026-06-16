@@ -33,12 +33,12 @@ FROM {SCHEMA}.{BUS_TABLE}
 WHERE reply_to IN (... agent_ref из шага 1 ...);
 ```
 
-Если по шагу 3 ответа нет — внешний агент ещё не ответил (или не работает). Если ответ есть, а черновик висит в `streaming` — не сработала финализация (проверить, что `chat.agent_channel_poller` запущен в `/admin/diagnostics`).
+Если по шагу 3 ответа нет — внешний агент ещё не ответил (или не работает). Если ответ есть (`status='completed'`), а черновик висит в `streaming` — не сработала финализация (проверить, что `chat.agent_channel_poller` запущен в `/admin/diagnostics`).
 
 **Recovery.**
 
 1. **Не торопиться.** Если процесс жив и `chat.agent_channel_poller` запущен (`/admin/diagnostics`), а внешний агент ещё работает — поллер догонит ответ. Двухфазные таймауты: `CLAIM_TIMEOUT_SEC` (1800 = 30 мин, фаза `pending`) и `ANSWER_TIMEOUT_SEC` (600 = 10 мин, фаза `processing`). По истечении `mark_timeout` сам пометит черновик `failed`. Дать сработать.
-2. **Если рестартовали uvicorn** — `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Дождаться, пока поллер сделает первые тики.
+2. **Если рестартовали uvicorn** — `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:297`). Дождаться, пока поллер сделает первые тики.
 3. **Forcibly закрыть.** Если ответа от агента нет и автоматика не помогает — пометить черновик и вопрос вручную:
    ```sql
    -- Черновик ассистент-сообщения → failed (на GP 6.x / PG 9.4 без jsonb-||,
@@ -126,7 +126,7 @@ GROUP BY status;
 
 **Что автоматически:**
 
-- `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Поллер продолжит ждать ответы из шины.
+- `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:297`). Поллер продолжит ждать ответы из шины.
 - `chat_messages.status='streaming'` с уже пришедшим ответом агента — поллер финализирует через `poll_once`; без ответа дольше `CLAIM_TIMEOUT_SEC`/`ANSWER_TIMEOUT_SEC` → `mark_timeout` пометит `failed`.
 - Singleton-lock освобождается мягко в shutdown-hook (`app/main.py:266-280`).
 

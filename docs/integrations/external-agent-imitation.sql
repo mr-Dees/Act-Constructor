@@ -62,9 +62,10 @@
 --    Сообщения одного chat_id агент НЕ обрабатывает параллельно — ждёт
 --    завершения активного, затем берёт следующее из той же беседы.
 --    Idle-таймауты двухфазные, отсчёт от последнего признака жизни:
---    30 мин для pending (CLAIM_TIMEOUT_SEC) и 10 мин для processing
---    (ANSWER_TIMEOUT_SEC); по истечении AW сам закрывает зависший draft
---    в chat_messages и best-effort ставит вопросу status='failed'.
+--    30 мин для pending (CHAT__AGENT_CHANNEL__CLAIM_TIMEOUT_SEC=1800) и
+--    10 мин для processing (CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC=600);
+--    по истечении AW сам закрывает зависший draft в chat_messages и
+--    best-effort ставит вопросу status='failed'.
 --
 --  СТРУКТУРА ФАЙЛА:
 --    0. ПОДГОТОВКА          — просмотр активных вопросов, копирование <QUESTION_ID>
@@ -399,6 +400,8 @@ LIMIT 10;
 --   completed / failed  — 180 дней
 -- Подстройте под свои аудит-требования.
 
+-- Для продакшен-очистки с плейсхолдерами ({SCHEMA}.{BUS_TABLE}) см.
+-- docs/integrations/agent-channel-cleanup.sql
 DELETE FROM chat_agent_messages_bus
 WHERE status IN ('completed', 'failed')
   AND updated_at < now() - INTERVAL '180 days';
@@ -408,8 +411,10 @@ WHERE status IN ('completed', 'failed')
 -- VACUUM ANALYZE chat_agent_messages_bus;
 
 -- Зависшие processing/pending дольше 2 часов — ручное закрытие:
--- (AW закрывает draft в chat_messages сам по idle-таймауту — 30 мин для
--- pending, 10 мин для processing — и best-effort ставит вопросу 'failed';
+-- (AW закрывает draft в chat_messages сам по idle-таймауту —
+-- 30 мин для pending (CHAT__AGENT_CHANNEL__CLAIM_TIMEOUT_SEC=1800),
+-- 10 мин для processing (CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC=600) —
+-- и best-effort ставит вопросу 'failed';
 -- если запись не прошла, строки остаются в pending —
 -- закрываем вручную тем же 'failed' из словаря CHECK'а владельца.)
 UPDATE chat_agent_messages_bus

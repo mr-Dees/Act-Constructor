@@ -50,6 +50,10 @@ DROP VIEW IF EXISTS v_db_oarb_ck_cs_validation;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_tool_metrics;
+-- ВНИМАНИЕ: имя bus-таблицы задаётся ЦЕЛИКОМ через CHAT__AGENT_CHANNEL__TABLE_NAME
+-- (дефолт chat_agent_messages_bus, БЕЗ префикса DATABASE__TABLE_PREFIX).
+-- Если в .env задано другое значение — подставить его здесь вместо
+-- t_db_oarb_audit_act_chat_agent_messages_bus, иначе DROP не найдёт таблицу.
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_agent_messages_bus;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_messages;
@@ -144,6 +148,10 @@ DROP TABLE IF EXISTS t_db_oarb_ua_process_dict;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_chat_tool_metrics;
+-- ВНИМАНИЕ: имя bus-таблицы задаётся ЦЕЛИКОМ через CHAT__AGENT_CHANNEL__TABLE_NAME
+-- (дефолт chat_agent_messages_bus, БЕЗ префикса DATABASE__TABLE_PREFIX).
+-- Если в .env задано другое значение — подставить его здесь вместо
+-- t_db_oarb_audit_act_chat_agent_messages_bus, иначе DROP не найдёт таблицу.
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_chat_agent_messages_bus;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_chat_messages;

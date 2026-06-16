@@ -3,39 +3,47 @@
 Документ описывает поведение `retry_on_transient`
 (`app/domains/chat/services/retry.py`) после расширения coverage (Stream 3.8).
 
-Конфигурация по умолчанию: `on_429=True, on_5xx=True, max_attempts=N, backoff_base=B`.
+Конфигурация по умолчанию: `on_429=True, on_5xx=True, max_attempts=N, connect_max_attempts=M, backoff_base=B`.
+
+| Параметр | Описание |
+|---|---|
+| `max_attempts` | Лимит попыток для **transient-класса** (сервер жив, но медленный/занят): HTTP 408/429/5xx, ReadTimeout, WriteTimeout, RemoteProtocolError, APITimeoutError |
+| `connect_max_attempts` | Лимит попыток для **connect-класса** (сервер недоступен): ConnectError, PoolTimeout, APIConnectionError (только «чистый», без таймаута). Обычно меньше `max_attempts` для быстрого fallback при лежащем primary-LLM |
 
 ## Таблица сценариев
 
-| # | Сценарий | Исключение / HTTP | Ожидание |
-|---|----------|-------------------|----------|
-| 1 | Rate-limit повторяемый | `APIStatusError(429)` | Ретрай, успех на 2-3 попытке |
-| 2 | Rate-limit отключён | `APIStatusError(429)`, `on_429=False` | Без ретрая, проброс |
-| 3 | Server error 500 | `APIStatusError(500)` | Ретрай |
-| 4 | Server error 502 Bad Gateway | `APIStatusError(502)` | Ретрай |
-| 5 | Server error 503 Service Unavailable | `APIStatusError(503)` | Ретрай |
-| 6 | Server error 504 Gateway Timeout | `APIStatusError(504)` | Ретрай |
-| 7 | 5xx отключены | `APIStatusError(503)`, `on_5xx=False` | Без ретрая |
-| 8 | 408 Request Timeout | `APIStatusError(408)` | Ретрай (всегда, независимо от флагов) |
-| 9 | 400 Bad Request | `APIStatusError(400)` | Без ретрая, проброс |
-| 10 | 401 Unauthorized | `APIStatusError(401)` | Без ретрая |
-| 11 | 403 Forbidden | `APIStatusError(403)` | Без ретрая |
-| 12 | 404 Not Found | `APIStatusError(404)` | Без ретрая |
-| 13 | 422 Unprocessable Entity | `APIStatusError(422)` | Без ретрая |
-| 14 | Сеть: `httpx.ConnectError` | подключение оборвано | Ретрай |
-| 15 | Сеть: `httpx.ReadTimeout` | чтение зависло | Ретрай |
-| 16 | Сеть: `httpx.WriteTimeout` | запись зависла | Ретрай |
-| 17 | Сеть: `httpx.RemoteProtocolError` | сервер закрыл соединение преждевременно | Ретрай |
-| 18 | Сеть: `httpx.PoolTimeout` | исчерпан пул соединений | Ретрай |
-| 19 | OpenAI SDK: `APITimeoutError` | обёртка над `httpx.ReadTimeout` | Ретрай |
-| 20 | OpenAI SDK: `APIConnectionError` | обёртка над `httpx.ConnectError` | Ретрай |
-| 21 | Доменное: `ChatLimitError` | лимит токенов/сообщений | Без ретрая |
-| 22 | Доменное: `ChatFileValidationError` | невалидный файл | Без ретрая |
-| 23 | Доменное: `ChatRateLimitError` | per-user rate-limit | Без ретрая |
-| 24 | Произвольное `ValueError` / `RuntimeError` | бизнес-логика | Без ретрая |
-| 25 | Исчерпание попыток | retryable, не успело — `max_attempts=2`, всегда 429 | Проброс последнего исключения |
-| 26 | Без ошибок | функция возвращает результат сразу | Один вызов, результат отдан |
-| 27 | Backoff растёт экспоненциально | retryable 3 раза подряд | Задержки `B*1`, `B*2`, `B*4` (+ jitter), capped at 60s |
+> Колонка «Класс» указывает лимит попыток: **transient** → `max_attempts`, **connect** → `connect_max_attempts`.
+> `APITimeoutError` — подкласс `APIConnectionError`, но является transient-классом и перехватывается первым.
+
+| # | Сценарий | Исключение / HTTP | Класс | Ожидание |
+|---|----------|-------------------|-------|----------|
+| 1 | Rate-limit повторяемый | `APIStatusError(429)` | transient | Ретрай, успех на 2-3 попытке |
+| 2 | Rate-limit отключён | `APIStatusError(429)`, `on_429=False` | — | Без ретрая, проброс |
+| 3 | Server error 500 | `APIStatusError(500)` | transient | Ретрай |
+| 4 | Server error 502 Bad Gateway | `APIStatusError(502)` | transient | Ретрай |
+| 5 | Server error 503 Service Unavailable | `APIStatusError(503)` | transient | Ретрай |
+| 6 | Server error 504 Gateway Timeout | `APIStatusError(504)` | transient | Ретрай |
+| 7 | 5xx отключены | `APIStatusError(503)`, `on_5xx=False` | — | Без ретрая |
+| 8 | 408 Request Timeout | `APIStatusError(408)` | transient | Ретрай (всегда, независимо от флагов) |
+| 9 | 400 Bad Request | `APIStatusError(400)` | — | Без ретрая, проброс |
+| 10 | 401 Unauthorized | `APIStatusError(401)` | — | Без ретрая |
+| 11 | 403 Forbidden | `APIStatusError(403)` | — | Без ретрая |
+| 12 | 404 Not Found | `APIStatusError(404)` | — | Без ретрая |
+| 13 | 422 Unprocessable Entity | `APIStatusError(422)` | — | Без ретрая |
+| 14 | Сеть: `httpx.ConnectError` | подключение оборвано | **connect** | Ретрай |
+| 15 | Сеть: `httpx.ReadTimeout` | чтение зависло | transient | Ретрай |
+| 16 | Сеть: `httpx.WriteTimeout` | запись зависла | transient | Ретрай |
+| 17 | Сеть: `httpx.RemoteProtocolError` | сервер закрыл соединение преждевременно | transient | Ретрай |
+| 18 | Сеть: `httpx.PoolTimeout` | исчерпан пул соединений | **connect** | Ретрай |
+| 19 | OpenAI SDK: `APITimeoutError` | обёртка над `httpx.ReadTimeout`; подкласс `APIConnectionError`, но ловится первым как transient | transient | Ретрай |
+| 20 | OpenAI SDK: `APIConnectionError` | «чистый» обрыв без таймаута; обёртка над `httpx.ConnectError` | **connect** | Ретрай |
+| 21 | Доменное: `ChatLimitError` | лимит токенов/сообщений | — | Без ретрая |
+| 22 | Доменное: `ChatFileValidationError` | невалидный файл | — | Без ретрая |
+| 23 | Доменное: `ChatRateLimitError` | per-user rate-limit | — | Без ретрая |
+| 24 | Произвольное `ValueError` / `RuntimeError` | бизнес-логика | — | Без ретрая |
+| 25 | Исчерпание попыток | retryable, не успело — `max_attempts=2`, всегда 429 | transient | Проброс последнего исключения |
+| 26 | Без ошибок | функция возвращает результат сразу | — | Один вызов, результат отдан |
+| 27 | Backoff растёт экспоненциально | retryable 3 раза подряд | transient | Задержки `B*1`, `B*2`, `B*4` (+ jitter), capped at 60s |
 
 ## Пример теста
 

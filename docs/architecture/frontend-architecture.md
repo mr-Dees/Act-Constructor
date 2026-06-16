@@ -25,16 +25,16 @@
 
 ## 1. Обзор
 
-Audit Workstation — Server-side rendered (Jinja2) + vanilla JS приложение **без бандлера и без npm-зависимостей**. Браузер грузит десятки `<script defer>`-тегов в строго заданном порядке; модули общаются через глобальные синглтоны на `window`. ES-modules не используются (исторически, чтобы упростить деплой в JupyterHub-окружении без node-tooling'а).
+Audit Workstation — Server-side rendered (Jinja2) + vanilla JS приложение **без бандлера и без npm-зависимостей**. Фронт использует **Native ES Modules** (`import`/`export`): браузер сам резолвит граф зависимостей через `<script type="module">`; Node.js на проде не нужен — статика отдаётся как есть. Модули дополнительно публикуют свои синглтоны в `window` (`window.X = X`) — для совместимости с inline-скриптами в шаблонах, которые ссылаются на bare-names (в inline `<script>` без `type="module"` bare-name резолвится через `window`; без этого `AuthManager.requireAuth()` упадёт `ReferenceError`).
 
 ### 1.1 Цифры (на момент аудита)
 
 | Параметр | Значение |
 |---|---|
-| Всего JS-файлов | 101 (`static/js/**/*.js`) |
-| `constructor/` (редактор актов) | 54 файла |
-| `shared/` (cross-zone модули + чат) | 25 файлов (включая 12 модулей чата) |
-| `portal/` (sidebar-страницы) | 22 файла |
+| Всего JS-файлов | приблизительно на момент написания: 101+ (`static/js/**/*.js`) |
+| `constructor/` (редактор актов) | приблизительно 54 файла |
+| `shared/` (cross-zone модули + чат) | приблизительно 25+ файлов (включая 13 модулей чата) |
+| `portal/` (sidebar-страницы) | приблизительно 22 файла |
 | Всего CSS-файлов | 78 |
 | `constructor/` CSS | 42 файла |
 | `portal/` CSS | 15 файлов |
@@ -51,7 +51,7 @@ static/js/
 │   │            #   FilterEngine, ck/* (CkTable, CkForm, CkPagination, CkProcessPicker)
 │   ├── dialog/  # DialogBase + DialogManager (confirm/alert)
 │   ├── ck/      # Реюзаемые компоненты ЦК-страниц
-│   └── chat/    # 12 модулей чата — реестр в docs/architecture/chat-frontend-architecture.md
+│   └── chat/    # 13 модулей чата — реестр в docs/architecture/chat-frontend-architecture.md
 │
 ├── portal/      # Sidebar-страницы: landing, acts-manager, admin, ck-fin-res, ck-client-exp
 │   ├── acts-manager/   # ActsManagerPage, CreateActDialog, AuditLogDialog,
@@ -95,7 +95,7 @@ CSS повторяет тройное разделение — см. главу 
 
 ### 1.4 Связанные документы
 
-- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (12 модулей, транспорт polling по шине `chat_agent_messages_bus`).
+- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (13 модулей, транспорт polling по шине `chat_agent_messages_bus`).
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §4 — высокоуровневый обзор фронта.
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §10 — UX/persistence/lock.
 - [`docs/architecture/agent-channel-sequence.md`](agent-channel-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
@@ -121,7 +121,7 @@ CSS повторяет тройное разделение — см. главу 
 
 Два entry-файла на зону:
 
-- **`static/js/entries/portal-common.js`** — импортит `shared/` (app-config, auth, api, notifications, error-boundary, escape-stack, sanitize, dialog-base, dialog-confirm), `portal/portal-sidebar`, `portal/portal-settings`, 12 чат-модулей. Подключается в `templates/portal/base_portal.html` одним тегом.
+- **`static/js/entries/portal-common.js`** — импортит `shared/` (app-config, auth, api, notifications, error-boundary, escape-stack, sanitize, dialog-base, dialog-confirm), `portal/portal-sidebar`, `portal/portal-settings`, 13 чат-модулей (chat-feedback подтягивается через граф chat-messages.js, не напрямую в entry). Подключается в `templates/portal/base_portal.html` одним тегом.
 
 - **`static/js/entries/constructor.js`** — импортит весь конструктор (state, tree, items, table, preview, textblock, violation, validation, lock-manager, header) + общие `shared/` + диалоги + чат + portal-cross-zone (team-member-search, dialog-create-act, acts-broadcast). Подключается в `templates/constructor/base_constructor.html`.
 
@@ -148,8 +148,18 @@ CSS повторяет тройное разделение — см. главу 
 | `shared/dialog/dialog-base.js` | `DialogBase` | static class |
 | `shared/dialog/dialog-confirm.js` | `DialogManager` | static class |
 | `shared/ck/{ck-table,ck-pagination,ck-form,ck-process-picker}.js` | `Ck*` | static classes |
+| `shared/resizable-panel.js` | `makeResizablePanel` | функция-фабрика |
+| `shared/format-units.js` | `formatMb`, `formatFileSize` | утилиты форматирования |
+| `shared/notifications-center/notification-center.js` | `NotificationCenter` | class |
+| `shared/api-errors.js` | `formatValidationDetail` | функция (window-публикация с guard для node:test) |
 
-**`shared/chat/`** — 12 модулей (ChatEventBus, ChatRenderer, ChatClientActionsRegistry, ChatStream, ChatHistory, ChatUI, ChatFiles, ChatTitle, ChatContext, ChatMessages, ChatManager, ChatModalManager). Полный реестр — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md).
+**`shared/chat/`** — 13 модулей (ChatEventBus, ChatRenderer, ClientActionsRegistry, ChatStream, ChatHistory, ChatUI, ChatFiles, ChatTitle, ChatContext, ChatMessages, ChatManager, ChatModalManager, ChatFeedback). Полный реестр — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md).
+
+**`constructor/` (дополнительно):**
+
+| Файл | Экспорт |
+|---|---|
+| `constructor/navigation-manager.js` | `NavigationManager` (step-кнопки + save+export pipeline; ловит `LockLostError`) |
 
 **`portal/`:**
 
@@ -1076,7 +1086,7 @@ Jinja-фильтр `versioned` (применяется ко всем `url_for('s
 
 ## 14. Чат
 
-Полный гайд по чат-фронту — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) (12 модулей, транспорт polling по шине, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, status state machine).
+Полный гайд по чат-фронту — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) (13 модулей, транспорт polling по шине, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, status state machine).
 
 Здесь — только load-bearing **точки сцепки** с остальным фронтом:
 

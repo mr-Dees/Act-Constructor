@@ -144,6 +144,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | Аудит-лог | `ACTS__AUDIT_LOG__RETENTION_DAYS`, `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | Хранение логов и лимиты diff |
 | Фактуры | `ACTS__INVOICE__HIVE_SCHEMA`, `ACTS__INVOICE__GP_SCHEMA` | Схемы для привязки фактур |
 | Администрирование | `ADMIN__USER_DIRECTORY__*` | Справочник пользователей |
+| Канал к внешнему ИИ-агенту | `CHAT__AGENT_CHANNEL__TABLE_NAME`, `CHAT__MAX_PARALLEL_STREAMS_PER_USER` | Имя bus-таблицы (без app-префикса) и лимит параллельных запросов к агенту. Полный список — в `.env.example`. |
 | ЦК Фин.Рез. | `CK_FIN_RES__SCHEMA_NAME`, `CK_FIN_RES__*` | Таблицы и VIEW верификации FR |
 | ЦК Клиентский опыт | `CK_CLIENT_EXP__SCHEMA_NAME`, `CK_CLIENT_EXP__*` | Таблицы и VIEW верификации CS |
 | Справочные данные | `UA_DATA__*` | Словари процессов, ТБ, подразделений |
