@@ -14,13 +14,16 @@
 
             <div id="notificationsMenu" class="notifications-menu hidden">
                 <div class="notifications-menu-header">
-                    <h4><span aria-hidden="true">⚠</span> Уведомления</h4>
+                    <h4>Уведомления</h4>
                     <div class="notifications-menu-actions">
                         <button id="notificationsReadAllBtn" class="notifications-read-all" type="button">Прочитать все</button>
                         <button id="closeNotificationsBtn" class="notifications-menu-close" aria-label="Закрыть">&times;</button>
                     </div>
                 </div>
                 <div class="notifications-menu-body" id="notificationsBody"></div>
+                <!-- Угловая ручка изменения размера (bottom-left: меню прижато
+                     к правому краю, растёт влево и вниз) -->
+                <div class="notifications-menu-resize" aria-hidden="true"></div>
             </div>
         </div>
         <button id="landingSettingsBtn" class="landing-topbar-btn" title="Настройки">

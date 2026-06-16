@@ -65,9 +65,10 @@
     position: absolute;
     top: calc(100% + var(--spacing-lg));
     right: 0;
-    width: 340px;
+    width: 420px;
+    max-width: calc(100vw - 32px);
     max-height: 50vh;
-    overflow-y: auto;
+    overflow: hidden;
     background: var(--modal-bg, var(--bg-primary));
     border: var(--border-width-thin) solid var(--modal-border, var(--border));
     border-radius: var(--radius-xl);
@@ -155,8 +156,11 @@
     transform: rotate(var(--rotate-close-button));
 }
 
-/* Тело меню */
+/* Тело меню — единственная скролл-область (шапка остаётся на месте); flex:1
+   заполняет высоту меню, в т.ч. при ручном ресайзе. */
 .notifications-menu-body {
+    flex: 1 1 0;
+    min-height: 0;
     padding: var(--spacing-sm) var(--spacing-md);
     overflow-y: auto;
 }
@@ -313,6 +317,46 @@
     text-align: center;
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
+}
+
+/* ============================================================================
+ * Угловая ручка изменения размера меню. Меню прижато к правому краю
+ * (right: 0), поэтому ручка в левом-нижнем углу: тянем влево — шире, вниз — выше
+ * (по аналогии с popup чата в конструкторе, но зеркально). Размеры сохраняются
+ * в localStorage (NotificationCenter).
+ * ============================================================================ */
+.notifications-menu-resize {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nesw-resize;
+    z-index: 2;
+}
+
+/* Паттерн из точек (стандартный grip), зеркально в левый-нижний угол */
+.notifications-menu-resize::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    bottom: 4px;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    opacity: 0.3;
+    background: var(--text-secondary);
+    box-shadow:
+        4px  0    var(--text-secondary),
+        0   -4px  var(--text-secondary),
+        4px -4px  var(--text-secondary),
+        8px  0    var(--text-secondary),
+        0   -8px  var(--text-secondary);
+    transition: opacity var(--transition-fast);
+}
+
+.notifications-menu-resize:hover::after {
+    opacity: 0.6;
 }
 
 /* ============================================================================

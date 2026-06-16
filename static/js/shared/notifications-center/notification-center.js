@@ -16,6 +16,7 @@
  */
 import { EscapeStack } from '../escape-stack.js';
 import { AppConfig } from '../app-config.js';
+import { makeResizablePanel } from '../resizable-panel.js';
 import {
   pickBadgeSeverityWithServer,
   computeBadge,
@@ -30,6 +31,16 @@ import {
 const DEFAULT_POLL_INTERVAL_MS = 30000;
 /** Нижняя граница интервала поллинга (мс) — защита от слишком частого опроса. */
 const MIN_POLL_INTERVAL_MS = 5000;
+
+// Границы ручного ресайза меню (передаются в makeResizablePanel). Меню прижато
+// к правому краю, поэтому ширина растёт влево (growX:'left'), высота — вниз.
+const MENU_MIN_WIDTH = 320;
+const MENU_MAX_WIDTH_PX = 640;
+const MENU_MAX_WIDTH_VW = 90;
+const MENU_MIN_HEIGHT = 200;
+const MENU_MAX_HEIGHT_VH = 85;
+/** Ключ localStorage с сохранённым размером меню (общий портал/конструктор). */
+const MENU_SIZE_KEY = 'notif:menu:size';
 
 export class NotificationCenter {
   /**
@@ -50,6 +61,8 @@ export class NotificationCenter {
     this.isOpen = false;
     this._escapeUnsub = null;
     this._pollTimer = null;
+    // teardown ручного ресайза меню (общая утилита makeResizablePanel).
+    this._resizer = null;
 
     // Контекстное меню записи (Прочитать/Непрочитанным/Удалить). Один общий
     // элемент на body, переиспользуется. Заменяет прежний крестик dismiss.
@@ -90,6 +103,8 @@ export class NotificationCenter {
     // контекстного меню (position:fixed) — закрываем его. Скролл слушаем на
     // window в capture-фазе: ловит и прокрутку внутреннего списка, и страницы.
     this._onScroll = () => this._closeContextMenu();
+    // Ресайз окна сдвигает якорь контекстного меню — закрываем его. Пере-кламп
+    // размера самого меню при ресайзе окна делает makeResizablePanel.
     this._onWinResize = () => this._closeContextMenu();
   }
 
@@ -104,7 +119,6 @@ export class NotificationCenter {
     this.badge = document.getElementById('notificationsBadge');
     this.closeBtn = document.getElementById('closeNotificationsBtn');
     this.readAllBtn = document.getElementById('notificationsReadAllBtn');
-
     if (!this.btn || !this.menu || !this.body || !this.badge) {
       return; // страница без колокольчика — ничего не делаем
     }
@@ -114,6 +128,24 @@ export class NotificationCenter {
     this.btn.addEventListener('click', this._onBtnClick);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCloseClick);
     if (this.readAllBtn) this.readAllBtn.addEventListener('click', this._onReadAllClick);
+
+    // Ресайз меню угловой ручкой (общая утилита; меню прижато вправо → растёт
+    // влево и вниз). Утилита сама восстанавливает сохранённый размер и пере-клампит.
+    const resizeHandle = this.menu.querySelector('.notifications-menu-resize');
+    if (resizeHandle) {
+      this._resizer = makeResizablePanel({
+        panel: this.menu,
+        handle: resizeHandle,
+        growX: 'left',
+        minWidth: MENU_MIN_WIDTH,
+        maxWidthPx: MENU_MAX_WIDTH_PX,
+        maxWidthVw: MENU_MAX_WIDTH_VW,
+        minHeight: MENU_MIN_HEIGHT,
+        maxHeightVh: MENU_MAX_HEIGHT_VH,
+        storageKey: MENU_SIZE_KEY,
+        cursor: 'nesw-resize',
+      });
+    }
 
     document.addEventListener('click', this._onDocClick);
     document.addEventListener('visibilitychange', this._onVisibilityChange);
@@ -272,6 +304,10 @@ export class NotificationCenter {
     this._destroyed = true;
     this._stopPolling();
     this._closeContextMenu();
+    if (this._resizer) {
+      this._resizer.destroy(); // снимает слушатели ресайза + сбрасывает залипшее
+      this._resizer = null;
+    }
     if (this.btn) this.btn.removeEventListener('click', this._onBtnClick);
     if (this.closeBtn) this.closeBtn.removeEventListener('click', this._onCloseClick);
     if (this.readAllBtn) this.readAllBtn.removeEventListener('click', this._onReadAllClick);
