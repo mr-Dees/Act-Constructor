@@ -406,7 +406,7 @@ class TestTextBlockFormatting:
     def test_default_values(self):
         f = TextBlockFormattingSchema()
         assert f.fontSize == 14
-        assert f.alignment == "left"
+        assert f.alignment == "justify"
 
     def test_font_size_too_small(self):
         with pytest.raises(ValidationError):

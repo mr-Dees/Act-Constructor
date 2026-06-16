@@ -42,50 +42,63 @@ export function sanitizeActContent(content) {
         return report;
     }
 
-    // Один обход дерева: множество id узлов + список {node, parent} (для
-    // вырезания зомби; корень несёт parent=null и под удаление не попадает).
-    const nodeIds = new Set();
-    const linked = [];
-    const stack = [{ node: content.tree, parent: null }];
-    while (stack.length) {
-        const { node, parent } = stack.pop();
-        if (!node || typeof node !== 'object') continue;
-        linked.push({ node, parent });
-        if (node.id) nodeIds.add(node.id);
-        if (Array.isArray(node.children)) {
-            for (const child of node.children) stack.push({ node: child, parent: node });
-        }
-    }
-
-    // (а) сироты словарей: nodeId записи не существует в дереве.
-    for (const [dictName] of DICT_REFS) {
-        const dict = content[dictName];
-        if (!dict || typeof dict !== 'object') continue;
-        for (const [entryId, entry] of Object.entries(dict)) {
-            if (!entry || !nodeIds.has(entry.nodeId)) {
-                delete dict[entryId];
-                report.droppedEntries[dictName].push(entryId);
-                report.changed = true;
+    // (а) и (б) взаимозависимы: вырезание зомби-узла уносит и его поддерево,
+    // осиротив записи словарей у потомков; отброшенная запись делает ссылку
+    // другого узла висячей. Поэтому повторяем оба правила до стабилизации —
+    // множество живых id и список {node, parent} строятся заново по ТЕКУЩЕМУ
+    // (уже обрезанному) дереву. Каждый результативный проход строго что-то
+    // удаляет (id-узлов/записей конечно) → цикл завершается.
+    for (;;) {
+        const nodeIds = new Set();
+        const linked = [];
+        const stack = [{ node: content.tree, parent: null }];
+        while (stack.length) {
+            const { node, parent } = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            linked.push({ node, parent });
+            if (node.id) nodeIds.add(node.id);
+            if (Array.isArray(node.children)) {
+                for (const child of node.children) stack.push({ node: child, parent: node });
             }
         }
-    }
 
-    // (б) узлы-зомби: листовая ссылка указывает на отсутствующую запись
-    //     словаря (в т.ч. после (а)) → удаляем узел целиком из родителя.
-    for (const { node, parent } of linked) {
-        if (!parent || !Array.isArray(parent.children)) continue;
-        const dangling = DICT_REFS.some(([dictName, refField]) => {
-            const ref = node[refField];
-            return ref && !(content[dictName] && content[dictName][ref]);
-        });
-        if (dangling) {
-            const idx = parent.children.indexOf(node);
-            if (idx !== -1) {
-                parent.children.splice(idx, 1);
-                report.removedNodes.push(node.id || '(без id)');
-                report.changed = true;
+        let changedThisPass = false;
+
+        // (а) сироты словарей: nodeId записи не существует в (текущем) дереве —
+        //     в т.ч. потомки удалённых на прошлом проходе зомби-узлов.
+        for (const [dictName] of DICT_REFS) {
+            const dict = content[dictName];
+            if (!dict || typeof dict !== 'object') continue;
+            for (const [entryId, entry] of Object.entries(dict)) {
+                if (!entry || !nodeIds.has(entry.nodeId)) {
+                    delete dict[entryId];
+                    report.droppedEntries[dictName].push(entryId);
+                    report.changed = true;
+                    changedThisPass = true;
+                }
             }
         }
+
+        // (б) узлы-зомби: листовая ссылка указывает на отсутствующую запись
+        //     словаря (в т.ч. после (а)) → удаляем узел целиком из родителя.
+        for (const { node, parent } of linked) {
+            if (!parent || !Array.isArray(parent.children)) continue;
+            const dangling = DICT_REFS.some(([dictName, refField]) => {
+                const ref = node[refField];
+                return ref && !(content[dictName] && content[dictName][ref]);
+            });
+            if (dangling) {
+                const idx = parent.children.indexOf(node);
+                if (idx !== -1) {
+                    parent.children.splice(idx, 1);
+                    report.removedNodes.push(node.id || '(без id)');
+                    report.changed = true;
+                    changedThisPass = true;
+                }
+            }
+        }
+
+        if (!changedThisPass) break;
     }
 
     return report;

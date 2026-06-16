@@ -127,7 +127,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | Поле        | Тип / default                          | Назначение                                  |
 |-------------|-----------------------------------------|---------------------------------------------|
 | `fontSize`  | int 8–72, default 14                    | базовый размер шрифта                       |
-| `alignment` | `"left" | "center" | "right" | "justify"`, default `"left"` | выравнивание                                |
+| `alignment` | `"left" | "center" | "right" | "justify"`, default `"justify"` (как тело акта) | выравнивание                                |
 | `bold`      | bool, default false                     | жирный                                      |
 | `italic`    | bool, default false                     | курсив                                      |
 | `underline` | bool, default false                     | подчёркивание                                |

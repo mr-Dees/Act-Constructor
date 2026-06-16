@@ -202,7 +202,7 @@ export function registerActsSource(center, handlers = {}) {
   // Применяет патч состояния к записи (id+sig), сохраняет и обновляет центр.
   const setState = (id, sig, patch) => {
     const prev = ctrl.store[id] || { sig, read: false, dismissed: false };
-    ctrl.store[id] = { sig, read: !!prev.read, dismissed: !!prev.dismissed, ...patch, sig };
+    ctrl.store[id] = { sig, read: !!prev.read, dismissed: !!prev.dismissed, ...patch };
     _saveState(ctrl.store);
     ctrl.persistedJson = JSON.stringify(ctrl.store);
     center.refresh();

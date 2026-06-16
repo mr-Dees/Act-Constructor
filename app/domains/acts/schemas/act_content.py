@@ -370,8 +370,8 @@ class TextBlockFormattingSchema(BaseModel):
         description="Базовый размер шрифта (границы — по настройкам)"
     )
     alignment: Literal["left", "center", "right", "justify"] = Field(
-        default="left",
-        description="Выравнивание"
+        default="justify",
+        description="Выравнивание (дефолт — по ширине, как тело акта)"
     )
     bold: bool = Field(default=False, description="Жирный")
     italic: bool = Field(default=False, description="Курсив")

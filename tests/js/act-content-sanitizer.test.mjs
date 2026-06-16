@@ -153,3 +153,35 @@ test('отсутствующие словари не ломают обход (б
   assert.ok(!nodeIdsOf(content.tree).has('n1'));
   assert.deepEqual(report.removedNodes, ['n1']);
 });
+
+test('удаление зомби-узла вычищает осиротевшие записи его потомков', () => {
+  // n1 — зомби (tableId без записи), но у него валидный потомок-нарушение n2.
+  // После вырезания n1 поддерево с n2 исчезает → запись violations.v2
+  // становится сиротой и должна быть вычищена этим же проходом.
+  const content = {
+    tree: {
+      id: 'root', label: 'Акт',
+      children: [
+        {
+          id: 'n1', type: 'table', tableId: 't_missing',
+          children: [
+            { id: 'n2', type: 'violation', violationId: 'v2', children: [] },
+          ],
+        },
+      ],
+    },
+    tables: {},
+    textBlocks: {},
+    violations: { v2: { id: 'v2', nodeId: 'n2' } },
+  };
+
+  const report = sanitizeActContent(content);
+
+  const ids = nodeIdsOf(content.tree);
+  assert.ok(!ids.has('n1'), 'зомби-узел n1 не удалён');
+  assert.ok(!ids.has('n2'), 'потомок зомби n2 не удалён');
+  // Осиротевшая запись потомка вычищена (а не оставлена бэкенду).
+  assert.equal(content.violations.v2, undefined);
+  assert.ok(report.removedNodes.includes('n1'));
+  assert.deepEqual(report.droppedEntries.violations, ['v2']);
+});

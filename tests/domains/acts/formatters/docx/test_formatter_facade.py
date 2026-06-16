@@ -223,6 +223,35 @@ def test_textblock_partial_formatting_left_alignment_applied():
     assert para.runs[0].bold is True
 
 
+def test_textblock_explicit_left_with_default_fields_renders_left():
+    """Регрессия: явный alignment=left при прочих дефолтах → LEFT, не JUSTIFY.
+
+    Раньше formatting, совпавший со схемными дефолтами (когда дефолт был
+    'left'), распознавался как «нетронутый» и подменялся на JUSTIFY — явный
+    левый выбор не доезжал до LEFT. Дефолт схемы теперь 'justify', выравнивание
+    применяется буквально.
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(
+            id="tb1", nodeId="1.1", content="Явно левый блок",
+            formatting={"fontSize": 14, "alignment": "left", "bold": False,
+                        "italic": False, "underline": False},
+        )},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    para = next(p for p in doc.paragraphs if "Явно левый блок" in p.text)
+    assert para.alignment == WD_ALIGN_PARAGRAPH.LEFT
+
+
 def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
     """#9: смена только выравнивания при дефолтном fontSize=14 НЕ уменьшает шрифт.
 

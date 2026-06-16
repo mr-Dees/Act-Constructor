@@ -343,6 +343,7 @@ class AgentChannelPoller:
                 if not self._subscriptions:
                     # Подписчиков нет — спим, коннект не берём.
                     interval = cfg.poll_min_interval_sec
+                    self._current_interval = interval
                     await asyncio.sleep(interval)
                     continue
 

@@ -428,7 +428,7 @@ export class AppConfig {
 
             // Текстовые блоки
             fontSize: 14,
-            alignment: 'left',
+            alignment: 'justify',
 
             // Форматирование
             formatting: {

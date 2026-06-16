@@ -122,21 +122,6 @@ class AgentMessageRepository(BaseRepository):
         )
         return self._parse_row(row)
 
-    async def get_questions(self, uids: list[str]) -> list[dict]:
-        """Возвращает строки по списку id (uid сообщений).
-
-        Пустой список uids → возвращает [] без обращения к БД.
-        ``ANY($1)`` без явного каста: тип элементов массива Postgres выводит
-        из типа колонки ``id`` (uuid на проде, что угодно на dev-стенде).
-        """
-        if not uids:
-            return []
-        rows = await self.conn.fetch(
-            f"SELECT * FROM {self.table} WHERE id = ANY($1)",
-            uids,
-        )
-        return [self._parse_row(r) for r in rows]
-
     async def set_status(self, *, uid: str, status: str) -> None:
         """Обновляет статус строки по id (uid сообщения)."""
         await self.conn.execute(

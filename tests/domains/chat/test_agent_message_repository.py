@@ -1,7 +1,7 @@
 """Тесты репозитория chat_agent_messages_bus (bus-таблица канала к внешнему агенту).
 
-Покрывают: insert_question, get_by_uid, get_questions (пустой и непустой
-списки), set_status, count_pending_before, count_active_for_user.
+Покрывают: insert_question, get_by_uid, set_status, count_pending_before,
+count_active_for_user.
 Стратегия: mock_conn + autouse-патч get_adapter — идентична
 test_message_repository.py.
 """
@@ -250,51 +250,6 @@ async def test_get_answer_for_question_not_found(mock_conn):
     mock_conn.fetchrow.return_value = None
     repo = AgentMessageRepository(mock_conn)
     assert await repo.get_answer_for_question("q-uid") is None
-
-
-# ── get_questions ────────────────────────────────────────────────────────
-
-
-async def test_get_questions_empty_list_no_db_call(mock_conn):
-    """Пустой uids → [] без обращения к БД."""
-    repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_questions([])
-    assert result == []
-    mock_conn.fetch.assert_not_called()
-
-
-async def test_get_questions_returns_parsed_rows(mock_conn):
-    """Непустой uids → SELECT WHERE id = ANY($1), результат раскодирован.
-
-    ANY($1) без явного каста: тип элементов массива Postgres выводит из типа
-    колонки id (uuid на проде). Явный ::varchar[] ломал бы uuid-колонку.
-    """
-    rows = [
-        {
-            "id": "msg-1", "chat_id": "c1", "user_id": "u1",
-            "role": "user", "content": "a",
-            "media": None, "metadata": '{"x": 1}', "buttons": None,
-            "status": "pending",
-        },
-        {
-            "id": "msg-2", "chat_id": "c1", "user_id": "u1",
-            "role": "user", "content": "b",
-            "media": '[1, 2]', "metadata": "{}", "buttons": None,
-            "status": "in_progress",
-        },
-    ]
-    mock_conn.fetch.return_value = rows
-    repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_questions(["msg-1", "msg-2"])
-
-    sql, uids = mock_conn.fetch.call_args.args
-    assert "id = ANY($1)" in sql
-    assert "::varchar[]" not in sql
-    assert uids == ["msg-1", "msg-2"]
-
-    assert len(result) == 2
-    assert result[0]["metadata"] == {"x": 1}  # JSONB раскодирован
-    assert result[1]["media"] == [1, 2]        # JSONB раскодирован
 
 
 # ── set_status ───────────────────────────────────────────────────────────
