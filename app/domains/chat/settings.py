@@ -31,6 +31,10 @@ class AgentChannelSettings(BaseModel):
     poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
     poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
     answer_timeout_sec: int = Field(default=600, gt=0)  # 10 минут
+    # Таймаут взятия вопроса в работу: вопрос висит в 'pending' без движения
+    # очереди дольше этого времени → черновик закрывается ошибкой. Idle-семантика:
+    # движение очереди (см. poller) сбрасывает отсчёт.
+    claim_timeout_sec: int = Field(default=1800, gt=0)  # 30 минут
     max_block_text_size: int = Field(default=262144, gt=0)
 
 

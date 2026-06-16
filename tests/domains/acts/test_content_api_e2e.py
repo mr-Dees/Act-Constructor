@@ -207,6 +207,25 @@ class TestSaveActContent:
         assert body["status"] == "success"
         svc.save_content.assert_awaited_once()
 
+    def test_save_content_response_includes_updated_at(self):
+        """PUT отдаёт серверный updated_at — базу метаданных снимка-черновика (H3)."""
+        svc = _make_content_service()
+        svc.save_content.return_value = {
+            "status": "success",
+            "message": "Содержимое сохранено",
+            "updated_at": dt.datetime(2026, 6, 11, 10, 0, 0, 123456),
+        }
+        app = _build_app(content_service=svc)
+
+        with TestClient(app) as client:
+            resp = client.put(
+                "/api/v1/acts/42/content", json=_valid_save_payload(),
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["updated_at"] == "2026-06-11T10:00:00.123456"
+
     def test_save_content_lock_conflict_returns_409(self):
         """Чужая блокировка → 409 через ActLockError."""
         svc = _make_content_service()
@@ -257,6 +276,58 @@ class TestSaveActContent:
         assert resp.status_code == 422
         # save_content не вызван — отсёк FastAPI на валидации
         svc.save_content.assert_not_awaited()
+
+    def test_save_content_unknown_table_field_returns_422(self):
+        """M.20: неизвестное поле в таблице → 422 (extra='forbid'), не молчаливая потеря."""
+        svc = _make_content_service()
+        app = _build_app(content_service=svc)
+
+        payload = _valid_save_payload()
+        payload["tables"] = {
+            "t1": {
+                "id": "t1", "nodeId": "n1",
+                "grid": [], "colWidths": [],
+                "totallyUnknownField": 123,
+            },
+        }
+        payload["tree"]["children"] = [
+            {"id": "n1", "label": "Таблица", "type": "table",
+             "tableId": "t1", "children": []},
+        ]
+
+        with TestClient(app) as client:
+            resp = client.put("/api/v1/acts/42/content", json=payload)
+
+        assert resp.status_code == 422
+        svc.save_content.assert_not_awaited()
+
+    def test_save_content_dangling_tree_ref_accepted_with_warning(self):
+        """M.13 (решение «lenient», findings 3+8): висячая ссылка узла больше
+        НЕ отбивает PUT 422 на разборе — запрос принимается, сервис вызывается,
+        а вычистку и warning делает ActContentService (см. service-level тесты).
+        Здесь проверяется только то, что API пропускает такой payload и
+        прокидывает поле warning ответа."""
+        svc = _make_content_service()
+        svc.save_content.return_value = {
+            "status": "success",
+            "message": "Содержимое сохранено",
+            "warning": "Очищено рассогласование дерево ↔ словари (висячих ссылок: 1)",
+        }
+        app = _build_app(content_service=svc)
+
+        payload = _valid_save_payload()
+        payload["tree"]["children"] = [
+            {"id": "n1", "label": "Таблица", "type": "table",
+             "tableId": "t_ghost", "children": []},
+        ]
+        # tables пуст — ссылка висячая, но запрос больше не отбивается 422
+
+        with TestClient(app) as client:
+            resp = client.put("/api/v1/acts/42/content", json=payload)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["warning"]
+        svc.save_content.assert_awaited_once()
 
     def test_save_content_business_validation_error_returns_400(self):
         """ActValidationError из сервиса (например, глубина дерева) → 400."""

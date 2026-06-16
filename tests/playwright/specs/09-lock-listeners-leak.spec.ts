@@ -116,10 +116,11 @@ test.describe('Lock listeners cleanup @smoke', () => {
     ).toBeLessThan(10);
   });
 
-  test('destroy() вызывает removeEventListener для всех 4 activity-событий', async ({ page }) => {
+  test('destroy() вызывает removeEventListener для всех подписок LockManager', async ({ page }) => {
     // Прямая проверка контракта destroy() через unit-style вызов из браузера.
-    // Гарантирует, что refactor сохранил ref handler'а и удаляет его
-    // ровно для тех 4 событий, которые добавил.
+    // Гарантирует, что refactor сохранил ref handler'ов и удаляет их
+    // ровно для тех событий, которые добавил: 4 activity-события
+    // (_activityEvents) + visibilitychange (возврат вкладки из фона).
     await page.addInitScript(() => {
       const win = window as unknown as {
         __removed: string[];
@@ -154,6 +155,10 @@ test.describe('Lock listeners cleanup @smoke', () => {
     });
 
     // _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart']
-    expect(removed).toEqual(['keydown', 'mousedown', 'scroll', 'touchstart']);
+    // + visibilitychange (bound-обработчик, см. inactivity-watchdog.js _visibilityHandler;
+    // LockManager.destroy() делегирует уборку watchdog.stop())
+    expect(removed).toEqual(
+      ['keydown', 'mousedown', 'scroll', 'touchstart', 'visibilitychange']
+    );
   });
 });

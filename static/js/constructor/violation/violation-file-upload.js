@@ -15,6 +15,15 @@ Object.assign(ViolationManager.prototype, {
      * @param {HTMLElement} contentContainer - Родительский контейнер
      */
     setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
+        // Повторная установка поля для того же нарушения снимает прежний
+        // document-слушатель drop — иначе он накапливался на каждый ре-рендер
+        // и удерживал отсоединённые контейнеры. Abort также дергают
+        // removeViolation (удаление узла) и destroy() (switch акта).
+        const prevController = this._fileDropControllers.get(violation.id);
+        if (prevController) prevController.abort();
+        const dropController = new AbortController();
+        this._fileDropControllers.set(violation.id, dropController);
+
         // Счетчик для отслеживания входов/выходов (для вложенных элементов)
         let dragCounter = 0;
         // Флаг активного файлового drag
@@ -61,6 +70,10 @@ Object.assign(ViolationManager.prototype, {
                 // Вычисляем позицию для вставки файлов
                 const position = this.calculateCursorPosition(e, itemsContainer);
                 this.cursorInsertPosition = position;
+
+                // Показываем индикатор позиции вставки — в т.ч. для пустого
+                // контейнера (violation-6): mousemove во время drag не приходит.
+                this.updateInsertIndicator(itemsContainer, position);
             }
         });
 
@@ -85,6 +98,7 @@ Object.assign(ViolationManager.prototype, {
                     itemsContainer.classList.remove('drag-over-file');
                     isFileDragActive = false;
                     this.cursorInsertPosition = null;
+                    this.removeInsertIndicators(itemsContainer);
                 }
             }
         });
@@ -113,9 +127,9 @@ Object.assign(ViolationManager.prototype, {
             isFileDragActive = false;
             itemsContainer.classList.remove('drag-over-file');
             this.cursorInsertPosition = null;
+            this.removeInsertIndicators(itemsContainer);
 
             // Обрабатываем каждый файл
-            let addedCount = 0;
             const imageFiles = [];
 
             // Сначала фильтруем только изображения
@@ -132,36 +146,13 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            // Теперь обрабатываем все изображения
-            imageFiles.forEach((file, idx) => {
-                const reader = new FileReader();
+            // Валидация ДО readAsDataURL (H6): MIME/размер/суммарный лимит/число
+            // элементов; отказники отсеяны с Notifications.warning.
+            const acceptedFiles = this.filterAcceptedImageFiles(imageFiles, violation);
+            if (acceptedFiles.length === 0) return;
 
-                reader.onload = (event) => {
-                    // Добавляем изображение в рассчитанную позицию
-                    this.addContentItemAtPosition(violation, 'image', contentContainer, insertPosition + idx, {
-                        url: event.target.result,
-                        filename: file.name
-                    });
-
-                    addedCount++;
-
-                    // Показываем уведомление для последнего файла
-                    if (addedCount === imageFiles.length) {
-                        const message = addedCount === 1
-                            ? 'Изображение добавлено'
-                            : `Добавлено изображений: ${addedCount}`;
-
-                        Notifications.success(message);
-                    }
-                };
-
-                reader.onerror = (error) => {
-                    console.error('Error reading file:', file.name, error);
-                    Notifications.error(`Ошибка при чтении ${file.name}`);
-                };
-
-                reader.readAsDataURL(file);
-            });
+            // Вставка строго в порядке перетащенных файлов (violation-4).
+            this.insertImageFilesInOrder(violation, contentContainer, insertPosition, acceptedFiles);
         });
 
         // Дополнительная защита: сбрасываем состояние при любом завершении drag
@@ -171,17 +162,19 @@ Object.assign(ViolationManager.prototype, {
                 isFileDragActive = false;
                 itemsContainer.classList.remove('drag-over-file');
                 this.cursorInsertPosition = null;
+                this.removeInsertIndicators(itemsContainer);
             }
         };
 
         itemsContainer.addEventListener('dragend', resetDragState);
 
-        // Сброс при потере фокуса или других событиях
+        // Сброс при потере фокуса или других событиях.
+        // Слушатель живёт до abort'а контроллера (см. начало метода).
         document.addEventListener('drop', (e) => {
             // Если drop произошел вне нашего контейнера
             if (!itemsContainer.contains(e.target)) {
                 resetDragState();
             }
-        });
+        }, { signal: dropController.signal });
     }
 });

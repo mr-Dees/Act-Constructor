@@ -163,6 +163,38 @@ class ChatAuditService:
             details=details or None,
         )
 
+    async def log_feedback(
+        self,
+        *,
+        username: str,
+        action: str,
+        conversation_id: str | None = None,
+        message_id: str | None = None,
+        rating: str | None = None,
+        reasons: list[str] | None = None,
+        route_type: str | None = None,
+    ) -> None:
+        """Логирует выставление/снятие оценки сообщения.
+
+        Текст свободного комментария НЕ пишется в audit (возможный PII) —
+        только машинные поля для аналитики.
+        """
+        details: dict = {}
+        if message_id is not None:
+            details["message_id"] = message_id
+        if rating is not None:
+            details["rating"] = rating
+        if reasons:
+            details["reasons"] = reasons
+        if route_type is not None:
+            details["route_type"] = route_type
+        await self._safe_log(
+            username=username,
+            action=action,
+            conversation_id=conversation_id,
+            details=details or None,
+        )
+
     async def log_file_deleted(
         self,
         *,

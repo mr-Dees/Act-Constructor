@@ -111,10 +111,17 @@ class ActLockRepository(BaseRepository):
         return result
 
     async def get_lock_info(self, act_id: int) -> dict | None:
-        """SELECT locked_by, lock_expires_at для диагностики."""
+        """SELECT locked_by, lock_expires_at + признак истечения lock_expired.
+
+        lock_expired вычисляется в SELECT (серверный CURRENT_TIMESTAMP):
+        сравнение на стороне приложения дало бы рассинхрон часов/таймзон
+        (lock_expires_at — TIMESTAMP без таймзоны, наивный datetime).
+        """
         row = await self.conn.fetchrow(
             f"""
-            SELECT locked_by, lock_expires_at
+            SELECT locked_by, lock_expires_at,
+                   (lock_expires_at IS NOT NULL
+                    AND lock_expires_at <= CURRENT_TIMESTAMP) AS lock_expired
             FROM {self.acts}
             WHERE id = $1
             """,

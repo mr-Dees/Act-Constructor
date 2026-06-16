@@ -20,11 +20,12 @@ export const ChatStream = {
      * @param {string} [options.agentMode='off'] — режим агента (off/adaptive/always)
      * @param {string[]|null} [options.domains=null] — фильтр доменов
      * @param {function(Object): void} [options.onReady] — вызывается с {id, status, content}
+     * @param {function(Object): void} [options.onProgress] — каждый тик опроса со status='streaming' (промежуточные блоки и статус очереди агента)
      * @param {function(Error): void} [options.onError] — вызывается при ошибке
      * @param {AbortSignal} [options.signal] — внешний сигнал отмены
      */
     async sendAndPoll(conversationId, message, files = [], options = {}) {
-        const { agentMode = 'off', domains = null, onReady, onError, signal } = options;
+        const { agentMode = 'off', domains = null, onReady, onProgress, onError, signal } = options;
 
         const fd = this._buildFormData(message, files, domains);
         fd.append('agent_mode', agentMode);
@@ -59,31 +60,46 @@ export const ChatStream = {
             return;
         }
 
-        return this.pollMessage(conversationId, messageId, { onReady, onError, signal });
+        return this.pollMessage(conversationId, messageId, { onReady, onProgress, onError, signal });
     },
 
     /**
      * Опрашивает бэк до статуса complete/failed.
      * Используется также для resume при reload/switch посреди ожидания.
      *
+     * Таймаут — idle-семантика, зеркало серверной: пока payload меняется
+     * (статус очереди, рост блоков) — ждём; замер без изменений дольше
+     * фазового лимита — ошибка. Жёсткого потолка нет: источник истины
+     * таймаутов — бэкенд (он сам зафейлит черновик по claim/answer-лимитам).
+     *
      * @param {string} conversationId
      * @param {string} messageId
      * @param {Object} options
      * @param {function(Object): void} [options.onReady]
+     * @param {function(Object): void} [options.onProgress] — каждый тик со status='streaming'
      * @param {function(Error): void} [options.onError]
      * @param {AbortSignal} [options.signal]
      */
     pollMessage(conversationId, messageId, options = {}) {
-        const { onReady, onError, signal } = options;
+        const { onReady, onProgress, onError, signal } = options;
         const url = AppConfig.api.getUrl(
             `/api/v1/chat/conversations/${conversationId}/messages/${messageId}`,
         );
-        const started = Date.now();
-        const TIMEOUT_MS = 11 * 60 * 1000; // чуть больше серверного answer_timeout (10 мин)
-        const INTERVAL = 1500;
+
+        // Idle-лимиты: pending зеркалит серверный claim_timeout (30 мин),
+        // остальные фазы — answer_timeout (10 мин); + слак на поллинг.
+        const IDLE_LIMIT_PENDING_MS = 31 * 60 * 1000;
+        const IDLE_LIMIT_DEFAULT_MS = 11 * 60 * 1000;
+        const INTERVAL_PENDING_MS = 4000;  // в очереди — опрашиваем реже
+        const INTERVAL_ACTIVE_MS = 1500;
+        const MAX_CONSECUTIVE_FETCH_ERRORS = 5;
+
+        let lastChangeAt = Date.now();
+        let lastFingerprint = '';
+        let consecutiveErrors = 0;
 
         // Возвращаем Promise, который резолвится в КАЖДОМ терминальном исходе:
-        // complete/failed, таймаут, сетевая ошибка, отмена через signal.
+        // complete/failed, idle-таймаут, серия сетевых ошибок, отмена через signal.
         // Без этого `await sendAndPoll(...)` разблокировал бы ui:processing
         // сразу после POST, пока polling ещё идёт.
         return new Promise((resolve) => {
@@ -102,8 +118,27 @@ export const ChatStream = {
                         return;
                     }
                     msg = await r.json();
+                    consecutiveErrors = 0;
                 } catch (e) {
-                    if (onError) onError(e);
+                    if (signal && signal.aborted) {
+                        resolve();
+                        return;
+                    }
+                    // Транзиентная сетевая ошибка: даём бэку шанс ожить,
+                    // серия подряд — считаем его мёртвым.
+                    consecutiveErrors += 1;
+                    if (consecutiveErrors >= MAX_CONSECUTIVE_FETCH_ERRORS) {
+                        if (onError) onError(e);
+                        resolve();
+                        return;
+                    }
+                    setTimeout(tick, INTERVAL_ACTIVE_MS);
+                    return;
+                }
+
+                // Отмена могла случиться, пока ответ был в полёте (между fetch
+                // и этим местом) — не рендерим в уже покинутый контейнер.
+                if (signal && signal.aborted) {
                     resolve();
                     return;
                 }
@@ -114,13 +149,42 @@ export const ChatStream = {
                     return;
                 }
 
-                if (Date.now() - started > TIMEOUT_MS) {
+                if (onProgress) {
+                    try {
+                        onProgress(msg);
+                    } catch (e) {
+                        console.warn('ChatStream: ошибка onProgress', e);
+                    }
+                }
+
+                // Idle-детект: «изменилось что-нибудь?» — статус, статус очереди
+                // или длины текстов блоков (рост reasoning агента).
+                // Ожидаемые поля status_details от бэка: {bus_status: str, queue_ahead: int|null}.
+                const fingerprint = JSON.stringify({
+                    s: msg.status,
+                    d: msg.status_details || null,
+                    c: Array.isArray(msg.content)
+                        ? msg.content.map((b) => (
+                            (b && typeof b.content === 'string') ? b.content.length : 0
+                        ))
+                        : [],
+                });
+                if (fingerprint !== lastFingerprint) {
+                    lastFingerprint = fingerprint;
+                    lastChangeAt = Date.now();
+                }
+
+                const busStatus = msg.status_details && msg.status_details.bus_status;
+                const idleLimit = (busStatus === 'pending')
+                    ? IDLE_LIMIT_PENDING_MS
+                    : IDLE_LIMIT_DEFAULT_MS;
+                if (Date.now() - lastChangeAt > idleLimit) {
                     if (onError) onError(new Error('Превышено время ожидания ответа.'));
                     resolve();
                     return;
                 }
 
-                setTimeout(tick, INTERVAL);
+                setTimeout(tick, (busStatus === 'pending') ? INTERVAL_PENDING_MS : INTERVAL_ACTIVE_MS);
             };
 
             tick();

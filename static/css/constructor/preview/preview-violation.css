@@ -33,12 +33,43 @@
     font-size: var(--font-size-base);
 }
 
-/* Строка информации о нарушении */
+/* Строка информации о нарушении.
+   Полные тексты (паритет с DOCX): переносы строк textarea сохраняются. */
 .preview-violation-line {
     margin: var(--spacing-xs) 0;
     color: var(--text-primary);
     display: flex;
     gap: var(--spacing-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Полный список описаний (descriptionList) — паритет с буллетами DOCX */
+.preview-violation-desclist {
+    margin: var(--spacing-xs) 0;
+    margin-left: var(--spacing-xl);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Картинка дополнительного контента: по центру, не шире контентной области,
+   высота ограничена долей листа (Б-1.6, значение приходит inline-стилем
+   из preview-violation-renderer по preview_max_height_percent) */
+.preview-violation-image-wrap {
+    margin: var(--spacing-xs) 0;
+    text-align: center;
+}
+
+.preview-violation-image {
+    max-width: 100%;
+}
+
+/* Подпись картинки: курсив, по центру (как в DOCX, Б-1.5) */
+.preview-violation-caption {
+    margin: var(--spacing-xs) 0;
+    text-align: center;
+    font-style: italic;
+    color: var(--text-primary);
 }
 
 /* Метка поля */

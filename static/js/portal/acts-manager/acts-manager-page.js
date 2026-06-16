@@ -23,10 +23,6 @@ export class ActsManagerPage {
     static _total = 0;
     static _loadingMore = false;
 
-    /* Последний загруженный список актов — источник живых уведомлений
-     * колокольчика (см. notifications-source-acts.js). */
-    static _acts = [];
-
     /* --- Утилиты форматирования --- */
 
     /**
@@ -138,60 +134,64 @@ export class ActsManagerPage {
             };
         }
 
-        // Проверяем есть ли критичный статус (фактура)
+        // Критичный статус (красная карточка): проверка фактуры ИЛИ
+        // структурная ОШИБКА содержимого (#8 — error приравнен к фактуре).
         const needsInvoice = act.needs_invoice_check;
+        const validationError = act.validation_status === 'error';
+        const isCritical = needsInvoice || validationError;
 
-        // Проверяем есть ли обычные требования валидации
-        const hasValidationIssues =
+        // Жёлтое тело дают только незаполненные поля метаданных. Структурный
+        // warning (напр. пустые таблицы) карточку НЕ красит — он виден лишь
+        // агрегатом в колокольчике лендинга и полным списком внутри акта.
+        const hasFieldIssues =
             act.needs_created_date ||
             act.needs_directive_number ||
             act.needs_service_note;
 
-        // Оба требования одновременно (красная рамка + желтое тело)
-        if (needsInvoice && hasValidationIssues) {
-            const tooltipText =
-                '🚨 КРИТИЧНО: Необходима проверка фактуры!\n\n' +
-                '⚠️ Дополнительно требуется заполнить:\n' +
-                this._buildValidationTooltip(act);
-
-            return {
-                type: 'critical-attention',
-                classes: ['needs-invoice', 'needs-attention'],
-                tooltip: tooltipText,
-                needsHighlight: true,
-                isCritical: true
-            };
+        // Нормальный статус — ничего не подсвечиваем.
+        if (!isCritical && !hasFieldIssues) {
+            return { type: 'normal', classes: [], tooltip: null, needsHighlight: false };
         }
 
-        // Только фактура (красная)
-        if (needsInvoice) {
-            return {
-                type: 'critical',
-                classes: ['needs-invoice'],
-                tooltip: '🚨 КРИТИЧНО: Необходима проверка фактуры!',
-                needsHighlight: true,
-                isCritical: true
-            };
+        const classes = [];
+        if (needsInvoice) classes.push('needs-invoice');
+        if (validationError) classes.push('validation-error');
+        if (hasFieldIssues) classes.push('needs-attention');
+
+        const tooltipParts = [];
+        if (needsInvoice) tooltipParts.push('🚨 КРИТИЧНО: Необходима проверка фактуры!');
+        if (validationError) {
+            const review = this._buildReviewTooltip(act);
+            tooltipParts.push('🚨 Акт требует проверки:' + (review ? '\n' + review : ''));
+        }
+        if (hasFieldIssues) {
+            const fields = this._buildValidationTooltip(act);
+            if (fields) tooltipParts.push('⚠️ Требуется заполнение полей:\n' + fields);
         }
 
-        // Только обычные требования (желтая)
-        if (hasValidationIssues) {
-            return {
-                type: 'attention',
-                classes: ['needs-attention'],
-                tooltip: '⚠️ Требуется заполнение полей:\n' + this._buildValidationTooltip(act),
-                needsHighlight: true,
-                isCritical: false
-            };
-        }
-
-        // Нормальный статус — акт готов
         return {
-            type: 'normal',
-            classes: [],
-            tooltip: null,
-            needsHighlight: false
+            type: isCritical ? 'critical' : 'attention',
+            classes,
+            tooltip: tooltipParts.join('\n\n'),
+            needsHighlight: true,
+            isCritical,
         };
+    }
+
+    /**
+     * Формирует текст tooltip из конкретных ОШИБОК структурной валидации
+     * (validation_issues severity='error' с бэка, #8). Warning'и в tooltip
+     * критичной карточки не выводим — они видны полным списком внутри акта.
+     * @private
+     * @param {Object} act - Данные акта
+     * @returns {string} Многострочный текст или ''
+     */
+    static _buildReviewTooltip(act) {
+        const issues = Array.isArray(act.validation_issues) ? act.validation_issues : [];
+        return issues
+            .filter(i => i && i.severity === 'error')
+            .map(i => `• ${i.message}`)
+            .join('\n');
     }
 
     /**
@@ -256,35 +256,17 @@ export class ActsManagerPage {
             this._offset = acts.length;
 
             if (!acts.length) {
-                this._setActsForNotifications([]);
                 this._showEmptyState(container);
                 return;
             }
 
-            this._setActsForNotifications(acts);
             this._renderActsGrid(acts, container);
             this._renderLoadMore(container);
 
         } catch (error) {
             console.error('Ошибка загрузки актов:', error);
-            this._setActsForNotifications([]);
             this._showErrorState(container);
             Notifications.error('Ошибка загрузки списка актов');
-        }
-    }
-
-    /**
-     * Сохраняет текущий список актов и обновляет живой источник «acts»
-     * shared-колокольчика. Источник pull-based: при refresh() он перечитает
-     * this._acts. Если колокольчика на странице нет — тихо пропускаем.
-     * @private
-     * @param {Array<Object>} acts
-     */
-    static _setActsForNotifications(acts) {
-        this._acts = Array.isArray(acts) ? acts : [];
-        const center = window.notificationCenter;
-        if (center && typeof center.refresh === 'function') {
-            center.refresh();
         }
     }
 
@@ -327,7 +309,6 @@ export class ActsManagerPage {
                 if (card) grid.appendChild(card);
             });
 
-            this._setActsForNotifications(this._acts.concat(acts));
             this._renderLoadMore(container);
         } catch (error) {
             console.error('Ошибка подгрузки актов:', error);
@@ -828,10 +809,10 @@ export class ActsManagerPage {
 
         // Живой источник уведомлений «acts»: акты с незакрытыми требованиями
         // (фактура/СЗ/дата/поручения) попадают в shared-колокольчик. Центр
-        // создаётся в portal-common.js; collect — pull-based по this._acts.
+        // создаётся в portal-common.js; источник сам тянет серверную сводку
+        // (GET /acts/attention-summary) — по всем актам, не только загруженным.
         if (window.notificationCenter) {
             registerActsSource(window.notificationCenter, {
-                getActs: () => this._acts,
                 onOpen: (actId) => this.openAct(actId),
             });
         }

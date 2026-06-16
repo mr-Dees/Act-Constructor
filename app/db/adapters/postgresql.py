@@ -86,6 +86,10 @@ class PostgreSQLAdapter(DatabaseAdapter):
                     f"PostgreSQL: все таблицы домена '{domain_name}' существуют "
                     f"({len(expected)} шт.)"
                 )
+                await self._warn_on_stale_tables(
+                    conn, schema_sql, domain_name,
+                    db_label="PostgreSQL", default_schema="public",
+                )
                 continue
 
             logger.info(
@@ -93,8 +97,27 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing)}"
             )
 
+            # «Спутники» (CREATE INDEX / COMMENT ON) пропускаем только для
+            # уже существующих ВНЕШНИХ таблиц (директива -- @external-table:,
+            # например bus-таблица канала агента): на чужой таблице даже
+            # CREATE INDEX IF NOT EXISTS падает с «must be owner of relation».
+            # Спутники собственных существующих таблиц исполняются — иначе
+            # новый индекс из релиза молча не доехал бы до развёрнутых стендов.
+            external = self._external_tables_from_sql(schema_sql)
+            statements = []
+            for stmt in self._split_sql_statements(schema_sql):
+                target = self._companion_target_table(stmt)
+                if target is not None and target in existing and target in external:
+                    logger.debug(
+                        f"PostgreSQL: внешняя таблица {target} уже существует, "
+                        f"пропускаем сопутствующий оператор"
+                    )
+                    continue
+                statements.append(stmt)
+
             try:
-                await conn.execute(schema_sql)
+                if statements:
+                    await conn.execute("\n".join(statements))
                 logger.info(f"PostgreSQL схема выполнена: {domain_name}")
             except asyncpg.DuplicateObjectError:
                 logger.info(f"PostgreSQL: некоторые объекты уже существуют ({domain_name})")

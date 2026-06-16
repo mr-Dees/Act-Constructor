@@ -1,10 +1,27 @@
 """Тесты builder'а нарушений."""
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.shared import Emu, Twips
 
-from app.domains.acts.formatters.docx.builders.violation import build_violation
-from app.domains.acts.schemas.act_content import (
-    ViolationSchema, ViolationOptionalFieldSchema,
+from app.domains.acts.formatters.docx.builders.violation import (
+    _USABLE_WIDTH_TWIPS,
+    _decode_data_url,
+    _scale_picture,
+    build_violation,
 )
+from app.domains.acts.schemas.act_content import (
+    ViolationAdditionalContentSchema,
+    ViolationContentItemSchema,
+    ViolationOptionalFieldSchema,
+    ViolationSchema,
+)
+
+# Валидный PNG 1×1 (прозрачный пиксель) для проверки встраивания.
+_PNG_1PX_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+_PNG_1PX_DATA_URL = f"data:image/png;base64,{_PNG_1PX_B64}"
 
 
 def _v(**overrides):
@@ -73,3 +90,196 @@ def test_labels_are_underlined(doc):
     ]
     assert len(label_runs) == 4
     assert all(r.underline for r in label_runs)
+
+
+# --- Картинки дополнительного контента (M.2 / H4) ---
+
+def _img_item(**overrides):
+    base = dict(
+        id="img1", type="image", url=_PNG_1PX_DATA_URL,
+        caption="", filename="screen.png", order=0,
+    )
+    base.update(overrides)
+    return ViolationContentItemSchema(**base)
+
+
+def _v_with_items(*items):
+    return _v(additionalContent=ViolationAdditionalContentSchema(
+        enabled=True, items=list(items),
+    ))
+
+
+def test_image_embedded_as_inline_shape(doc):
+    """PNG 1×1 из data-URL встраивается в документ как inline shape."""
+    build_violation(doc, _v_with_items(_img_item()))
+    assert len(doc.inline_shapes) == 1
+
+
+def test_image_paragraph_centered(doc):
+    """Абзац с картинкой выровнен по центру (Б-1.5)."""
+    build_violation(doc, _v_with_items(_img_item()))
+    pic_para = next(
+        p for p in doc.paragraphs if p._p.findall(".//" + qn("w:drawing"))
+    )
+    assert pic_para.alignment == WD_ALIGN_PARAGRAPH.CENTER
+
+
+def test_image_caption_italic_centered_below(doc):
+    """Подпись — отдельный абзац под картинкой: курсив, по центру."""
+    build_violation(doc, _v_with_items(_img_item(caption="Скриншот экрана")))
+    cap_para = next(p for p in doc.paragraphs if "Скриншот экрана" in p.text)
+    assert cap_para.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert all(r.italic for r in cap_para.runs if r.text.strip())
+
+
+def test_broken_base64_renders_placeholder(doc):
+    """Битый base64 → текстовый плейсхолдер «Изображение: …», без исключения."""
+    build_violation(doc, _v_with_items(
+        _img_item(url="data:image/png;base64,@@не-base64@@"),
+    ))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Изображение: screen.png" in text
+    assert len(doc.inline_shapes) == 0
+
+
+def test_empty_url_renders_placeholder(doc):
+    """Пустой url (черновик без содержимого) → плейсхолдер (паритет с MD/TXT)."""
+    violation = _v_with_items(
+        ViolationContentItemSchema(
+            id="img1", type="image", url="", caption="", filename="ext.png",
+        ),
+    )
+    build_violation(doc, violation)
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Изображение: ext.png" in text
+    assert len(doc.inline_shapes) == 0
+
+
+def test_undecodable_image_bytes_render_placeholder(doc):
+    """Валидный base64, но не картинка → плейсхолдер, без исключения."""
+    build_violation(doc, _v_with_items(_img_item(url="data:image/png;base64,AAAA")))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Изображение: screen.png" in text
+    assert len(doc.inline_shapes) == 0
+
+
+# --- Whitelist форматов builder'а = whitelist схемы (единый IMAGE_DATA_URL_PATTERN) ---
+
+def test_decode_rejects_webp_and_svg():
+    """Builder отбрасывает форматы вне whitelist (webp/svg) — единый источник
+    с валидатором url схемы (IMAGE_DATA_URL_PATTERN)."""
+    # Валидный base64-payload (PNG), но MIME вне whitelist → None (плейсхолдер).
+    assert _decode_data_url(f"data:image/webp;base64,{_PNG_1PX_B64}") is None
+    assert _decode_data_url(f"data:image/svg+xml;base64,{_PNG_1PX_B64}") is None
+
+
+def test_decode_accepts_png_jpeg_gif():
+    """Builder принимает png/jpeg/gif и возвращает декодированные байты."""
+    for subtype in ("png", "jpeg", "jpg", "gif"):
+        data = _decode_data_url(f"data:image/{subtype};base64,{_PNG_1PX_B64}")
+        assert data is not None, f"формат {subtype} должен приниматься builder'ом"
+        assert isinstance(data, bytes)
+
+
+def test_image_width_50_percent_is_half_usable_width(doc):
+    """width=50 → ширина shape ≈ 5173 твип (половина полезной ширины)."""
+    build_violation(doc, _v_with_items(_img_item(width=50)))
+    shape = doc.inline_shapes[0]
+    expected = Twips(_USABLE_WIDTH_TWIPS * 50 // 100)
+    assert abs(int(shape.width) - int(expected)) <= int(Twips(1))
+    assert _USABLE_WIDTH_TWIPS == 10346  # Page 11906 − left 851 − right 709
+
+
+def test_scale_picture_caps_natural_size_at_usable_width():
+    """Без width картинка шире полезной ширины ужимается с сохранением пропорций."""
+    class _FakeShape:
+        width = Emu(int(Twips(_USABLE_WIDTH_TWIPS)) * 2)
+        height = Emu(1_000_000)
+
+    shape = _FakeShape()
+    _scale_picture(shape, 0)
+    assert int(shape.width) == int(Twips(_USABLE_WIDTH_TWIPS))
+    assert int(shape.height) == 500_000
+
+
+def test_scale_picture_keeps_natural_size_when_fits():
+    """Без width картинка уже полезной ширины остаётся в натуральном размере."""
+    class _FakeShape:
+        width = Emu(100_000)
+        height = Emu(50_000)
+
+    shape = _FakeShape()
+    _scale_picture(shape, 0)
+    assert int(shape.width) == 100_000
+    assert int(shape.height) == 50_000
+
+
+# --- Нумерация кейсов (паритет с MD/TXT и фронтом) ---
+
+def _case(content, **overrides):
+    base = dict(id=f"c_{content}", type="case", content=content)
+    base.update(overrides)
+    return ViolationContentItemSchema(**base)
+
+
+def test_cases_are_numbered_sequentially(doc):
+    """Подряд идущие кейсы нумеруются: «Кейс 1:», «Кейс 2:»."""
+    build_violation(doc, _v_with_items(_case("Первый"), _case("Второй")))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Кейс 1:" in text
+    assert "Кейс 2:" in text
+
+
+def test_case_numbering_resets_after_non_case_item(doc):
+    """Не-кейс (image/freeText) сбрасывает нумерацию — как в MD/TXT и превью."""
+    build_violation(doc, _v_with_items(
+        _case("До картинки"),
+        _img_item(),
+        _case("После картинки"),
+    ))
+    labels = [
+        r.text for p in doc.paragraphs for r in p.runs
+        if r.text.strip().startswith("Кейс")
+    ]
+    assert labels == ["Кейс 1: ", "Кейс 1: "]
+
+
+def test_empty_case_not_rendered_and_not_numbered(doc):
+    """Пустой кейс пропускается и не двигает нумерацию (как в MD/TXT)."""
+    build_violation(doc, _v_with_items(_case(""), _case("Единственный")))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Кейс 1: Единственный" in text
+    assert "Кейс 2:" not in text
+
+
+class _StubShape:
+    """Минимальный shape для юнит-теста _scale_picture (width/height — int)."""
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+
+def test_scale_picture_zero_width_does_not_crash():
+    """#7: картинка нулевой ширины не роняет экспорт (нет ZeroDivisionError)."""
+    shape = _StubShape(width=0, height=100)
+    _scale_picture(shape, width_percent=50)  # не должно бросить
+    # Размеры не тронуты — масштабировать нечего.
+    assert shape.width == 0
+    assert shape.height == 100
+
+
+def test_scale_picture_zero_width_auto_branch():
+    """#7: тот же guard в ветке width_percent=0 (натуральный размер)."""
+    shape = _StubShape(width=0, height=50)
+    _scale_picture(shape, width_percent=0)
+    assert shape.width == 0
+    assert shape.height == 50
+
+
+def test_scale_picture_normal_still_scales():
+    """Регрессия: ненулевая ширина по-прежнему масштабируется по проценту."""
+    usable = int(Twips(_USABLE_WIDTH_TWIPS))
+    shape = _StubShape(width=usable, height=usable)
+    _scale_picture(shape, width_percent=50)
+    assert shape.width == usable * 50 // 100
+    assert shape.height == shape.width  # пропорции 1:1 сохранены

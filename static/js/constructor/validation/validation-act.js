@@ -57,9 +57,10 @@ export const ValidationAct = {
      * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     validateTb() {
-        // Находим раздел 5
+        // Находим раздел 5 по id (как validateStructure): поиск по number
+        // молча пропускал проверку, пока нумерация не сгенерирована
         const section5 = (AppState.treeData?.children || []).find(
-            c => c.number && c.number === '5'
+            c => c.id === '5'
         );
         if (!section5?.children?.length) return ValidationCore.success();
 

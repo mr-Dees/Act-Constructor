@@ -38,3 +38,6 @@ AUDIT_CONVERSATION_DELETED: Final[str] = "conversation_deleted"
 AUDIT_MESSAGE_SENT: Final[str] = "message_sent"
 AUDIT_FILE_UPLOADED: Final[str] = "file_uploaded"
 AUDIT_FILE_DELETED: Final[str] = "file_deleted"
+# Обратная связь по сообщению ассистента (лайк/дизлайк):
+AUDIT_FEEDBACK_SUBMITTED: Final[str] = "feedback_submitted"
+AUDIT_FEEDBACK_CLEARED: Final[str] = "feedback_cleared"

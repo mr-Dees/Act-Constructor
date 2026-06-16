@@ -12,6 +12,7 @@ from app.db.repositories.base import BaseRepository
 from app.db.utils.json_db_utils import JSONDBUtils
 from app.domains.acts.utils import KMUtils, ActDirectivesValidator
 from app.domains.acts.schemas.act_metadata import (
+    ActAttentionItem,
     ActListItem,
     ActResponse,
     AuditTeamMember,
@@ -19,6 +20,18 @@ from app.domains.acts.schemas.act_metadata import (
 )
 
 logger = logging.getLogger("audit_workstation.db.repository.crud")
+
+
+def _parse_validation_issues(value) -> list[dict] | None:
+    """JSONB validation_issues → list[dict]. asyncpg может вернуть str/None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    return value
 
 
 class ActCrudRepository(BaseRepository):
@@ -384,7 +397,7 @@ class ActCrudRepository(BaseRepository):
     async def copy_tables(self, from_id: int, to_id: int) -> None:
         """Копирует таблицы из одного акта в другой (1 запрос).
 
-        Копирует все 6 флагов подвидов таблиц — иначе у дубликата спецтаблицы
+        Копирует подвид таблицы (kind) — иначе у дубликата спецтаблицы
         (риск/налоговые/прочие/сводные) деградируют до обычных.
         """
         await self.conn.execute(
@@ -392,16 +405,12 @@ class ActCrudRepository(BaseRepository):
             INSERT INTO {self.tables} (
                 act_id, table_id, node_id, node_number, table_label,
                 grid_data, col_widths, is_protected, is_deletable,
-                is_metrics_table, is_main_metrics_table,
-                is_regular_risk_table, is_operational_risk_table,
-                is_tax_risk_table, is_other_risk_table
+                kind
             )
             SELECT
                 $2, table_id, node_id, node_number, table_label,
                 grid_data, col_widths, is_protected, is_deletable,
-                is_metrics_table, is_main_metrics_table,
-                is_regular_risk_table, is_operational_risk_table,
-                is_tax_risk_table, is_other_risk_table
+                kind
             FROM {self.tables}
             WHERE act_id = $1
             """,
@@ -492,7 +501,9 @@ class ActCrudRepository(BaseRepository):
                 a.needs_created_date,
                 a.needs_directive_number,
                 a.needs_invoice_check,
-                a.needs_service_note
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
             FROM {self.acts} a
             INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
             WHERE atm.username = $1
@@ -514,7 +525,9 @@ class ActCrudRepository(BaseRepository):
                 a.needs_created_date,
                 a.needs_directive_number,
                 a.needs_invoice_check,
-                a.needs_service_note
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
             ORDER BY
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
@@ -545,6 +558,74 @@ class ActCrudRepository(BaseRepository):
                 needs_directive_number=row["needs_directive_number"],
                 needs_invoice_check=row["needs_invoice_check"],
                 needs_service_note=row["needs_service_note"],
+                validation_status=row["validation_status"],
+                validation_issues=_parse_validation_issues(row["validation_issues"]),
+            )
+            for row in rows
+        ]
+
+    async def get_user_acts_needing_attention(
+        self, username: str, *, limit: int = 200,
+    ) -> list[ActAttentionItem]:
+        """Возвращает ВСЕ акты пользователя, требующие внимания (без пагинации).
+
+        Сводка для колокольчика лендинга: акты с незакрытыми требованиями
+        (needs_* — фактура/дата/поручения/СЗ; поддерживаются ETL) ИЛИ
+        со структурной валидацией не 'ok' (validation_status пишется при
+        сохранении). Заблокированные (живой lock) исключаем — как делал прежний
+        клиентский живой источник. Один дешёвый запрос вместо клиентского
+        пересчёта по сотне актов; читает те же колонки, что и список.
+
+        ``limit`` — потолок размера ответа (защита от патологического payload);
+        реалистично у пользователя их кратно меньше.
+        """
+        rows = await self.conn.fetch(
+            f"""
+            SELECT
+                a.id,
+                a.inspection_name,
+                a.needs_created_date,
+                a.needs_directive_number,
+                a.needs_invoice_check,
+                a.needs_service_note,
+                a.validation_status,
+                a.validation_issues
+            FROM {self.acts} a
+            WHERE EXISTS (
+                SELECT 1 FROM {self.audit_team} atm
+                WHERE atm.act_id = a.id AND atm.username = $1
+            )
+              AND NOT (
+                a.locked_by IS NOT NULL
+                AND a.lock_expires_at IS NOT NULL
+                AND a.lock_expires_at > CURRENT_TIMESTAMP
+              )
+              AND (
+                a.needs_created_date
+                OR a.needs_directive_number
+                OR a.needs_invoice_check
+                OR a.needs_service_note
+                OR a.validation_status <> 'ok'
+              )
+            ORDER BY
+                COALESCE(a.last_edited_at, a.created_at) DESC,
+                a.created_at DESC
+            LIMIT $2
+            """,
+            username,
+            limit,
+        )
+
+        return [
+            ActAttentionItem(
+                id=row["id"],
+                inspection_name=row["inspection_name"],
+                needs_created_date=row["needs_created_date"],
+                needs_directive_number=row["needs_directive_number"],
+                needs_invoice_check=row["needs_invoice_check"],
+                needs_service_note=row["needs_service_note"],
+                validation_status=row["validation_status"],
+                validation_issues=_parse_validation_issues(row["validation_issues"]),
             )
             for row in rows
         ]
@@ -568,6 +649,7 @@ class ActCrudRepository(BaseRepository):
                 inspection_start_date, inspection_end_date,
                 needs_created_date, needs_directive_number,
                 needs_invoice_check, needs_service_note,
+                validation_status, validation_issues,
                 created_at, updated_at, created_by,
                 last_edited_by, last_edited_at
             FROM {self.acts}
@@ -641,6 +723,8 @@ class ActCrudRepository(BaseRepository):
             needs_directive_number=act_row["needs_directive_number"],
             needs_invoice_check=act_row["needs_invoice_check"],
             needs_service_note=act_row["needs_service_note"],
+            validation_status=act_row["validation_status"],
+            validation_issues=_parse_validation_issues(act_row["validation_issues"]),
             created_at=act_row["created_at"],
             updated_at=act_row["updated_at"],
             created_by=act_row["created_by"],

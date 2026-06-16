@@ -13,7 +13,7 @@ logger = logging.getLogger("audit_workstation.api.acts.management")
 from app.api.v1.deps.auth_deps import get_username
 from app.core.responses import PaginatedResponse
 from app.domains.acts.deps import get_crud_service, get_lock_service, _get_acts_settings
-from app.domains.acts.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
+from app.domains.acts.schemas.act_metadata import ActAttentionItem, ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
 from app.schemas.errors import ErrorDetail, LockErrorDetail, KmConflictDetail
 from app.domains.acts.schemas.act_responses import (
     LockConfigResponse,
@@ -40,6 +40,21 @@ async def list_user_acts(
     return PaginatedResponse[ActListItem](
         items=items, total=total, limit=limit, offset=offset,
     )
+
+
+@router.get("/attention-summary", response_model=list[ActAttentionItem])
+async def acts_attention_summary(
+        username: str = Depends(get_username),
+        service: ActCrudService = Depends(get_crud_service),
+):
+    """Сводка «мои акты, требующие внимания» для колокольчика лендинга.
+
+    Серверный пересчёт по всем актам пользователя (не по загруженной странице):
+    незакрытые требования (фактура/дата/поручения/СЗ) или структурная валидация
+    не 'ok'. Read-only; флаги меняются редко (фактура — на стороне ETL), поэтому
+    фронт опрашивает эндпоинт нечасто. Маршрут — ДО ``/{act_id}``.
+    """
+    return await service.get_attention_summary(username)
 
 
 @router.post("/{act_id}/lock", response_model=LockResponse, status_code=200, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Акт заблокирован другим пользователем", "model": LockErrorDetail}})

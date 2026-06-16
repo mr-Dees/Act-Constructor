@@ -106,7 +106,7 @@
 {% endblock %}
 
 {% block init_script %}
-<script type="module">
+<script type="module" nonce="{{ request.state.csp_nonce }}">
     import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
     import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
     import { LandingPage } from '{{ url_for('static', path='js/portal/landing/landing-page.js') | versioned }}';

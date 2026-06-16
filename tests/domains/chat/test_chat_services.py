@@ -60,6 +60,7 @@ def _make_mock_repo_with_conn():
         "status": "streaming",
     })
     repo.append_block = AsyncMock(return_value=True)
+    repo.upsert_block = AsyncMock(return_value=True)
     repo.finalize = AsyncMock(return_value=True)
     repo.mark_failed = AsyncMock(return_value=True)
     # get_streaming_drafts: пустой список — безопасный дефолт для всех тестов,

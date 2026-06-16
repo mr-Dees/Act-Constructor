@@ -115,13 +115,19 @@ class SecuritySettings(BaseModel):
     singleton_lock_stale_ttl_sec: int = Field(default=60, gt=0)
 
     # === Security response headers ===
-    # CSP пока в report-only — в шаблонах ещё много inline-обработчиков (onclick/onchange).
-    # После их выноса в JS можно переключить csp_report_only=False для enforce-режима.
+    # CSP в enforce-режиме (csp_report_only=False) с реальной защитой от инъекции
+    # inline-скриптов через per-request nonce. SecurityHeadersMiddleware генерит
+    # nonce на каждый http-запрос, подставляет его в плейсхолдер {nonce} директивы
+    # script-src и кладёт в request.state.csp_nonce; единственные inline-скрипты
+    # (init-блоки <script type="module"> в 5 шаблонах) проставляют этот nonce
+    # атрибутом. Inline-обработчиков (onclick/onchange) в шаблонах нет.
+    # style-src сохраняет 'unsafe-inline' осознанно: вынос inline-стилей —
+    # отдельный несоизмеримый объём, выходит за рамки этой задачи (follow-up).
     csp_enabled: bool = True
-    csp_report_only: bool = True
+    csp_report_only: bool = False
     csp_policy: str = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'nonce-{nonce}'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "font-src 'self' data:; "

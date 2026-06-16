@@ -4,6 +4,10 @@
 
 import { LinkFootnoteContextMenu } from '../context-menu/context-menu-links-footnotes.js';
 import { TextBlockManager } from './textblock-core.js';
+// Ниже на module-level оборачивается handleEditorFocus — базовый метод должен
+// быть уже навешен на прототип (textblock-editor.js), независимо от того,
+// кто импортировал этот модуль первым (entry или, например, acts-menu).
+import './textblock-editor.js';
 
 // Создаем глобальный экземпляр менеджера контекстного меню
 export const linkFootnoteContextMenu = new LinkFootnoteContextMenu();
@@ -26,125 +30,74 @@ Object.assign(TextBlockManager.prototype, {
      * Создает или редактирует гиперссылку
      */
     createOrEditLink() {
-        if (!this.activeEditor) return;
-
-        const selection = window.getSelection();
-
-        if (!selection || selection.isCollapsed) {
-            alert('Выделите текст для создания гиперссылки');
-            return;
-        }
-
-        let existingLink = this.findParentLink(selection.anchorNode);
-        const isEditing = !!existingLink;
-        const currentUrl = existingLink ? existingLink.getAttribute('data-link-url') : '';
-
-        const url = prompt('Введите URL гиперссылки:', currentUrl);
-
-        if (url === null) return;
-
-        if (!url.trim()) {
-            if (existingLink) {
-                this.removeLinkOrFootnote(existingLink);
-            }
-            return;
-        }
-
-        const range = selection.getRangeAt(0);
-        let selectedText = range.toString();
-
-        if (isEditing) {
-            existingLink.setAttribute('data-link-url', url);
-            this.attachLinkFootnoteHandlers();
-        } else {
-            const trailingSpaces = selectedText.match(/\s+$/);
-            const trailingSpaceText = trailingSpaces ? trailingSpaces[0] : '';
-            selectedText = selectedText.trimEnd();
-
-            if (!selectedText) {
-                alert('Текст ссылки не может состоять только из пробелов');
-                return;
-            }
-
-            const linkId = 'link_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-
-            const linkSpan = document.createElement('span');
-            linkSpan.className = 'text-link';
-            linkSpan.setAttribute('data-link-id', linkId);
-            linkSpan.setAttribute('data-link-url', url);
-            linkSpan.contentEditable = 'false';
-            linkSpan.textContent = selectedText;
-
-            range.deleteContents();
-            range.insertNode(linkSpan);
-
-            this.inheritFormattingToElement(linkSpan);
-
-            let spaceNode = null;
-            if (trailingSpaceText) {
-                spaceNode = document.createTextNode(trailingSpaceText);
-                linkSpan.parentNode.insertBefore(spaceNode, linkSpan.nextSibling);
-            }
-
-            const nextNode = spaceNode ? spaceNode.nextSibling : linkSpan.nextSibling;
-            const needsSpace = !spaceNode &&
-                (!nextNode ||
-                    (nextNode.nodeType === 3 && !nextNode.textContent.startsWith(' ')) ||
-                    (nextNode.nodeType === 1));
-
-            if (needsSpace) {
-                const space = document.createTextNode(' ');
-                if (spaceNode) {
-                    spaceNode.parentNode.insertBefore(space, spaceNode.nextSibling);
-                } else {
-                    linkSpan.parentNode.insertBefore(space, linkSpan.nextSibling);
-                }
-                spaceNode = space;
-            }
-
-            if (spaceNode) {
-                range.setStartAfter(spaceNode);
-                range.setEndAfter(spaceNode);
-            } else {
-                range.setStartAfter(linkSpan);
-                range.setEndAfter(linkSpan);
-            }
-
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-
-            this.attachLinkFootnoteHandlers();
-        }
-
-        const textBlockId = this.activeEditor.dataset.textBlockId;
-        this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        this._createOrEditInlineMarker({
+            find: (node) => this.findParentLink(node),
+            valueAttr: 'data-link-url',
+            idAttr: 'data-link-id',
+            idPrefix: 'link_',
+            className: 'text-link',
+            promptLabel: 'Введите URL гиперссылки:',
+            selectAlert: 'Выделите текст для создания гиперссылки',
+            spacesAlert: 'Текст ссылки не может состоять только из пробелов',
+        });
     },
 
     /**
      * Создает или редактирует сноску
      */
     createOrEditFootnote() {
+        this._createOrEditInlineMarker({
+            find: (node) => this.findParentFootnote(node),
+            valueAttr: 'data-footnote-text',
+            idAttr: 'data-footnote-id',
+            idPrefix: 'footnote_',
+            className: 'text-footnote',
+            promptLabel: 'Введите текст сноски:',
+            selectAlert: 'Выделите текст для создания сноски',
+            spacesAlert: 'Текст сноски не может состоять только из пробелов',
+        });
+    },
+
+    /**
+     * Общий поток создания/редактирования inline-маркера (ссылка/сноска):
+     * поиск существующего маркера в выделении → prompt значения → обновление
+     * атрибута существующего ЛИБО вставка нового span с наследованием
+     * форматирования и пробелом-разделителем после маркера.
+     * @private
+     * @param {Object} cfg Конфигурация разновидности маркера
+     * @param {function(Node): (HTMLElement|null)} cfg.find Поиск существующего маркера от узла выделения
+     * @param {string} cfg.valueAttr Атрибут значения (URL / текст сноски)
+     * @param {string} cfg.idAttr Атрибут идентификатора маркера
+     * @param {string} cfg.idPrefix Префикс генерируемого id
+     * @param {string} cfg.className CSS-класс маркера
+     * @param {string} cfg.promptLabel Заголовок prompt
+     * @param {string} cfg.selectAlert Сообщение «выделите текст»
+     * @param {string} cfg.spacesAlert Сообщение «текст из одних пробелов»
+     */
+    _createOrEditInlineMarker(cfg) {
         if (!this.activeEditor) return;
 
         const selection = window.getSelection();
 
         if (!selection || selection.isCollapsed) {
-            alert('Выделите текст для создания сноски');
+            alert(cfg.selectAlert);
             return;
         }
 
-        let existingFootnote = this.findParentFootnote(selection.anchorNode);
-        const isEditing = !!existingFootnote;
-        const currentNote = existingFootnote ? existingFootnote.getAttribute('data-footnote-text') : '';
+        // Ищем существующий маркер от НАЧАЛА выделения: при обратном выделении
+        // (снизу вверх / справа налево) anchorNode — это конец выделения, и
+        // маркер в начале не находился (создавался вложенный дубль).
+        const existing = cfg.find(selection.getRangeAt(0).startContainer);
+        const isEditing = !!existing;
+        const currentValue = existing ? existing.getAttribute(cfg.valueAttr) : '';
 
-        const noteText = prompt('Введите текст сноски:', currentNote);
+        const value = prompt(cfg.promptLabel, currentValue);
 
-        if (noteText === null) return;
+        if (value === null) return;
 
-        if (!noteText.trim()) {
-            if (existingFootnote) {
-                this.removeLinkOrFootnote(existingFootnote);
+        if (!value.trim()) {
+            if (existing) {
+                this.removeLinkOrFootnote(existing);
             }
             return;
         }
@@ -153,7 +106,7 @@ Object.assign(TextBlockManager.prototype, {
         let selectedText = range.toString();
 
         if (isEditing) {
-            existingFootnote.setAttribute('data-footnote-text', noteText);
+            existing.setAttribute(cfg.valueAttr, value);
             this.attachLinkFootnoteHandlers();
         } else {
             const trailingSpaces = selectedText.match(/\s+$/);
@@ -161,31 +114,31 @@ Object.assign(TextBlockManager.prototype, {
             selectedText = selectedText.trimEnd();
 
             if (!selectedText) {
-                alert('Текст сноски не может состоять только из пробелов');
+                alert(cfg.spacesAlert);
                 return;
             }
 
-            const footnoteId = 'footnote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            const markerId = cfg.idPrefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
-            const footnoteSpan = document.createElement('span');
-            footnoteSpan.className = 'text-footnote';
-            footnoteSpan.setAttribute('data-footnote-id', footnoteId);
-            footnoteSpan.setAttribute('data-footnote-text', noteText);
-            footnoteSpan.contentEditable = 'false';
-            footnoteSpan.textContent = selectedText;
+            const markerSpan = document.createElement('span');
+            markerSpan.className = cfg.className;
+            markerSpan.setAttribute(cfg.idAttr, markerId);
+            markerSpan.setAttribute(cfg.valueAttr, value);
+            markerSpan.contentEditable = 'false';
+            markerSpan.textContent = selectedText;
 
             range.deleteContents();
-            range.insertNode(footnoteSpan);
+            range.insertNode(markerSpan);
 
-            this.inheritFormattingToElement(footnoteSpan);
+            this.inheritFormattingToElement(markerSpan);
 
             let spaceNode = null;
             if (trailingSpaceText) {
                 spaceNode = document.createTextNode(trailingSpaceText);
-                footnoteSpan.parentNode.insertBefore(spaceNode, footnoteSpan.nextSibling);
+                markerSpan.parentNode.insertBefore(spaceNode, markerSpan.nextSibling);
             }
 
-            const nextNode = spaceNode ? spaceNode.nextSibling : footnoteSpan.nextSibling;
+            const nextNode = spaceNode ? spaceNode.nextSibling : markerSpan.nextSibling;
             const needsSpace = !spaceNode &&
                 (!nextNode ||
                     (nextNode.nodeType === 3 && !nextNode.textContent.startsWith(' ')) ||
@@ -196,7 +149,7 @@ Object.assign(TextBlockManager.prototype, {
                 if (spaceNode) {
                     spaceNode.parentNode.insertBefore(space, spaceNode.nextSibling);
                 } else {
-                    footnoteSpan.parentNode.insertBefore(space, footnoteSpan.nextSibling);
+                    markerSpan.parentNode.insertBefore(space, markerSpan.nextSibling);
                 }
                 spaceNode = space;
             }
@@ -205,8 +158,8 @@ Object.assign(TextBlockManager.prototype, {
                 range.setStartAfter(spaceNode);
                 range.setEndAfter(spaceNode);
             } else {
-                range.setStartAfter(footnoteSpan);
-                range.setEndAfter(footnoteSpan);
+                range.setStartAfter(markerSpan);
+                range.setEndAfter(markerSpan);
             }
 
             range.collapse(true);
@@ -449,59 +402,48 @@ Object.assign(TextBlockManager.prototype, {
         const footnotes = this.activeEditor.querySelectorAll('.text-footnote');
 
         [...links, ...footnotes].forEach(element => {
-            // Удаляем старые обработчики
-            if (element._contextmenuHandler) {
-                element.removeEventListener('contextmenu', element._contextmenuHandler);
-            }
-            if (element._mouseenterHandler) {
-                element.removeEventListener('mouseenter', element._mouseenterHandler);
-            }
-            if (element._mouseleaveHandler) {
-                element.removeEventListener('mouseleave', element._mouseleaveHandler);
-            }
-            if (element._dblclickHandler) {
-                element.removeEventListener('dblclick', element._dblclickHandler);
-            }
+            // Снимаем ВЕСЬ предыдущий набор слушателей разом (включая
+            // click-capture, который раньше навешивался анонимно и копился).
+            // Покрывает и initial tooltip-обработчики (_attachInitialTooltipHandlers
+            // навешивает свой набор через тот же _lfAbort).
+            if (element._lfAbort) element._lfAbort.abort();
+            const controller = new AbortController();
+            element._lfAbort = controller;
+            const { signal } = controller;
 
             // Обработчик контекстного меню (ПКМ)
-            element._contextmenuHandler = (e) => {
+            element.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 linkFootnoteContextMenu.show(e.clientX, e.clientY, {element});
-            };
+            }, { signal });
 
             // Обработчик двойного клика (ЛКМ x2)
-            element._dblclickHandler = (e) => {
+            element.addEventListener('dblclick', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 this.enableInlineEditing(element);
-            };
+            }, { signal });
 
             // Обработчик наведения для tooltip
-            element._mouseenterHandler = (e) => {
+            element.addEventListener('mouseenter', (e) => {
                 if (element.classList.contains('editing-mode')) return;
 
                 this.tooltipTimeout = setTimeout(() => {
                     this.showTooltip(element, e);
                 }, 700);
-            };
+            }, { signal });
 
             // Обработчик ухода мыши
-            element._mouseleaveHandler = () => {
+            element.addEventListener('mouseleave', () => {
                 this.hideTooltip();
-            };
+            }, { signal });
 
-            // Привязываем обработчики
-            element.addEventListener('contextmenu', element._contextmenuHandler);
-            element.addEventListener('dblclick', element._dblclickHandler);
-            element.addEventListener('mouseenter', element._mouseenterHandler);
-            element.addEventListener('mouseleave', element._mouseleaveHandler);
-
-            // Предотвращаем случайное редактирование
+            // Предотвращаем случайное редактирование (capture-фаза)
             element.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-            }, true);
+            }, { capture: true, signal });
         });
     }
 });

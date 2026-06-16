@@ -15,6 +15,7 @@ Middleware для FastAPI приложения.
 import asyncio
 import json
 import logging
+import secrets
 import uuid
 from datetime import datetime, timedelta
 
@@ -221,6 +222,13 @@ class SecurityHeadersMiddleware:
 
     Заголовки добавляются НЕ перезаписывая уже выставленные приложением
     (например, если эндпоинт явно сменил CSP).
+
+    CSP в enforce-режиме защищён per-request nonce: для каждого http-запроса
+    генерируется свежий nonce (``secrets.token_urlsafe``), кладётся в
+    ``scope["state"]["csp_nonce"]`` (доступен шаблонам через
+    ``request.state.csp_nonce``) и подставляется в плейсхолдер ``{nonce}``
+    директивы ``script-src``. Так inline-скрипты с верным ``nonce``-атрибутом
+    исполняются, а инъектированные злоумышленником — нет.
     """
 
     def __init__(self, app, settings: Settings):
@@ -232,7 +240,10 @@ class SecurityHeadersMiddleware:
             if sec.csp_report_only
             else b"content-security-policy"
         )
-        self._csp_value = sec.csp_policy.encode()
+        # Политика — шаблон-строка с плейсхолдером {nonce} в script-src.
+        # Реальный nonce подставляется в send_wrapper на каждый запрос.
+        self._csp_policy_template = sec.csp_policy
+        self._csp_has_nonce = "{nonce}" in sec.csp_policy
         self._hsts_enabled = sec.hsts_enabled
         hsts_directives = [f"max-age={sec.hsts_max_age}"]
         if sec.hsts_include_subdomains:
@@ -257,6 +268,17 @@ class SecurityHeadersMiddleware:
 
         is_https = scope.get("scheme") == "https"
 
+        # Per-request nonce: генерируем ДО рендера роутом и кладём в state,
+        # чтобы шаблон проставил его inline-скриптам. Тот же nonce уходит в
+        # заголовок CSP ниже — значения совпадают по построению.
+        # request.state.csp_nonce публикуется ВСЕГДА (пустая строка, когда CSP
+        # выключен или в политике нет плейсхолдера {nonce}): шаблоны читают его
+        # безусловно, и отсутствие атрибута сломало бы рендер при StrictUndefined.
+        csp_nonce = ""
+        if self._csp_enabled and self._csp_has_nonce:
+            csp_nonce = secrets.token_urlsafe(16)
+        scope.setdefault("state", {})["csp_nonce"] = csp_nonce
+
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
@@ -271,7 +293,10 @@ class SecurityHeadersMiddleware:
                 add(b"referrer-policy", self._referrer_policy)
                 add(b"permissions-policy", self._permissions_policy)
                 if self._csp_enabled:
-                    add(self._csp_header_name, self._csp_value)
+                    csp_value = self._csp_policy_template.replace(
+                        "{nonce}", csp_nonce
+                    )
+                    add(self._csp_header_name, csp_value.encode())
                 if self._hsts_enabled and is_https:
                     add(b"strict-transport-security", self._hsts_value)
 

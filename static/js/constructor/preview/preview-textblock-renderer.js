@@ -41,13 +41,15 @@ export class PreviewTextBlockRenderer {
 
         this._applyFormatting(content, textBlock.formatting);
         // textBlock.content — пользовательский HTML, см. C-XSS-1.
-        SafeHTML.set(content, textBlock.content);
+        // Профиль 'acts' — allowlist, синхронный с бэк-санитайзером (5.2.3).
+        SafeHTML.set(content, textBlock.content, 'acts');
 
         return content;
     }
 
     /**
-     * Применяет форматирование к элементу
+     * Применяет форматирование к элементу (M.6: и bold/italic/underline —
+     * контейнером, паритет с DOCX-рендером заданного formatting)
      * @private
      */
     static _applyFormatting(element, formatting) {
@@ -59,6 +61,18 @@ export class PreviewTextBlockRenderer {
 
         if (formatting.alignment) {
             element.style.textAlign = formatting.alignment;
+        }
+
+        if (formatting.bold) {
+            element.style.fontWeight = 'bold';
+        }
+
+        if (formatting.italic) {
+            element.style.fontStyle = 'italic';
+        }
+
+        if (formatting.underline) {
+            element.style.textDecoration = 'underline';
         }
     }
 }

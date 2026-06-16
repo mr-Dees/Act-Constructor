@@ -6,7 +6,6 @@
  */
 import { App } from './app.js';
 import { FormatMenuManager } from './header/format-menu-manager.js';
-import { ItemsRenderer } from './items/items-renderer.js';
 import { StorageManager } from './storage-manager.js';
 import { ValidationAct } from './validation/validation-act.js';
 import { ValidationTable } from './validation/validation-table.js';
@@ -73,6 +72,12 @@ export class NavigationManager {
             return;
         }
 
+        // Воронка «Сохранить и экспортировать»: коммитим зависшие правки
+        // (textblock в debounce, ячейка таблицы) ДО валидации и чтения
+        // exportData() в save/export. Save/export-методы api.js флашат повторно
+        // (идемпотентно), но валидация ниже тоже читает state — флашим здесь.
+        StorageManager._flushPendingEdits();
+
         // Получаем выбранные действия
         const selectedFormats = FormatMenuManager.getSelectedFormats();
         const shouldSaveToDb = selectedFormats.includes('db');
@@ -87,16 +92,15 @@ export class NavigationManager {
             return;
         }
 
-        // Валидация структуры акта (только для экспорта)
-        if (exportFormats.length > 0) {
-            if (!this._validateStructure()) return;
-            if (!this._validateTables()) return;
-        }
+        // Предупреждения о незаполненности (пустые таблицы, ТБ) — всегда,
+        // не блокируют (#8: WIP-акт сохраняется в БД как есть).
+        this._showContentWarnings();
 
-        // Синхронизация данных из DOM в AppState
-        if (typeof ItemsRenderer !== 'undefined') {
-            ItemsRenderer.syncDataToState();
-        }
+        // Экспорт в файл требует валидной структуры: сломанная структура даёт
+        // битый документ. Сохранение «только в БД» НЕ блокируется — акт
+        // сохраняется и помечается статусом валидации на бэке (источник истины),
+        // конкретику покажут уведомления и карточка акта.
+        if (exportFormats.length > 0 && !this._validateForExport()) return;
 
         // Блокируем кнопку
         generateBtn.disabled = true;
@@ -198,12 +202,14 @@ export class NavigationManager {
     }
 
     /**
-     * Валидация таблиц
+     * Валидация ПЕРЕД ЭКСПОРТОМ в файл: только error-уровень (структура +
+     * заголовки таблиц). Сломанная структура даёт битый документ — экспорт
+     * блокируем. Сохранение в БД эту проверку НЕ проходит (#8).
      * @private
-     * @returns {boolean} true если валидация прошла успешно
+     * @returns {boolean} true если структура пригодна для экспорта
      */
-    static _validateTables() {
-        // Критическая проверка заголовков таблиц
+    static _validateForExport() {
+        if (!this._validateStructure()) return false;
         const headerCheckResult = ValidationTable.validateHeaders();
         if (!headerCheckResult.valid) {
             Notifications.error(
@@ -212,28 +218,31 @@ export class NavigationManager {
             );
             return false;
         }
+        return true;
+    }
 
-        // Предупреждение о пустых таблицах
+    /**
+     * Показывает НЕблокирующие предупреждения о незаполненности (пустые
+     * таблицы, не назначенные ТБ). Сохранение не прерывается.
+     * @private
+     */
+    static _showContentWarnings() {
         const dataCheckResult = ValidationTable.validateData();
-        if (!dataCheckResult.valid) {
+        if (dataCheckResult.isWarning) {
             Notifications.show(
                 dataCheckResult.message,
-                'info',
+                'warning',
                 AppConfig.notifications.duration.warning
             );
         }
-
-        // Предупреждение о незаполненных ТБ
         const tbCheckResult = ValidationAct.validateTb();
-        if (!tbCheckResult.valid) {
+        if (tbCheckResult.isWarning) {
             Notifications.show(
                 tbCheckResult.message,
-                'info',
+                'warning',
                 AppConfig.notifications.duration.warning
             );
         }
-
-        return true;
     }
 }
 

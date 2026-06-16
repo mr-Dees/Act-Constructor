@@ -13,6 +13,7 @@ import { AppState } from '../state/state-core.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { pixelWidthsToWeights } from './col-widths.js';
 import { makeIdempotentTeardown } from './resize-teardown.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 export class TableSizes {
     constructor(tableManager) {
@@ -52,8 +53,9 @@ export class TableSizes {
         const startRightPct = (cols[rightIdx].offsetWidth || this._colPixelWidth(table, rightIdx)) / tableWidth * 100;
         const pairPct = startLeftPct + startRightPct;
 
-        // Минимальная ширина колонки в процентах (80px от ширины таблицы).
-        const minPct = (80 / tableWidth) * 100;
+        // Минимальная ширина колонки в процентах (min_col_width_px от ширины
+        // таблицы; источник — настройки ACTS__TABLES__ через /limits).
+        const minPct = (getStructureLimits().minColWidthPx / tableWidth) * 100;
 
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';

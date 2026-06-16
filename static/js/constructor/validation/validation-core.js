@@ -34,13 +34,15 @@ export const ValidationCore = {
     },
 
     /**
-     * Создает результат-предупреждение (не блокирует операцию)
+     * Создает результат-предупреждение (не блокирует операцию).
+     * valid === true: предупреждение информирует, но не запрещает действие;
+     * вызывающий код различает его по флагу isWarning.
      * @param {string} message - Сообщение-предупреждение
      * @returns {Object} Результат валидации с флагом isWarning
      */
     warning(message) {
         return {
-            valid: false,
+            valid: true,
             message,
             isWarning: true
         };
@@ -144,23 +146,19 @@ export const ValidationCore = {
      * @returns {Object} Объединенный результат
      */
     combine(...results) {
-        const failures = results.filter(r => !r.valid);
-
-        if (failures.length === 0) {
-            return this.success();
-        }
-
-        // Разделяем ошибки и предупреждения
-        const errors = failures.filter(f => !f.isWarning);
-        const warnings = failures.filter(f => f.isWarning);
-
-        // Если есть хоть одна ошибка, возвращаем ошибку
+        // Ошибки (valid: false) доминируют: хотя бы одна — итог блокирующий
+        const errors = results.filter(r => !r.valid);
         if (errors.length > 0) {
             const messages = errors.map(f => f.message).filter(Boolean);
             return this.failure(messages.join('\n'));
         }
 
-        // Иначе возвращаем предупреждение
+        // Предупреждения не блокируют (valid: true, isWarning: true)
+        const warnings = results.filter(r => r.isWarning);
+        if (warnings.length === 0) {
+            return this.success();
+        }
+
         const messages = warnings.map(f => f.message).filter(Boolean);
         return this.warning(messages.join('\n'));
     },

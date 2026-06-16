@@ -69,8 +69,11 @@
     box-shadow: var(--shadow-md), 0 0 var(--spacing-lg) var(--act-attention-border);
 }
 
-/* Карточка с критичным требованием проверки фактуры (только красная) */
-.act-card.needs-invoice:not(.needs-attention) {
+/* Критичная карточка (только красная): проверка фактуры ИЛИ структурная
+   ОШИБКА содержимого (#8 — error приравнен к фактуре). Текст-описание ошибок
+   структуры — в data-tooltip и в уведомлениях (колокольчик/toast). */
+.act-card.needs-invoice:not(.needs-attention),
+.act-card.validation-error:not(.needs-attention) {
     background: var(--act-critical-bg);
     border-color: var(--act-critical-border);
     border-width: var(--border-width-thick);
@@ -79,13 +82,16 @@
     position: relative;
 }
 
-.act-card.needs-invoice:not(.needs-attention):hover {
+.act-card.needs-invoice:not(.needs-attention):hover,
+.act-card.validation-error:not(.needs-attention):hover {
     border-color: var(--error-hover);
     box-shadow: 0 0 var(--spacing-xl) var(--act-critical-glow);
 }
 
-/* Карточка с обоими требованиями (красная рамка + желтое тело) - САМОЕ СПЕЦИФИЧНОЕ ПРАВИЛО */
-.act-card.needs-invoice.needs-attention {
+/* Карточка критичная + жёлтое тело метаданных (красная рамка + жёлтый фон) -
+   САМОЕ СПЕЦИФИЧНОЕ ПРАВИЛО. Критичность — фактура ИЛИ структурная ошибка (#8). */
+.act-card.needs-invoice.needs-attention,
+.act-card.validation-error.needs-attention {
     background: var(--act-attention-bg) !important;
     border-color: var(--act-critical-border);
     border-width: var(--border-width-thick);
@@ -94,7 +100,8 @@
     position: relative;
 }
 
-.act-card.needs-invoice.needs-attention:hover {
+.act-card.needs-invoice.needs-attention:hover,
+.act-card.validation-error.needs-attention:hover {
     border-color: var(--error-hover);
     box-shadow: 0 0 var(--spacing-xl) var(--act-critical-glow);
 }
@@ -109,8 +116,9 @@
     transform: translateY(calc(-1 * var(--button-hover-translate)));
 }
 
-/* Подсветка кнопки редактирования для критичных актов */
-.act-card.needs-invoice .act-card-actions .btn[data-action="edit"] {
+/* Подсветка кнопки редактирования для критичных актов (фактура или ошибка #8) */
+.act-card.needs-invoice .act-card-actions .btn[data-action="edit"],
+.act-card.validation-error .act-card-actions .btn[data-action="edit"] {
     animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite,
     criticalGlow 2s var(--ease-in-out-smooth) infinite;
 }
@@ -279,40 +287,47 @@
     filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-locked-border));
 }
 
-/* Цвета tooltip для карточек требующих внимания (только желтые) */
-.act-card.needs-attention:not(.needs-invoice)[data-tooltip]:hover::after {
+/* Цвета tooltip для карточек требующих внимания (только желтые). Исключаем
+   validation-error — у структурной ошибки tooltip должен быть красным, как у
+   фактуры, даже если есть жёлтое тело незаполненных полей метаданных. */
+.act-card.needs-attention:not(.needs-invoice):not(.validation-error)[data-tooltip]:hover::after {
     background: var(--warning);
     color: var(--text-on-primary);
     border-color: var(--act-attention-border);
 }
 
-.act-card.needs-attention:not(.needs-invoice)[data-tooltip]:hover::before {
+.act-card.needs-attention:not(.needs-invoice):not(.validation-error)[data-tooltip]:hover::before {
     border-top-color: var(--warning);
     filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-attention-border));
 }
 
-/* Цвета tooltip для критичных карточек (только красные) */
-.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::after {
+/* Цвета tooltip для критичных карточек (только красные): фактура ИЛИ
+   структурная ОШИБКА содержимого (#8 — error ведёт себя как фактура). */
+.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::after,
+.act-card.validation-error:not(.needs-attention)[data-tooltip]:hover::after {
     background: var(--error);
     color: var(--text-on-primary);
     border-color: var(--act-critical-border);
     animation: tooltipFadeInTop var(--transition-base), criticalTooltipPulse 2s var(--ease-in-out-smooth) infinite;
 }
 
-.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::before {
+.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::before,
+.act-card.validation-error:not(.needs-attention)[data-tooltip]:hover::before {
     border-top-color: var(--error);
     filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-critical-border));
 }
 
-/* Цвета tooltip для карточек с обоими требованиями (красный) */
-.act-card.needs-invoice.needs-attention[data-tooltip]:hover::after {
+/* Цвета tooltip для критичной карточки с жёлтым телом метаданных (красный) */
+.act-card.needs-invoice.needs-attention[data-tooltip]:hover::after,
+.act-card.validation-error.needs-attention[data-tooltip]:hover::after {
     background: var(--error);
     color: var(--text-on-primary);
     border-color: var(--act-critical-border);
     animation: tooltipFadeInTop var(--transition-base), criticalTooltipPulse 2s var(--ease-in-out-smooth) infinite;
 }
 
-.act-card.needs-invoice.needs-attention[data-tooltip]:hover::before {
+.act-card.needs-invoice.needs-attention[data-tooltip]:hover::before,
+.act-card.validation-error.needs-attention[data-tooltip]:hover::before {
     border-top-color: var(--error);
     filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-critical-border));
 }

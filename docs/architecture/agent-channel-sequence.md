@@ -15,14 +15,18 @@
 
 ## 0. Модель данных и режимы
 
-**Bus-таблица `chat_agent_messages_bus`** (единая, заменяет прежние три таблицы):
-`id` (VARCHAR(36)), `chat_id`, `user_id`, `conversation_id`,
-`role` CHECK(`user`/`assistant`/`tool`), `content` TEXT, `media` JSONB,
-`metadata` JSONB, `reply_to`, `buttons` JSONB,
-`status` CHECK(`pending`/`in_progress`/`complete`/`error`/`timeout`),
-`created_at`, `updated_at`. На Greenplum: PK `(id, chat_id)`,
-`DISTRIBUTED BY (chat_id)`. Роль `tool` разрешена схемой, но приложением пока не
-обрабатывается.
+**Bus-таблица `chat_agent_messages_bus`** (структуру задаёт и таблицей владеет
+сторона внешнего агента; отдельной колонки `conversation_id` нет):
+`id` UUID — uid одного сообщения шины, `chat_id` TEXT — uid треда, `user_id` TEXT,
+`role` (`user`/`assistant`/`system`, CHECK владельца), `content` TEXT NOT NULL,
+`media` JSONB, `metadata` JSONB (`metadata.reasoning` — стримящиеся рассуждения
+агента), `reply_to` UUID — **на строке-ответе**, ссылается на id вопроса,
+`buttons` JSONB, `status` (`pending`/`processing`/`completed`/`failed` — CHECK
+владельца, подтверждённая спека; записи статуса от AW best-effort),
+`created_at`/`updated_at` TIMESTAMPTZ NOT NULL (у владельца есть DEFAULT'ы,
+AW не полагается). GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`. Роль
+`system` приложением не обрабатывается. Сообщения одного `chat_id` агент
+не обрабатывает параллельно.
 
 **Связь с чатом**: `chat_messages.agent_ref VARCHAR(36)` — ссылка из
 ассистент-сообщения (draft) на `id` строки-вопроса в шине.
@@ -71,16 +75,16 @@ sequenceDiagram
         end
         Note over F: при status='complete'/'failed'<br/>рендер ответа целиком + «эффект печати»
     and внешний агент
-        EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='in_progress'
-        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', status='complete')<br/>+ UPDATE reply_to на вопросе
+        EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='processing' (claim)
+        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', reply_to=question_uid),<br/>стримит reasoning-дельты в metadata.reasoning,<br/>пишет content и status='completed' + UPDATE вопроса status='completed'
     and поллер шины
         loop adaptive backoff (без удержания conn в sleep)
-            POLL->>CS: try_finalize(assistant_message_id, question_uid)
+            POLL->>CS: poll_once(assistant_message_id, question_uid, ...)
             CS->>DB: SELECT вопрос по question_uid
-            alt reply_to не выставлен
+            alt строки-ответа ещё нет
                 CS-->>POLL: 'pending'
             else агент ответил
-                CS->>DB: SELECT ответ по reply_to
+                CS->>DB: SELECT ответ WHERE reply_to=question_uid<br/>AND role='assistant'
                 alt answer.status == 'error'
                     CS->>DB: mark_failed (error-блок)
                 else
@@ -95,13 +99,22 @@ sequenceDiagram
 **Ключевые контракты:**
 
 - **Поллер — единственный writer** в `chat_messages` для draft'а: `create_streaming`
-  на старте, `finalize`/`mark_failed` по результату `try_finalize`. Фронт лишь
+  на старте, `finalize`/`mark_failed` по результату `poll_once`. Фронт лишь
   опрашивает готовность.
-- **Таймаут**: при превышении `ANSWER_TIMEOUT_SEC` (600) поллер вызывает
-  `mark_timeout` → draft → `failed` с error-блоком (`build_timeout_error_block`),
-  вопросу в шине ставится `status='timeout'`.
+- **Таймаут**: двухфазный — `CLAIM_TIMEOUT_SEC` (1800) пока `pending`, `ANSWER_TIMEOUT_SEC` (600) пока `processing`. Поллер вызывает
+  `mark_timeout(reason='claim'|'answer')` → draft → `failed` с error-блоком (`build_timeout_error_block`);
+  вопрос в шине best-effort закрывается `status='failed'` (если CHECK владельца
+  отклонит — строка останется, слот лимита освобождает двойная отсечка
+  возрасту в `count_active_for_user`).
 - **Reconcile после рестарта**: поллер при старте поднимает подписки из
   streaming-черновиков `chat_messages` (`get_streaming_drafts`).
+- **Аварийное снятие подписки**: ошибка обработки одной подписки в тике
+  ретраится (idle-таймер продолжает тикать), но серия из
+  `_MAX_CONSECUTIVE_ENTRY_ERRORS` (30) ошибок ПОДРЯД — признак «отравленной»
+  подписки (например, сменилась структура bus-таблицы): подписка снимается,
+  draft best-effort финализируется error-блоком через `mark_timeout`.
+  Полный отказ БД до счётчиков не доходит — ловится в `_run` на получении
+  коннекта.
 
 ---
 
@@ -129,7 +142,7 @@ sequenceDiagram
         ORCH->>FT: tool_call
         FT->>CS: submit(mode='adaptive', ...)
         CS->>DB: INSERT вопрос (pending)<br/>+ create_streaming draft (status='streaming')
-        Note over POLL: поллер подхватит draft и<br/>финализирует через try_finalize<br/>(см. диаграмму §1)
+        Note over POLL: поллер подхватит draft и<br/>финализирует через poll_once<br/>(см. диаграмму §1)
     end
     API-->>F: 200 {"message_id": assistant_message_id}
     loop пока status == 'streaming'
@@ -149,7 +162,7 @@ sequenceDiagram
 `AgentChannelService.map_answer_to_blocks(row)` собирает список блоков из
 строки-ответа в порядке:
 
-1. **reasoning** — из `metadata.thinking` (если есть);
+1. **reasoning** — из `metadata.reasoning`, legacy `metadata.thinking` (если есть);
 2. **text** — `content` (обрезается до `MAX_BLOCK_TEXT_SIZE` = 262144);
 3. **buttons** — из `buttons` JSONB, `block_id` шаблоном `{id}:btn:0`;
    `button_translator.translate_buttons` переводит `action_id` ChatTool в
@@ -165,6 +178,10 @@ sequenceDiagram
 Если активных запросов пользователя `>= max_parallel_streams_per_user`
 (`CHAT__MAX_PARALLEL_STREAMS_PER_USER`, default 3) — бросается `ChatLimitError`
 → HTTP 422 с дружелюбным сообщением, ни вопрос, ни draft не создаются.
+Счёт идёт с двойной отсечкой: `pending`-строки — по `created_at` (окно `CLAIM_TIMEOUT_SEC`),
+`processing`-строки — по `updated_at` (окно `ANSWER_TIMEOUT_SEC`): вопрос,
+которому не удалось записать терминальный статус (CHECK владельца шины),
+не занимает слот навсегда.
 
 ---
 
@@ -172,11 +189,13 @@ sequenceDiagram
 
 | Случай | Что произойдёт |
 |---|---|
-| Поллер ещё не дошёл до `try_finalize`, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик поллера выполнит `finalize`, фронт увидит `complete` на очередном опросе |
-| Агент проставил `reply_to`, но строка-ответ не найдена | `try_finalize` логирует предупреждение и оставляет draft в `streaming` до таймаута |
-| Ответ агента со `status='error'` | `try_finalize` → `mark_failed` с error-блоком из ответа + закрывает вопрос (`status='error'`), фронт показывает крестик |
-| Агент проставил `reply_to`, но не выставил терминальный `status` | `try_finalize` сам закрывает вопрос (`status='complete'`) после финализации — слот лимита освобождается, не зависая в `pending` |
-| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), вопрос в шине → `timeout` |
+| Поллер ещё не дошёл до финализации, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик `poll_once` выполнит `finalize`, фронт увидит `complete` на очередном опросе |
+| Строка-ответ есть, но статус нетерминальный (`pending`/`processing`) | `poll_once` → `outcome='pending'` — агент ещё стримит ответ; reasoning-блок черновика дозаполняется инкрементально |
+| Ответ агента со `status='failed'` | `poll_once` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='failed'`), фронт показывает крестик |
+| Агент закрыл вопрос `status='failed'` без строки-ответа | `poll_once` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
+| Агент вставил ответ, но не закрыл вопрос терминальным `status` | `poll_once` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
+| CHECK владельца отклонил наш статус (`CheckViolationError`) | `_set_status_safe` глотает с warning'ом — финализация/таймаут не ломаются, поллер не зацикливается |
+| Превышен idle-таймаут (claim или answer) | `mark_timeout(reason)`: draft → `failed` (error-блок `agent_claim_timeout` / `agent_timeout`), вопрос в шине best-effort закрывается `failed` |
 | Поллер не инициализирован (lifespan-сбой) | Форвард **не выполняется**: вопрос в шину не пишется, draft не создаётся, сразу финализируется error-сообщение (`agent_unavailable`). Беседа остаётся удаляемой |
 | Рестарт uvicorn посреди ожидания | Поллер при старте поднимает подписки из streaming-черновиков `chat_messages` и продолжает опрос; draft остаётся виден в истории как `streaming` |
 | Пользователь отправил N форвардов параллельно | Каждый получает свой `message_id`/вопрос; при `>= max_parallel_streams_per_user` активных — `ChatLimitError` (422) до записей |
@@ -187,12 +206,12 @@ sequenceDiagram
 
 - POST/GET messages — `app/domains/chat/api/messages.py` (`send_message`, `get_message`)
 - AgentChannelService — `app/domains/chat/services/agent_channel.py`
-  (`submit`, `try_finalize`, `mark_timeout`, `map_answer_to_blocks`, `build_timeout_error_block`)
+  (`submit`, `poll_once`, `mark_timeout`, `get_queue_details`, `map_answer_to_blocks`, `build_timeout_error_block`)
 - AgentChannelPoller — `app/domains/chat/services/agent_channel_poller.py`
   (`subscribe`/`unsubscribe`/`_tick`/`_run` adaptive-backoff, reconcile из streaming-черновиков, `start`/`stop`/`get_status`)
 - button_translator — `app/domains/chat/services/button_translator.py` (`translate_buttons`)
 - forward-tool (adaptive) — `app/domains/chat/services/forward_tool_factory.py`
-- bus-репозиторий — `app/domains/chat/repositories/agent_message_repository.py` (`count_active_for_user`, `get_by_uid`)
+- bus-репозиторий — `app/domains/chat/repositories/agent_message_repository.py` (`count_active_for_user`, `get_by_uid`, `get_answer_for_question`)
 - chat_messages streaming-методы — `app/domains/chat/repositories/message_repository.py`
   (`create_streaming`/`finalize`/`mark_failed`/`get_streaming_drafts`)
 - настройки — `AgentChannelSettings` (`app/domains/chat/settings.py`),

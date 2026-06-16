@@ -1,5 +1,7 @@
 """Pydantic-модели ответов API."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -39,6 +41,30 @@ class RestoreVersionResponse(BaseModel):
 
 
 class SaveContentResponse(BaseModel):
-    """Ответ на сохранение содержимого."""
+    """Ответ на сохранение содержимого.
+
+    updated_at — серверная метка обновления акта после сохранения; фронт
+    запоминает её как базу метаданных снимка-черновика localStorage
+    (baseUpdatedAt) для решения о восстановлении черновика (H3).
+
+    warning — мягкое предупреждение пользователю, когда при сохранении
+    автоматически вычищено рассогласование дерево ↔ словари (висячие ссылки
+    узлов и/или записи словарей без узла-владельца). null — ничего не чистилось.
+    Сохранение в обоих случаях успешно (status='success'): обе стороны
+    рассогласования лечатся мягко, а не отбивают весь PUT 422. Фронт читает
+    result.warning.
+
+    validation_status / validation_issues — состояние структурной валидации
+    акта, вычисленное бэком на этом сохранении (источник истины). 'ok' —
+    акт заполнен корректно; 'warning' — есть только мягкие замечания (напр.
+    пустые таблицы); 'error' — есть структурные ошибки (список issues с
+    code/severity/message/ref). WIP-сохранение в БД НЕ блокируется: акт
+    сохраняется и помечается статусом, конкретику фронт показывает в
+    уведомлениях и на карточке.
+    """
     status: str
     message: str
+    updated_at: datetime | None = None
+    warning: str | None = None
+    validation_status: str = "ok"
+    validation_issues: list[dict] = []

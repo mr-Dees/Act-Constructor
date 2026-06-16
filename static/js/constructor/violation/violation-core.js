@@ -4,7 +4,10 @@
  */
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { Notifications } from '../../shared/notifications.js';
 
 export class ViolationManager {
     constructor() {
@@ -16,10 +19,18 @@ export class ViolationManager {
         // удаляется через removeViolation при разрушении узла дерева — без этого Map
         // рос бесконтрольно при switch'е между актами / удалении нарушений.
         this.activeViolations = new Map();
+        // AbortController'ы document-слушателей drop по violation.id
+        // (см. setupFileDragAndDrop): abort при повторной установке поля,
+        // удалении нарушения и destroy() — иначе слушатели копились
+        // на каждый ре-рендер поля дополнительных материалов.
+        this._fileDropControllers = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
         // Позиция курсора для вставки (null означает конец списка)
         this.cursorInsertPosition = null;
+        // Unsubscribe ESC-хэндлера активной зоны в EscapeStack
+        // (push в _setActiveZone, снятие в _resetActiveZone/destroy).
+        this._escapeZoneUnsub = null;
     }
 
     /**
@@ -29,8 +40,37 @@ export class ViolationManager {
     initialize() {
         // Настраиваем глобальный обработчик вставки
         this.setupPasteHandler();
-        // Настраиваем обработчик ESC для сброса активной зоны
-        this.setupEscapeHandler();
+    }
+
+    /**
+     * Активирует зону вставки (мышь внутри контейнера дополнительного
+     * контента) и регистрирует сброс зоны по ESC через EscapeStack —
+     * вместо прежнего собственного document-listener'а в обход стека.
+     * Идемпотентен: повторная активация не плодит хэндлеры.
+     * @param {HTMLElement} container - Контейнер дополнительного контента
+     */
+    _setActiveZone(container) {
+        this.currentActiveContainer = container;
+        if (!this._escapeZoneUnsub) {
+            this._escapeZoneUnsub = EscapeStack.push(() => {
+                this._resetActiveZone();
+                Notifications.info('Активная зона сброшена');
+            });
+        }
+    }
+
+    /**
+     * Сбрасывает активную зону вставки и снимает ESC-хэндлер со стека.
+     * Идемпотентен.
+     */
+    _resetActiveZone() {
+        this.currentActiveContainer = null;
+        this.cursorInsertPosition = null;
+        if (this._escapeZoneUnsub) {
+            const unsub = this._escapeZoneUnsub;
+            this._escapeZoneUnsub = null;
+            unsub();
+        }
     }
 
     /**
@@ -41,6 +81,11 @@ export class ViolationManager {
     removeViolation(violationId) {
         if (!violationId) return;
         this.activeViolations.delete(violationId);
+        const controller = this._fileDropControllers.get(violationId);
+        if (controller) {
+            controller.abort();
+            this._fileDropControllers.delete(violationId);
+        }
     }
 
     /**
@@ -49,8 +94,9 @@ export class ViolationManager {
      */
     destroy() {
         this.activeViolations.clear();
-        this.currentActiveContainer = null;
-        this.cursorInsertPosition = null;
+        this._fileDropControllers.forEach(controller => controller.abort());
+        this._fileDropControllers.clear();
+        this._resetActiveZone();
         this.selectedViolation = null;
         this.lastDragOverIndex = null;
     }
@@ -63,7 +109,7 @@ export class ViolationManager {
      */
     createViolationElement(violation, node) {
         const section = document.createElement('div');
-        section.className = 'violation-section';
+        section.className = RENDER_CLASSES.VIOLATION_SECTION;
         section.dataset.violationId = violation.id;
 
         const columnsContainer = document.createElement('div');
@@ -79,7 +125,7 @@ export class ViolationManager {
         violatedColumn.appendChild(violatedLabel);
 
         const violatedTextarea = document.createElement('textarea');
-        violatedTextarea.className = 'violation-textarea';
+        violatedTextarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         violatedTextarea.placeholder = 'Опишите нарушение...';
         violatedTextarea.value = violation.violated || '';
         violatedTextarea.rows = 4;
@@ -96,7 +142,7 @@ export class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
                 }
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -112,7 +158,7 @@ export class ViolationManager {
         establishedColumn.appendChild(establishedLabel);
 
         const establishedTextarea = document.createElement('textarea');
-        establishedTextarea.className = 'violation-textarea';
+        establishedTextarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         establishedTextarea.placeholder = 'Опишите установленное...';
         establishedTextarea.value = violation.established || '';
         establishedTextarea.rows = 4;
@@ -128,7 +174,7 @@ export class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
                 }
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -237,7 +283,7 @@ export class ViolationManager {
         checkbox.addEventListener('change', () => {
             violation[fieldName].enabled = checkbox.checked;
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
-            PreviewManager.update();
+            PreviewManager.updateBlock('violation', violation.id);
         });
 
         const checkboxLabel = document.createElement('label');
@@ -266,7 +312,7 @@ export class ViolationManager {
             addButton.addEventListener('click', () => {
                 violation[fieldName].items.push('');
                 this.renderList(listContainer, violation, fieldName);
-                PreviewManager.update();
+                PreviewManager.updateBlock('violation', violation.id);
             });
 
             contentContainer.appendChild(addButton);
@@ -275,7 +321,7 @@ export class ViolationManager {
 
         } else if (type === 'text') {
             const textarea = document.createElement('textarea');
-            textarea.className = 'violation-textarea';
+            textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
             textarea.placeholder = label ? `Введите ${label.toLowerCase()}...` : '...';
             textarea.value = violation[fieldName].content || '';
             textarea.rows = 3;
@@ -283,7 +329,7 @@ export class ViolationManager {
             // Настраиваем обработку клавиш
             this.setupTextareaHandlers(textarea, (value) => {
                 violation[fieldName].content = value;
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
 
             contentContainer.appendChild(textarea);
@@ -308,7 +354,7 @@ export class ViolationManager {
 
             const input = document.createElement('input');
             input.type = 'text';
-            input.className = 'violation-list-input';
+            input.className = RENDER_CLASSES.VIOLATION_LIST_INPUT;
             input.value = item;
             input.placeholder = `Пункт ${index + 1}`;
 
@@ -317,7 +363,7 @@ export class ViolationManager {
             // Обновляем массив при вводе
             input.addEventListener('input', () => {
                 violation[fieldName].items[index] = input.value;
-                PreviewManager.scheduleTyping();
+                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
 
             // Обработка горячих клавиш для элементов списка
@@ -332,7 +378,7 @@ export class ViolationManager {
                     input.value = originalValue;
                     violation[fieldName].items[index] = originalValue;
                     input.blur();
-                    PreviewManager.update();
+                    PreviewManager.updateBlock('violation', violation.id);
                 }
             });
 
@@ -349,7 +395,7 @@ export class ViolationManager {
             deleteBtn.addEventListener('click', () => {
                 violation[fieldName].items.splice(index, 1);
                 this.renderList(container, violation, fieldName);
-                PreviewManager.update();
+                PreviewManager.updateBlock('violation', violation.id);
             });
 
             itemContainer.appendChild(input);

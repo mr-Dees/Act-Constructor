@@ -26,6 +26,7 @@
 19. [Settings залипают между тестами (один тест видит env другого)](#19-settings-залипают-между-тестами-один-тест-видит-env-другого)
 20. [Singleton-lock — приложение не стартует / зависший процесс](#20-singleton-lock--приложение-не-стартует--зависший-процесс)
 21. [Записи в audit_log / metrics пропадают — что проверить](#21-записи-в-audit_log--metrics-пропадают--что-проверить)
+22. [Старт падает: `must be owner of relation <bus-таблица>`](#22-старт-падает-must-be-owner-of-relation-bus-таблица)
 
 ---
 
@@ -84,10 +85,10 @@
 
 **Симптом:** После форварда в «Базу знаний ОАРБ» сообщение ассистента остаётся в статусе «печатает…» и через ~10 минут сменяется блоком ошибки о таймауте.
 
-**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `chat_agent_messages_bus`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до терминального статуса записи (`complete`/`error`/`timeout`). Если агент не отвечает дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин) — `AgentChannelService.mark_timeout` финализирует черновик блоком ошибки (`build_timeout_error_block`).
+**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `chat_agent_messages_bus`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до появления строки-ответа агента (`reply_to = <id вопроса>`) с терминальным статусом (`completed`/`failed`). Если агент не отвечает дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин) — `AgentChannelService.mark_timeout` финализирует черновик блоком ошибки (`build_timeout_error_block`).
 
 **Решение:**
-1. Проверь таблицу `chat_agent_messages_bus`: есть ли запись-вопрос (`role='user'`) и появился ли ответ (`role='assistant'`). Статус ответа должен дойти до `complete`. Если ответа нет — внешний агент не подхватил вопрос.
+1. Проверь таблицу `chat_agent_messages_bus`: есть ли запись-вопрос (`role='user'`) и появился ли ответ (`role='assistant'` с `reply_to` = id вопроса). Статус ответа должен дойти до `completed`. Если ответа нет — внешний агент не подхватил вопрос.
 2. Если агент действительно отвечает медленнее — поднять `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` в `.env`.
 3. **Параметры polling** — `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` (2.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Интервал растёт от min к max при пустых тиках и сбрасывается при появлении ответа.
 4. Имя bus-таблицы настраивается через `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `chat_agent_messages_bus`).
@@ -104,7 +105,7 @@
 - `off` / `adaptive` — локальная LLM/GigaChat исполняется синхронно в POST через `orchestrator.run(...)`. В режиме `adaptive` форвард-tool есть в наборе, и оркестратор сам решает, форвардить ли вопрос.
 - `always` — прямой проброс в агента без локального оркестратора.
 
-Форвард создаёт черновик `chat_messages` (status='streaming') + вопрос в шине, после чего `AgentChannelPoller` поллит шину, а `AgentChannelService.try_finalize` маппит ответ в блоки и финализирует черновик. Ссылка из ассистент-сообщения на вопрос в шине — колонка `chat_messages.agent_ref`.
+Форвард создаёт черновик `chat_messages` (status='streaming') + вопрос в шине, после чего `AgentChannelPoller` поллит шину, а `AgentChannelService.poll_once` дозаполняет reasoning и финализирует черновик. Ссылка из ассистент-сообщения на вопрос в шине — колонка `chat_messages.agent_ref`.
 
 **Решение:**
 1. Проверь, что фронт реально шлёт `agent_mode` (DevTools → Network → form-data POST `/messages`). Позиция тумблера — в localStorage `assistant_oarb_mode`.
@@ -419,3 +420,15 @@
    - При `last_error` — устранить корневую причину (например, CHECK constraint без mapping в `CHECK_CONSTRAINT_MESSAGES`).
 
 **См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/guides/developer-guide.md` §9.5a / §9.5b.
+
+---
+
+### 22. Старт падает: `must be owner of relation <bus-таблица>`
+
+**Симптом:** при запуске приложения `RuntimeError: Не удалось инициализировать БД при старте: must be owner of relation <имя bus-таблицы>`. Воспроизводится, когда bus-таблица канала агента (`CHAT__AGENT_CHANNEL__TABLE_NAME`, схема `CHAT__AGENT_CHANNEL__SCHEMA_NAME`) уже создана внешней стороной (командой агента), а владелец — не учётка приложения.
+
+**Причина:** `create_tables_if_not_exist` при наличии хотя бы одной отсутствующей таблицы домена исполнял **весь** schema.sql, включая `CREATE INDEX` (и `COMMENT ON`) на уже существующей чужой таблице. Эти операторы требуют владения таблицей — даже `CREATE INDEX IF NOT EXISTS` падает, если индекса ещё нет.
+
+**Решение:** исправлено в адаптерах (`app/db/adapters/{base,greenplum,postgresql}.py`): операторы-«спутники» (`CREATE INDEX`, `COMMENT ON`) уже существующей таблицы пропускаются, если таблица объявлена в schema.sql **внешней** директивой `-- @external-table: <имя как в DDL>` (bus-таблица канала агента объявлена так в обеих схемах chat-домена). Спутники собственных существующих таблиц исполняются как раньше — иначе новый индекс из релиза молча не доезжал бы до развёрнутых стендов (дубликаты идемпотентны: `IF NOT EXISTS` на PG, перехват `DuplicateObjectError` на GP). `ALTER TABLE` исполняется всегда (путь эволюции собственных таблиц). При появлении новой внешней таблицы — добавь директиву рядом с её dev-имитацией. На старых версиях — митигация: попросить владельца создать индексы из schema.sql либо выдать ownership учётке приложения.
+
+**См. также:** `DatabaseAdapter._external_tables_from_sql`, `DatabaseAdapter._companion_target_table`, `tests/db/test_adapters.py::TestSkipCompanionsForExistingTables`.

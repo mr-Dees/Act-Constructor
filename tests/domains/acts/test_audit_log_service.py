@@ -10,6 +10,7 @@ Unit-тесты сервиса/репозитория аудит-лога.
 но даём один регрессионный кейс на интеграцию (фильтр доходит до SQL).
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +24,20 @@ from app.domains.acts.services.audit_log_service import AuditLogService
 def _patch_adapter(mock_adapter):
     with patch("app.db.repositories.base.get_adapter", return_value=mock_adapter):
         yield
+
+
+def _make_tx_conn() -> AsyncMock:
+    """Mock-соединение с поддержкой async with conn.transaction().
+
+    restore_version держит все шаги в одной плоской транзакции —
+    mock-у нужен синхронный transaction(), возвращающий async-CM.
+    """
+    conn = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
+    return conn
 
 
 # ── ActAuditLogRepository.log: запись и обработка ошибок ────────────────────
@@ -221,7 +236,7 @@ class TestAuditLogServiceRestore:
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
 
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), guard, audit_repo, versions_repo
 
     async def test_restore_version_unknown_raises_not_found(self):
@@ -282,6 +297,72 @@ class TestAuditLogServiceRestore:
         assert result["restored_version"] == 5
         assert result["success"] is True
 
+    async def test_restore_recomputes_validation_status_from_content(self):
+        """restore пересчитывает validation_status из ВОССТАНОВЛЕННОГО контента.
+
+        Регрессия на баг «restore слепо сбрасывал статус в ok»: восстановление
+        дефектной структуры (пустое дерево) должно дать save_content с
+        validation_status='error', а не дефолтным 'ok'.
+        """
+        svc, guard, audit_repo, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 5,
+            "tree_data": {"id": "root", "label": "Акт", "children": []},  # пустая структура → error
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        saved = {}
+
+        async def _save_content(act_id, data, username, **kwargs):
+            saved.update(kwargs)
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock(side_effect=_save_content)
+            instance.get_content = AsyncMock(return_value=None)
+            await svc.restore_version(act_id=42, version_id=5, username="12345")
+
+        assert saved.get("validation_status") == "error"
+        assert saved.get("validation_issues")  # непустой список замечаний
+
+    async def test_restore_valid_content_yields_ok_status(self):
+        """Восстановление валидной структуры (разделы 1–5) → статус 'ok'."""
+        svc, guard, audit_repo, versions_repo = self._make_service()
+        valid_tree = {
+            "id": "root", "label": "Акт", "children": [
+                {"id": str(i), "label": f"Раздел {i}", "type": "item",
+                 "protected": True, "deletable": False, "children": []}
+                for i in range(1, 6)
+            ],
+        }
+        versions_repo.get_version.return_value = {
+            "version_number": 6,
+            "tree_data": valid_tree,
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        saved = {}
+
+        async def _save_content(act_id, data, username, **kwargs):
+            saved.update(kwargs)
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock(side_effect=_save_content)
+            instance.get_content = AsyncMock(return_value=None)
+            await svc.restore_version(act_id=42, version_id=6, username="12345")
+
+        assert saved.get("validation_status") == "ok"
+        assert saved.get("validation_issues") == []
+
     async def test_restore_version_swallow_audit_log_db_error_does_not_fail_caller(self):
         """Аудит-лог глушит DB-ошибку → restore_version всё равно завершается успехом.
 
@@ -331,7 +412,7 @@ class TestRestoreVersionPreSnapshot:
         versions_repo = MagicMock()
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), versions_repo
 
     async def test_pre_snapshot_created_from_current_content(self):
@@ -384,6 +465,90 @@ class TestRestoreVersionPreSnapshot:
         assert second_call.kwargs["save_type"] == "manual"
         assert second_call.kwargs["tree"]["label"] == "v1"
 
+    async def test_pre_snapshot_sanitized_before_write(self):
+        """pbe-6: pre-snapshot чистится той же санитизацией, что и post.
+
+        Иначе несанитизированный HTML из текущего контента (записанного
+        в обход save_content или до ужесточения) лёг бы в историю и при
+        повторном restore такого снимка вернулся бы в БД (stored XSS).
+        Ячейки таблиц при этом НЕ трогаются (инвариант «всё на текст»).
+        """
+        svc, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "label": "v1", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+        current_content = {
+            "tree": {
+                "id": "root", "label": "Акт",
+                "content": "<p>ok</p><script>alert(1)</script>",
+                "children": [],
+            },
+            "tables": {
+                "t1": {"id": "t1", "nodeId": "n1", "grid": [[
+                    {"content": "<script>в ячейке — дословно</script>"},
+                ]]},
+            },
+            "textBlocks": {
+                "tb1": {"id": "tb1", "nodeId": "n2",
+                        "content": '<b>жирный</b><iframe srcdoc="x"></iframe>'},
+            },
+            "violations": {
+                "v1": {
+                    "id": "v1", "nodeId": "n3",
+                    "violated": '<img src=x onerror="alert(1)">текст',
+                    "established": "",
+                    "descriptionList": {"enabled": True,
+                                        "items": ["<script>x</script>пункт"]},
+                    "additionalContent": {"enabled": True, "items": [
+                        {"id": "i1", "type": "image", "url": "data:image/png;base64,AAAA",
+                         "content": "", "caption": "<b>подпись</b>",
+                         "filename": "<script>f</script>имя.png", "order": 0},
+                    ]},
+                    "reasons": {"enabled": True, "content": "<svg onload=x></svg>причина"},
+                },
+            },
+        }
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=current_content)
+
+            await svc.restore_version(act_id=42, version_id=1, username="12345")
+
+        pre = versions_repo.create_version.await_args_list[0].kwargs
+        assert pre["save_type"] == "auto"
+        # Дерево: script вырезан, безопасный HTML остался
+        assert "<script" not in pre["tree"]["content"]
+        assert "ok" in pre["tree"]["content"]
+        # Текстблок: iframe вырезан, whitelist-тег остался
+        tb = pre["textblocks"]["tb1"]
+        assert "<iframe" not in tb["content"]
+        assert "<b>жирный</b>" in tb["content"]
+        # Нарушение: HTML-поля чищены, plain-поля без тегов, url не тронут
+        v = pre["violations"]["v1"]
+        assert "onerror" not in v["violated"]
+        assert "текст" in v["violated"]
+        assert "<script" not in v["descriptionList"]["items"][0]
+        assert "пункт" in v["descriptionList"]["items"][0]
+        item = v["additionalContent"]["items"][0]
+        assert "<b>" not in item["caption"]
+        assert "подпись" in item["caption"]
+        assert "<script" not in item["filename"]
+        assert "имя.png" in item["filename"]
+        assert item["url"] == "data:image/png;base64,AAAA"
+        assert "<svg" not in v["reasons"]["content"]
+        assert "причина" in v["reasons"]["content"]
+        # Ячейки таблиц — дословно (инвариант B8)
+        cell = pre["tables"]["t1"]["grid"][0][0]
+        assert cell["content"] == "<script>в ячейке — дословно</script>"
+
     async def test_pre_snapshot_skipped_when_no_current_content(self):
         """get_content вернул None/{} → pre-snapshot не создаётся."""
         svc, versions_repo = self._make_service()
@@ -427,7 +592,7 @@ class TestRestoreVersionPreSnapshot:
             return {"tree": {"id": "root", "label": "wip"}, "tables": {},
                     "textBlocks": {}, "violations": {}}
 
-        async def _save_content(act_id, data, username):
+        async def _save_content(act_id, data, username, **kwargs):
             call_log.append("save_content")
 
         async def _create_version(**kwargs):
@@ -451,3 +616,127 @@ class TestRestoreVersionPreSnapshot:
             "save_content",           # перезапись восстановленным контентом
             "create_version:manual",  # post-restore snapshot
         ]
+
+
+# ── ActAuditLogRepository.compute_field_diffs: поля нарушений ────────────────
+
+
+# Маленькая, но валидная data:image-картинка (payload-маркер для проверки,
+# что base64 не утекает в diff).
+_IMG_BASE64_PAYLOAD = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+_IMG_DATA_URL = f"data:image/png;base64,{_IMG_BASE64_PAYLOAD}"
+
+
+def _make_act_data(violations: dict) -> "ActDataSchema":
+    """ActDataSchema с пустым деревом и заданными нарушениями."""
+    from app.domains.acts.schemas.act_content import ActDataSchema
+    return ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": []},
+        violations=violations,
+    )
+
+
+def _db_violation_row(**overrides) -> dict:
+    """Строка нарушения из БД, как её отдаёт SELECT в compute_field_diffs."""
+    row = {
+        "violation_id": "v1",
+        "violated": "нарушено",
+        "established": "установлено",
+        "reasons": '{"enabled": false, "content": ""}',
+        "consequences": '{"enabled": false, "content": ""}',
+        "responsible": '{"enabled": false, "content": ""}',
+        "recommendations": '{"enabled": false, "content": ""}',
+        "description_list": '{"enabled": false, "items": []}',
+        "additional_content": '{"enabled": false, "items": []}',
+    }
+    row.update(overrides)
+    return row
+
+
+class TestComputeFieldDiffsViolationCollections:
+    """compute_field_diffs учитывает descriptionList/additionalContent (pbe-10).
+
+    В diff пишется только компактная сводка (enabled + число элементов):
+    additionalContent может содержать base64-картинки на мегабайты —
+    их содержимое в аудит-лог попадать не должно.
+    """
+
+    def _make_violation(self, **kwargs):
+        from app.domains.acts.schemas.act_content import ViolationSchema
+        defaults = {
+            "id": "v1", "nodeId": "n1",
+            "violated": "нарушено", "established": "установлено",
+        }
+        defaults.update(kwargs)
+        return ViolationSchema(**defaults)
+
+    async def test_description_list_change_detected(self, mock_conn):
+        """Изменение items списка описаний попадает в diff нарушения."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [],  # таблицы
+            [],  # текстблоки
+            [_db_violation_row(
+                description_list='{"enabled": true, "items": ["старый пункт"]}',
+            )],
+        ]
+        data = _make_act_data({"v1": self._make_violation(
+            descriptionList={"enabled": True, "items": ["старый пункт", "новый пункт"]},
+        )})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert "v1" in result
+        diff = result["v1"]["fields"]["descriptionList"]
+        assert diff["changed"] is True
+        assert diff["old_items"] == 1
+        assert diff["new_items"] == 2
+
+    async def test_additional_content_change_detected_without_base64_leak(self, mock_conn):
+        """Изменение доп. контента фиксируется компактно — без base64 в diff."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row()],
+        ]
+        data = _make_act_data({"v1": self._make_violation(
+            additionalContent={"enabled": True, "items": [
+                {"id": "c1", "type": "image", "url": _IMG_DATA_URL},
+            ]},
+        )})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert "v1" in result
+        diff = result["v1"]["fields"]["additionalContent"]
+        assert diff["changed"] is True
+        assert diff["old_items"] == 0
+        assert diff["new_items"] == 1
+        # base64-payload картинки не должен утекать в аудит-лог
+        assert _IMG_BASE64_PAYLOAD not in json.dumps(result)
+
+    async def test_unchanged_collections_not_reported(self, mock_conn):
+        """Совпадающие коллекции (включая NULL в БД ↔ схемный дефолт) — не diff."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row(description_list=None, additional_content=None)],
+        ]
+        data = _make_act_data({"v1": self._make_violation()})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert result == {}
+
+    async def test_scalar_field_diff_still_works(self, mock_conn):
+        """Регрессия: прежние поля (violated и пр.) diff'ятся как раньше."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row(violated="старый текст")],
+        ]
+        data = _make_act_data({"v1": self._make_violation(violated="новый текст")})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert result["v1"]["fields"] == {"violated": {"changed": True}}

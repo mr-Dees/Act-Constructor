@@ -1,18 +1,28 @@
 """Сервис канала к внешнему агенту через bus-таблицу chat_agent_messages_bus.
 
-Поток:
+Поток (подтверждённая спека владельца шины — стороны агента):
   AW → submit() → INSERT вопрос (role='user', status='pending')
                  + create_streaming draft (status='streaming', agent_ref=uid)
-  Агент → INSERT ответ + reply_to на вопросе + status='complete'
-  AW → try_finalize() → читает вопрос; если reply_to есть → финализирует draft.
+  Агент → claim вопроса (status='processing') → INSERT ответ (role='assistant',
+          reply_to = id ВОПРОСА) → стримит reasoning-дельты в metadata.reasoning
+          → пишет финальный content и терминальный status ('completed'/'failed')
+  AW → poll_once() → ищет ответ по reply_to = id вопроса; инкрементально
+       upsert'ит частичный reasoning-блок пока ответ нетерминальный; финализирует
+       draft, когда статус ответа терминальный.
+
+Словарь status владельца (CHECK на его таблице): pending | processing |
+completed | failed; role: user | assistant | system. Записи статуса от AW —
+best-effort: CheckViolation логируется и глотается, финализацию/таймаут это
+не ломает (защита от смены словаря владельцем).
 """
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
-from app.domains.chat.exceptions import ChatLimitError
+from app.domains.chat.exceptions import AgentChannelUnavailableError, ChatLimitError
 from app.domains.chat.repositories.agent_message_repository import AgentMessageRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
 from app.domains.chat.services.button_translator import translate_buttons
@@ -22,6 +32,16 @@ logger = logging.getLogger("audit_workstation.domains.chat.service.agent_channel
 
 _TRIM_MARKER = " …[обрезано]"
 _TRIM_MARKER_BYTES = len(_TRIM_MARKER.encode("utf-8"))
+
+# Нетерминальные статусы строки шины: ответ с таким статусом ещё пишется
+# агентом — финализировать рано. Словарь владельца: 'processing' (агент создаёт
+# строку-ответ сразу при claim'е и стримит reasoning-дельты в metadata, пока не
+# запишет финальный content); 'in_progress' — legacy-синоним для старых dev-строк.
+# Любой другой статус при наличии строки-ответа считаем терминальным.
+_BUS_PENDING_STATUSES = ("pending", "processing", "in_progress")
+
+# Терминальные статусы ошибки: 'failed' — словарь владельца, 'error' — legacy.
+_BUS_ERROR_STATUSES = ("failed", "error")
 
 
 # ── Pure-функции ─────────────────────────────────────────────────────────────
@@ -74,17 +94,19 @@ def _normalize_button(btn: dict, idx: int) -> dict:
 def map_answer_to_blocks(row: dict, max_block_text_size: int = 262144) -> list[dict]:
     """Маппит строку-ответ chat_agent_messages_bus в блоки чата.
 
-    Порядок: reasoning (metadata.thinking) → text (content) → buttons → media.
+    Порядок: reasoning (metadata.reasoning, legacy metadata.thinking) →
+    text (content) → buttons → media.
     block_id кнопок и reasoning: ``f"{row['id']}:btn:0"`` / ``f"{row['id']}:reasoning:0"``.
     Тексты обрезаются через _trim_text_if_oversized.
     """
     row_id = row.get("id", "unknown")
     blocks: list[dict] = []
 
-    # 1. reasoning из metadata.thinking
+    # 1. reasoning из metadata.reasoning (ключ по спеке владельца шины;
+    #    'thinking' — legacy-fallback для старых строк и dev-имитаций)
     metadata = row.get("metadata") or {}
     if isinstance(metadata, dict):
-        thinking = metadata.get("thinking")
+        thinking = metadata.get("reasoning") or metadata.get("thinking")
         if thinking and isinstance(thinking, str) and thinking.strip():
             trimmed = _trim_text_if_oversized(
                 text=thinking.strip(),
@@ -150,8 +172,31 @@ def map_answer_to_blocks(row: dict, max_block_text_size: int = 262144) -> list[d
     return blocks
 
 
-def build_timeout_error_block() -> dict:
-    """Возвращает error-блок таймаута агента."""
+def _extract_reasoning(answer: dict) -> str:
+    """Текст рассуждений из строки-ответа: metadata.reasoning, legacy metadata.thinking."""
+    metadata = answer.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        return ""
+    val = metadata.get("reasoning") or metadata.get("thinking")
+    return val.strip() if isinstance(val, str) else ""
+
+
+# Коды причин таймаута агента. Единые константы для поллера (выбор reason
+# по фазе) и build_timeout_error_block (текст error-блока) — вместо строковых
+# литералов, расползающихся по двум файлам.
+TIMEOUT_REASON_CLAIM = "claim"
+TIMEOUT_REASON_ANSWER = "answer"
+
+
+def build_timeout_error_block(reason: str = TIMEOUT_REASON_ANSWER) -> dict:
+    """Error-блок таймаута агента. reason: 'answer' — агент не дописал ответ;
+    'claim' — агент не взял вопрос в работу (очередь не двигалась claim_timeout)."""
+    if reason == TIMEOUT_REASON_CLAIM:
+        return {
+            "type": "error",
+            "code": "agent_claim_timeout",
+            "message": "Внешний агент не взял вопрос в работу за отведённое время. Попробуйте позже.",
+        }
     return {
         "type": "error",
         "code": "agent_timeout",
@@ -183,6 +228,24 @@ class AgentChannelService:
     def _message_repo(self) -> MessageRepository:
         return MessageRepository(self._conn)
 
+    async def _set_status_safe(self, *, uid: str, status: str) -> None:
+        """Best-effort запись статуса в чужую bus-таблицу.
+
+        На таблице владельца есть CHECK по status; его полный список значений
+        нам неизвестен и может меняться. CheckViolation — постоянная ошибка
+        (ретрай бесполезен), глотаем с warning'ом: статус в шине — гигиена,
+        source-of-truth отображения — chat_messages. Транзиентные ошибки БД
+        пробрасываются — поллер повторит операцию на следующем тике.
+        """
+        try:
+            await self._agent_repo().set_status(uid=uid, status=status)
+        except asyncpg.exceptions.CheckViolationError:
+            logger.warning(
+                "agent_channel: CHECK владельца шины отклонил status=%r для uid=%s — пропускаем",
+                status,
+                uid,
+            )
+
     async def submit(
         self,
         *,
@@ -196,15 +259,27 @@ class AgentChannelService:
     ) -> str:
         """Кладёт вопрос в chat_agent_messages_bus и создаёт draft-сообщение в chat_messages.
 
-        Возвращает ``question_uid`` — conversation_id строки-вопроса в bus-таблице.
+        Возвращает ``question_uid`` — id строки-вопроса в bus-таблице.
         Вызывающий может сразу передать его поллеру без дополнительного SELECT;
         draft в chat_messages хранит тот же uid в поле ``agent_ref``.
         """
         # Мягкий лимит: count-then-insert не атомарен, два конкурентных запроса
         # могут оба пройти проверку на границе. Это защита от злоупотребления,
         # а не строгий инвариант — небольшое превышение допустимо.
+        # Двухфазные отсечки: pending живёт в окне claim_timeout_sec по
+        # created_at; processing — в окне answer_timeout_sec по updated_at
+        # (агент обновляет updated_at, стримя reasoning).
         limit = self._settings.max_parallel_streams_per_user
-        active = await self._agent_repo().count_active_for_user(user_id)
+        now = datetime.now(timezone.utc)
+        active = await self._agent_repo().count_active_for_user(
+            user_id,
+            pending_created_after=now - timedelta(
+                seconds=self._settings.agent_channel.claim_timeout_sec
+            ),
+            processing_updated_after=now - timedelta(
+                seconds=self._settings.agent_channel.answer_timeout_sec
+            ),
+        )
         if active >= limit:
             raise ChatLimitError(
                 f"Достигнут лимит одновременных запросов к агенту ({limit}). "
@@ -212,26 +287,39 @@ class AgentChannelService:
             )
 
         question_uid = str(uuid.uuid4())
-        question_id = str(uuid.uuid4())
 
         # Оба INSERT'а — в одной транзакции: вопрос в шине без draft'а (или
         # наоборот) оставил бы осиротевшую строку, которая вечно входит в
         # count_active_for_user и съедает слот лимита параллельных запросов.
-        async with self._conn.transaction():
-            await self._agent_repo().insert_question(
-                id=question_id,
-                chat_id=conversation_id,
-                user_id=user_id,
-                conversation_id=question_uid,
-                content=text,
-                metadata={"mode": mode, "kb": kb},
-                media=media,
+        try:
+            async with self._conn.transaction():
+                await self._agent_repo().insert_question(
+                    id=question_uid,
+                    chat_id=conversation_id,
+                    user_id=user_id,
+                    content=text,
+                    metadata={"mode": mode, "kb": kb},
+                    media=media,
+                )
+                await self._message_repo().create_streaming(
+                    message_id=assistant_message_id,
+                    conversation_id=conversation_id,
+                    agent_ref=question_uid,
+                )
+        except asyncpg.exceptions.CheckViolationError as exc:
+            # CHECK владельца шины отклонил наш вопрос (например, после смены
+            # словаря на его стороне). Имя его констрейнта на ПРОМе чужое —
+            # глобальный обработчик CheckViolationError не найдёт маппинг в
+            # CHECK_CONSTRAINT_MESSAGES, поэтому конвертируем в доменную ошибку
+            # с понятным сообщением. Транзакция уже откатила draft.
+            logger.error(
+                "agent_channel: CHECK владельца шины отклонил вопрос uid=%s: %s",
+                question_uid,
+                exc,
             )
-            await self._message_repo().create_streaming(
-                message_id=assistant_message_id,
-                conversation_id=conversation_id,
-                agent_ref=question_uid,
-            )
+            raise AgentChannelUnavailableError(
+                "Не удалось передать вопрос внешнему агенту. Попробуйте позже."
+            ) from exc
         return question_uid
 
     async def mark_timeout(
@@ -239,22 +327,27 @@ class AgentChannelService:
         *,
         assistant_message_id: str,
         question_uid: str,
+        reason: str = TIMEOUT_REASON_ANSWER,
     ) -> None:
-        """Помечает draft как failed (error-блок таймаута) и ставит вопросу status='timeout'."""
-        # Best-effort без общей транзакции: если set_status упадёт после
-        # mark_failed, строка в chat_agent_messages_bus останется в pending — побочных
-        # эффектов нет, reconcile её не подхватит (chat_message уже failed, а
-        # get_streaming_drafts отбирает только status='streaming').
+        """Помечает draft как failed (error-блок таймаута) и закрывает вопрос в шине.
+
+        reason: 'answer' — агент не дописал ответ (дефолт);
+                'claim'  — агент не взял вопрос в работу.
+        """
+        # Закрываем вопрос статусом 'failed' — он есть в словаре CHECK'а
+        # владельца ('timeout' там запрещён). Запись всё равно best-effort:
+        # если CHECK отклонит, строка останется в pending — побочных эффектов
+        # нет: reconcile её не подхватит (chat_message уже failed,
+        # get_streaming_drafts отбирает только status='streaming'), а слот
+        # лимита освобождает отсечка по возрасту в count_active_for_user.
         await self._message_repo().mark_failed(
             message_id=assistant_message_id,
-            error_block=build_timeout_error_block(),
+            error_block=build_timeout_error_block(reason),
         )
-        await self._agent_repo().set_status(
-            conversation_id=question_uid,
-            status="timeout",
-        )
+        await self._set_status_safe(uid=question_uid, status="failed")
         logger.info(
-            "agent_channel: таймаут — message_id=%s, question_uid=%s",
+            "agent_channel: таймаут (%s) — message_id=%s, question_uid=%s",
+            reason,
             assistant_message_id,
             question_uid,
         )
@@ -302,43 +395,117 @@ class AgentChannelService:
             recipient_user_id=recipient_user_id,
         )
 
-    async def try_finalize(
+    async def get_queue_details(self, question_uid: str) -> dict | None:
+        """Промежуточный статус вопроса в шине для отображения на фронте.
+
+        Возвращает {"bus_status": str, "queue_ahead": int|None} либо None,
+        если строки-вопроса нет (например, владелец её удалил).
+        queue_ahead считается только для 'pending' — после взятия в работу
+        позиция в очереди не имеет смысла.
+        """
+        agent_repo = self._agent_repo()
+        question = await agent_repo.get_by_uid(question_uid)
+        if not question:
+            return None
+        status = question.get("status")
+        queue_ahead = None
+        if status == "pending":
+            queue_ahead = await agent_repo.count_pending_before(
+                question["created_at"]
+            )
+        return {"bus_status": status, "queue_ahead": queue_ahead}
+
+    async def poll_once(
         self,
         *,
         assistant_message_id: str,
         question_uid: str,
-    ) -> str:
-        """Проверяет готовность ответа и финализирует draft при наличии.
+        last_reasoning_len: int = 0,
+        want_queue_position: bool = False,
+    ) -> dict:
+        """Один тик наблюдения за вопросом: финализация при готовности,
+        upsert частичного reasoning, сбор liveness-сигналов для поллера.
 
-        Читает строку-вопрос по ``question_uid``. Если ``reply_to`` не выставлен —
-        возвращает ``'pending'``. Если агент проставил ``reply_to``:
-        - читает строку-ответ (по reply_to как conversation_id);
-        - если answer.status == 'error' → mark_failed(error-блок);
-        - иначе → finalize(map_answer_to_blocks(answer)).
-        Возвращает ``'done'`` после финализации, ``'pending'`` если ответа ещё нет.
+        Возвращает dict:
+          outcome           — 'done' (подписку снять) | 'pending' (ждать дальше);
+          question_status   — статус строки-вопроса (None, если строки нет);
+          answer_exists     — появилась ли строка-ответ;
+          reasoning_len     — длина (в символах) текста рассуждений на строке-ответе (0 если нет);
+          queue_ahead       — pending-вопросов впереди (None вне фазы pending
+                              или при want_queue_position=False);
+          answer_updated_at — updated_at строки-ответа (liveness-сигнал).
         """
         agent_repo = self._agent_repo()
         message_repo = self._message_repo()
 
+        result = {
+            "outcome": "pending",
+            "question_status": None,
+            "answer_exists": False,
+            "reasoning_len": 0,
+            "queue_ahead": None,
+            "answer_updated_at": None,
+        }
+
         question = await agent_repo.get_by_uid(question_uid)
         if not question:
-            logger.warning(
-                "try_finalize: вопрос %s не найден в bus-таблице", question_uid
-            )
-            return "pending"
+            logger.warning("poll_once: вопрос %s не найден в bus-таблице", question_uid)
+            return result
+        result["question_status"] = question.get("status")
 
-        reply_to = question.get("reply_to")
-        if not reply_to:
-            return "pending"
-
-        answer = await agent_repo.get_by_uid(reply_to)
+        answer = await agent_repo.get_answer_for_question(question_uid)
         if not answer:
-            logger.warning(
-                "try_finalize: ответ %s (reply_to) не найден в bus-таблице", reply_to
-            )
-            return "pending"
+            # Агент мог закрыть вопрос со status='failed' без строки-ответа.
+            if question.get("status") in _BUS_ERROR_STATUSES:
+                failed = await message_repo.mark_failed(
+                    message_id=assistant_message_id,
+                    error_block={
+                        "type": "error",
+                        "code": "agent_error",
+                        "message": "Внешний агент вернул ошибку.",
+                    },
+                )
+                if failed:
+                    await self._emit_answer_notification(
+                        question=question,
+                        title="Ошибка ответа базы знаний",
+                        severity="error",
+                    )
+                result["outcome"] = "done"
+                return result
+            if question.get("status") == "pending" and want_queue_position:
+                result["queue_ahead"] = await agent_repo.count_pending_before(
+                    question["created_at"]
+                )
+            return result
 
-        if answer.get("status") == "error":
+        result["answer_exists"] = True
+        result["answer_updated_at"] = answer.get("updated_at")
+        reasoning = _extract_reasoning(answer)
+        result["reasoning_len"] = len(reasoning)
+
+        if answer.get("status") in _BUS_PENDING_STATUSES:
+            # Ответ ещё пишется: стримим частичный reasoning в черновик.
+            # block_id строится от id строки-ОТВЕТА — ровно как в
+            # map_answer_to_blocks, поэтому финализация заместит блок, а не задвоит.
+            if reasoning and len(reasoning) > max(last_reasoning_len, 0):
+                trimmed = _trim_text_if_oversized(
+                    text=reasoning,
+                    max_size=self._settings.agent_channel.max_block_text_size,
+                    uid=str(answer.get("id", "unknown")),
+                    block_type="reasoning",
+                )
+                await message_repo.upsert_block(
+                    message_id=assistant_message_id,
+                    block={
+                        "type": "reasoning",
+                        "content": trimmed,
+                        "block_id": f"{answer.get('id', 'unknown')}:reasoning:0",
+                    },
+                )
+            return result
+
+        if answer.get("status") in _BUS_ERROR_STATUSES:
             error_message = answer.get("content") or "Внешний агент вернул ошибку."
             error_block = {
                 "type": "error",
@@ -352,7 +519,7 @@ class AgentChannelService:
             if failed:
                 # Уведомление об ошибке — ровно один раз, на тике, который
                 # реально перевёл сообщение в терминал, и ДО set_status: при
-                # сбое set_status поллер повторит try_finalize, но mark_failed
+                # сбое set_status поллер повторит poll_once, но mark_failed
                 # вернёт False — уведомление не задвоится и не потеряется.
                 # best-effort (см. _emit_answer_notification).
                 await self._emit_answer_notification(
@@ -360,14 +527,15 @@ class AgentChannelService:
                     title="Ошибка ответа базы знаний",
                     severity="error",
                 )
-            # Закрываем вопрос: AW — source-of-truth освобождения слота лимита,
-            # не полагаемся на то, что внешний агент проставит терминальный
-            # status (он мог выставить только reply_to). Не best-effort: при
-            # сбое set_status исключение поднимется в _tick, подписка останется
-            # и поллер повторит try_finalize на следующем тике (mark_failed
-            # идемпотентен — вернёт False на уже не-streaming сообщении).
-            await agent_repo.set_status(conversation_id=question_uid, status="error")
-            return "done"
+            # Закрываем вопрос ('failed' — словарь владельца): не полагаемся
+            # на то, что внешний агент проставит терминальный status.
+            # CheckViolation глотается (_set_status_safe); транзиентный сбой
+            # поднимется в _tick, подписка останется и поллер повторит
+            # poll_once на следующем тике (mark_failed идемпотентен —
+            # вернёт False на уже не-streaming сообщении).
+            await self._set_status_safe(uid=question_uid, status="failed")
+            result["outcome"] = "done"
+            return result
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
         if answer.get("buttons"):
@@ -384,7 +552,7 @@ class AgentChannelService:
         if finalized:
             # Уведомление о готовности — ровно один раз, на тике, который
             # реально финализировал черновик, и ДО set_status: при сбое
-            # set_status поллер повторит try_finalize, но finalize вернёт False
+            # set_status поллер повторит poll_once, но finalize вернёт False
             # — уведомление не задвоится и не потеряется. best-effort
             # (см. _emit_answer_notification).
             await self._emit_answer_notification(
@@ -392,10 +560,11 @@ class AgentChannelService:
                 title="Готов ответ базы знаний",
                 severity="info",
             )
-        # Закрываем вопрос в шине: освобождаем слот лимита независимо от того,
-        # проставил ли внешний агент терминальный status (мог выставить только
-        # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое
-        # set_status поллер повторит try_finalize на следующем тике (finalize
-        # идемпотентен — вернёт False на уже complete-сообщении).
-        await agent_repo.set_status(conversation_id=question_uid, status="complete")
-        return "done"
+        # Закрываем вопрос в шине, если агент не сделал это сам. Словарь
+        # статусов — владельца: 'completed' (наблюдаемо разрешён CHECK'ом),
+        # не 'complete'. CheckViolation глотается (_set_status_safe);
+        # транзиентный сбой → поллер повторит poll_once на следующем тике
+        # (finalize идемпотентен — вернёт False на уже complete-сообщении).
+        await self._set_status_safe(uid=question_uid, status="completed")
+        result["outcome"] = "done"
+        return result

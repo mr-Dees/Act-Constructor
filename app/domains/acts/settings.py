@@ -92,6 +92,53 @@ class AuditLogSettings(BaseModel):
     max_diff_cells_per_table: int = Field(default=50, gt=0)
 
 
+class ImagesSettings(BaseModel):
+    """
+    Лимиты картинок нарушений (inline data-URL в дополнительном контенте).
+
+    Фронт читает их через GET /acts/limits и валидирует файлы ДО
+    кодирования в base64. Жёсткий серверный потолок длины data-URL —
+    константа VIOLATION_IMAGE_URL_MAX_LENGTH в schemas/act_content.py;
+    она обязана быть заведомо выше max_file_size с учётом
+    base64-оверхеда (×4/3 + префикс).
+    """
+    max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
+    max_total_size_per_act: int = Field(default=30 * 1024 * 1024, gt=0)
+    # webp исключён сознательно: python-docx (без Pillow) не встраивает его
+    # в DOCX — картинка молча расходилась бы между превью и экспортом.
+    allowed_mime_types: list[str] = Field(
+        default=["image/jpeg", "image/png", "image/gif"]
+    )
+    max_items_per_violation: int = Field(default=50, gt=0)
+    preview_max_height_percent: int = Field(default=40, gt=0, le=100)
+
+
+class TablesSettings(BaseModel):
+    """
+    Жёсткие границы таблиц (grid) — защита от исчерпания памяти.
+
+    Единый источник для серверной схемы (act_content.py читает их в
+    валидаторах), эндпоинта GET /acts/limits и фронт-гейтов вставки
+    строк/колонок. Дефолты обязаны совпадать с фолбэк-константами схемы
+    (TABLE_MAX_ROWS/TABLE_MAX_COLS).
+    """
+    max_rows: int = Field(default=64, gt=0)
+    max_cols: int = Field(default=16, gt=0)
+    min_col_width_px: int = Field(default=80, gt=0)
+
+
+class TextblocksSettings(BaseModel):
+    """
+    Границы форматирования текстблоков (размер шрифта редактора).
+
+    Единый источник для серверной схемы (TextBlockFormattingSchema),
+    GET /acts/limits и фронт-тулбара. Дефолты совпадают с фолбэками схемы
+    (FONT_SIZE_MIN/FONT_SIZE_MAX).
+    """
+    font_size_min: int = Field(default=8, gt=0)
+    font_size_max: int = Field(default=72, gt=0)
+
+
 class ActsSettings(BaseModel):
     """Корневая модель настроек домена актов."""
     lock: LockSettings = LockSettings()
@@ -99,3 +146,6 @@ class ActsSettings(BaseModel):
     resource: ResourceSettings = ResourceSettings()
     invoice: InvoiceSettings = InvoiceSettings()
     audit_log: AuditLogSettings = AuditLogSettings()
+    images: ImagesSettings = ImagesSettings()
+    tables: TablesSettings = TablesSettings()
+    textblocks: TextblocksSettings = TextblocksSettings()

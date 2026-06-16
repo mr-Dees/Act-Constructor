@@ -32,9 +32,15 @@ class ActContentVersionRepository(BaseRepository):
         textblocks: dict,
         violations: dict,
         max_versions: int = 50,
-    ) -> int | None:
+    ) -> int:
         """
         Создаёт новый снэпшот. Возвращает version_number.
+
+        Ошибки БД ПРОБРАСЫВАЮТСЯ (не глотаются): вызывающие сервисы держат
+        снимок версии в одной плоской транзакции с записью контента —
+        сбой снимка обязан откатить всё (§9 зона 4). Глотание исключения
+        внутри открытой транзакции к тому же оставило бы её в
+        aborted-состоянии и уронило бы последующие запросы.
 
         Args:
             act_id: ID акта
@@ -46,49 +52,41 @@ class ActContentVersionRepository(BaseRepository):
             violations: Данные нарушений
             max_versions: Максимальное число версий (старые удаляются)
         """
-        try:
-            tree_json = json.dumps(tree, ensure_ascii=False, default=str)
-            tables_json = json.dumps(tables, ensure_ascii=False, default=str)
-            textblocks_json = json.dumps(textblocks, ensure_ascii=False, default=str)
-            violations_json = json.dumps(violations, ensure_ascii=False, default=str)
+        tree_json = json.dumps(tree, ensure_ascii=False, default=str)
+        tables_json = json.dumps(tables, ensure_ascii=False, default=str)
+        textblocks_json = json.dumps(textblocks, ensure_ascii=False, default=str)
+        violations_json = json.dumps(violations, ensure_ascii=False, default=str)
 
-            # Атомарный INSERT с вычислением version_number
-            row = await self.conn.fetchrow(
-                f"""
-                INSERT INTO {self.versions_table}
-                    (act_id, version_number, save_type, username,
-                     tree_data, tables_data, textblocks_data, violations_data)
-                SELECT $1::bigint, COALESCE(MAX(version_number), 0) + 1, $2, $3,
-                       $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb
-                FROM {self.versions_table}
-                WHERE act_id = $1
-                RETURNING version_number
-                """,
-                act_id,
-                save_type,
-                username,
-                tree_json,
-                tables_json,
-                textblocks_json,
-                violations_json,
-            )
-            next_version = row["version_number"]
+        # Атомарный INSERT с вычислением version_number
+        row = await self.conn.fetchrow(
+            f"""
+            INSERT INTO {self.versions_table}
+                (act_id, version_number, save_type, username,
+                 tree_data, tables_data, textblocks_data, violations_data)
+            SELECT $1::bigint, COALESCE(MAX(version_number), 0) + 1, $2, $3,
+                   $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb
+            FROM {self.versions_table}
+            WHERE act_id = $1
+            RETURNING version_number
+            """,
+            act_id,
+            save_type,
+            username,
+            tree_json,
+            tables_json,
+            textblocks_json,
+            violations_json,
+        )
+        next_version = row["version_number"]
 
-            # Удалить старые версии если превышен лимит
-            await self._cleanup_old_versions(act_id, max_versions)
+        # Удалить старые версии если превышен лимит
+        await self._cleanup_old_versions(act_id, max_versions)
 
-            logger.info(
-                f"Создана версия #{next_version} акта ID={act_id} "
-                f"(save_type={save_type}, user={username})"
-            )
-            return next_version
-
-        except Exception:
-            logger.exception(
-                f"Не удалось создать версию содержимого: "
-                f"act_id={act_id}, username={username}"
-            )
-            return None
+        logger.info(
+            f"Создана версия #{next_version} акта ID={act_id} "
+            f"(save_type={save_type}, user={username})"
+        )
+        return next_version
 
     async def get_versions_list(
         self, act_id: int, *, limit: int = 50, offset: int = 0,

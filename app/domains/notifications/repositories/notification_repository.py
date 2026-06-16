@@ -138,6 +138,35 @@ class NotificationRepository(BaseRepository):
                 user_id,
             )
 
+    async def mark_unread(self, notification_id: str, user_id: str) -> None:
+        """Возвращает уведомление в непрочитанное (lazy upsert state).
+
+        Зеркало ``mark_read``: ставит ``is_read = FALSE``. Если state-строки нет
+        — уведомление и так непрочитано (COALESCE FALSE), но создаём явную строку
+        для консистентности с mark_read/dismiss и проверки видимости.
+        """
+        result = await self.conn.execute(
+            f"""
+            UPDATE {self.state}
+            SET is_read = FALSE, updated_at = CURRENT_TIMESTAMP
+            WHERE notification_id = $1 AND user_id = $2
+            """,
+            notification_id,
+            user_id,
+        )
+        if result == "UPDATE 0":
+            if not await self._is_visible_to_user(notification_id, user_id):
+                raise NotificationNotFoundError("Уведомление не найдено")
+            await self.conn.execute(
+                f"""
+                INSERT INTO {self.state}
+                    (notification_id, user_id, is_read, is_dismissed)
+                VALUES ($1, $2, FALSE, FALSE)
+                """,
+                notification_id,
+                user_id,
+            )
+
     async def mark_all_read(self, user_id: str) -> None:
         """Помечает все видимые уведомления пользователя прочитанными.
 

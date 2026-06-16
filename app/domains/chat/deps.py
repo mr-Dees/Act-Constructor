@@ -18,10 +18,15 @@ from app.domains.chat.repositories.chat_tool_metrics_repository import (
     ChatToolMetricRecord,
     ChatToolMetricsRepository,
 )
+from app.domains.chat.repositories.chat_message_feedback_repository import (
+    ChatMessageFeedbackRepository,
+)
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.file_repository import FileRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.services.chat_analytics_service import ChatAnalyticsService
 from app.domains.chat.services.chat_audit_service import ChatAuditService
+from app.domains.chat.services.chat_feedback_service import ChatFeedbackService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -82,7 +87,7 @@ def get_agent_channel_poller() -> AgentChannelPoller | None:
     return _agent_channel_poller
 
 
-def _get_chat_settings() -> ChatDomainSettings:
+def get_chat_settings() -> ChatDomainSettings:
     """Возвращает настройки домена чата из реестра."""
     return get_domain_settings("chat", ChatDomainSettings)
 
@@ -96,7 +101,7 @@ def get_rate_limiter() -> UserRateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
         try:
-            settings = _get_chat_settings()
+            settings = get_chat_settings()
         except KeyError:
             settings = ChatDomainSettings()
         _rate_limiter = UserRateLimiter(
@@ -118,7 +123,7 @@ async def get_conversation_service() -> AsyncGenerator[ConversationService, None
         )
         yield ConversationService(
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
         )
 
@@ -133,7 +138,7 @@ async def get_message_service() -> AsyncGenerator[MessageService, None]:
         yield MessageService(
             msg_repo=MessageRepository(conn),
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
         )
 
@@ -148,15 +153,41 @@ async def get_file_service() -> AsyncGenerator[FileService, None]:
         yield FileService(
             file_repo=FileRepository(conn),
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
+        )
+
+
+async def get_feedback_service() -> AsyncGenerator[ChatFeedbackService, None]:
+    """Создаёт ChatFeedbackService с подключением из пула.
+
+    audit_service подключается на том же соединении (best-effort запись
+    события feedback_submitted/feedback_cleared в chat_audit_log).
+    """
+    async with get_db() as conn:
+        audit = ChatAuditService(
+            repo=ChatAuditLogRepository(conn),
+            batcher=_audit_log_batcher,
+        )
+        yield ChatFeedbackService(
+            repo=ChatMessageFeedbackRepository(conn),
+            audit_service=audit,
+        )
+
+
+async def get_analytics_service() -> AsyncGenerator[ChatAnalyticsService, None]:
+    """Создаёт ChatAnalyticsService (admin-аналитика чата) с подключением из пула."""
+    async with get_db() as conn:
+        yield ChatAnalyticsService(
+            feedback_repo=ChatMessageFeedbackRepository(conn),
+            msg_repo=MessageRepository(conn),
         )
 
 
 async def get_agent_channel_service() -> AsyncGenerator[AgentChannelService, None]:
     """Создаёт AgentChannelService с подключением из пула."""
     async with get_db() as conn:
-        yield AgentChannelService(conn, _get_chat_settings())
+        yield AgentChannelService(conn, get_chat_settings())
 
 
 async def get_tool_metrics_repository() -> AsyncGenerator[

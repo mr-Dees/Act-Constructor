@@ -8,11 +8,11 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
-import { AppState } from './state-core.js';
-import { StorageManager } from '../storage-manager.js';
+import { UndoDeleteManager } from './undo-delete.js';
+import { AppState, _unwrap } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
-import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
+import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -27,87 +27,46 @@ Object.assign(AppState, {
      * @param {string} [prefix=''] - Префикс нумерации
      */
     generateNumbering(node = this.treeData, prefix = '') {
-        if (!node.children) return;
+        // Горячий read-путь: обход по raw-узлам (без Proxy get-трапов).
+        // Записываются только производные поля (number; метки сводных — через
+        // updateMetricsTableLabel → findNodeById, т.е. через tracked-узел).
+        // Каждый вызов сопровождает структурную мутацию, уже пометившую
+        // состояние dirty, поэтому raw-запись number трекинг не теряет.
+        node = _unwrap(node);
+        if (!node?.children) return;
 
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        node.children.forEach((child, index) => {
+        // Один проход с локальными счётчиками по типам — вместо
+        // filter().indexOf() на каждом ребёнке (квадратичная стоимость).
+        // Результат байт-в-байт совпадает со старым алгоритмом
+        // (закреплено tests/js/generate-numbering.test.mjs).
+        const {TABLE, TEXTBLOCK, VIOLATION, ITEM} = AppConfig.nodeTypes;
+        let tableCount = 0;
+        let textBlockCount = 0;
+        let violationCount = 0;
+        let itemCount = 0;
+
+        for (const child of node.children) {
             if (child.type === TABLE) {
-                this._numberTable(child, node);
+                child.number = `Таблица ${++tableCount}`;
             } else if (child.type === TEXTBLOCK) {
-                this._numberTextBlock(child, node);
+                child.number = `Текстовый блок ${++textBlockCount}`;
             } else if (child.type === VIOLATION) {
-                this._numberViolation(child, node);
-            } else {
-                this._numberItem(child, node, prefix, index);
+                child.number = `Нарушение ${++violationCount}`;
+            } else if (!child.type || child.type === ITEM) {
+                const number = prefix ? `${prefix}.${++itemCount}` : `${++itemCount}`;
+                child.number = number;
+
+                // Обновляем метки таблиц метрик для узлов под пунктом 5
+                if (node.id === '5' && number.startsWith('5.')) {
+                    this.updateMetricsTableLabel(child.id);
+                }
+
+                // Рекурсивная нумерация дочерних элементов
+                if (child.children?.length > 0) {
+                    this.generateNumbering(child, number);
+                }
             }
-        });
-    },
-
-    /**
-     * Нумерует таблицу в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел таблицы
-     * @param {Object} parent - Родительский узел
-     */
-    _numberTable(child, parent) {
-        const parentTables = parent.children.filter(c => c.type === AppConfig.nodeTypes.TABLE);
-        const tableIndex = parentTables.indexOf(child) + 1;
-
-        child.number = `Таблица ${tableIndex}`;
-    },
-
-    /**
-     * Нумерует текстовый блок в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел текстового блока
-     * @param {Object} parent - Родительский узел
-     */
-    _numberTextBlock(child, parent) {
-        const parentTextBlocks = parent.children.filter(c => c.type === AppConfig.nodeTypes.TEXTBLOCK);
-        const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
-
-        child.number = `Текстовый блок ${textBlockIndex}`;
-    },
-
-    /**
-     * Нумерует нарушение в рамках родительского узла
-     * @private
-     * @param {Object} child - Узел нарушения
-     * @param {Object} parent - Родительский узел
-     */
-    _numberViolation(child, parent) {
-        const parentViolations = parent.children.filter(c => c.type === AppConfig.nodeTypes.VIOLATION);
-        const violationIndex = parentViolations.indexOf(child) + 1;
-
-        child.number = `Нарушение ${violationIndex}`;
-    },
-
-    /**
-     * Нумерует обычный пункт с иерархической структурой
-     * @private
-     * @param {Object} child - Узел пункта
-     * @param {Object} parent - Родительский узел
-     * @param {string} prefix - Префикс нумерации
-     * @param {number} index - Индекс среди siblings
-     */
-    _numberItem(child, parent, prefix, index) {
-        const itemChildren = parent.children.filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
-        const itemIndex = itemChildren.indexOf(child);
-
-        if (itemIndex === -1) return;
-
-        const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
-
-        child.number = number;
-
-        // Обновляем метки таблиц метрик для узлов под пунктом 5
-        if (parent.id === '5' && number.startsWith('5.')) {
-            this.updateMetricsTableLabel(child.id);
-        }
-
-        // Рекурсивная нумерация дочерних элементов
-        if (child.children?.length > 0) {
-            this.generateNumbering(child, number);
+            // Узлы прочих типов номера не получают (поведение старого алгоритма).
         }
     },
 
@@ -120,13 +79,17 @@ Object.assign(AppState, {
         if (!node?.children) return;
 
         const metricsTableNode = node.children.find(child =>
-            child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (metricsTableNode && node.number) {
-            const newLabel = `Объем выявленных отклонений (В метриках) по ${node.number}`;
-            metricsTableNode.label = newLabel;
-            metricsTableNode.customLabel = newLabel;
+            // Обновляем только автогенерируемую метку (пустую или с каноническим
+            // префиксом). Пользовательский customLabel перенумерация не затирает.
+            if (isAutoMetricsTableLabel(metricsTableNode.customLabel)) {
+                const newLabel = buildMetricsTableLabel(node.number);
+                metricsTableNode.label = newLabel;
+                metricsTableNode.customLabel = newLabel;
+            }
         }
     },
 
@@ -206,6 +169,7 @@ Object.assign(AppState, {
     _addAsChild(parent, newNode) {
         if (!parent.children) parent.children = [];
         parent.children.push(newNode);
+        this._indexNodeAdded(newNode, parent);
     },
 
     /**
@@ -220,7 +184,47 @@ Object.assign(AppState, {
         if (grandParent?.children) {
             const index = grandParent.children.findIndex(n => n.id === siblingId);
             grandParent.children.splice(index + 1, 0, newNode);
+            this._indexNodeAdded(newNode, grandParent);
         }
+    },
+
+    /**
+     * Вставляет ГОТОВЫЙ узел (с поддеревом) в children родителя по индексу.
+     * Официальный мутатор для восстановления удалённых блоков (undo-delete):
+     * вставка через tracked-узел (dirty-tracking), индекс clamp'ится по
+     * pinned-инварианту (_getFirstNonPinnedIndex) и длине children,
+     * поддерево регистрируется в _nodeIndex/_parentIndex.
+     *
+     * НЕ создаёт новый узел (в отличие от addNode) и НЕ трогает записи
+     * словарей — вызывающий отвечает за их восстановление.
+     *
+     * @param {string} parentId - ID родительского узла
+     * @param {Object} node - Готовый узел с поддеревом
+     * @param {number} index - Желаемый индекс в children родителя
+     * @returns {Object} Результат с полями valid, message
+     */
+    insertNodeAt(parentId, node, index) {
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
+
+        const parent = this.findNodeById(parentId);
+        if (!parent) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+
+        if (!parent.children) parent.children = [];
+
+        // Clamp: не раньше первого незакреплённого (pinned-инвариант),
+        // не дальше конца children.
+        const firstNonPinned = this._getFirstNonPinnedIndex(parent);
+        let effectiveIndex = Number.isInteger(index) ? index : parent.children.length;
+        if (effectiveIndex < firstNonPinned) effectiveIndex = firstNonPinned;
+        if (effectiveIndex > parent.children.length) effectiveIndex = parent.children.length;
+
+        parent.children.splice(effectiveIndex, 0, node);
+        this._indexNodeAdded(node, parent);
+
+        return ValidationCore.success();
     },
 
     /**
@@ -251,7 +255,18 @@ Object.assign(AppState, {
             return false;
         }
 
-        return this._deleteNodeUnchecked(node, nodeId);
+        // Снимок для отката — ДО удаления (Б-4). В стек попадает только после
+        // фактического удаления: rollback каскада metrics↔risk возвращает узел,
+        // и тогда commit пропускается (откатывать нечего).
+        const undoSnapshot = UndoDeleteManager.captureDeletion(nodeId);
+
+        const result = this._deleteNodeUnchecked(node, nodeId);
+
+        if (result && undoSnapshot && !this._findNodeRaw(nodeId)) {
+            UndoDeleteManager.commit(undoSnapshot);
+        }
+
+        return result;
     },
 
     /**
@@ -347,7 +362,9 @@ Object.assign(AppState, {
         const parent = this.findParentNode(nodeId);
 
         if (parent?.children) {
+            const removed = parent.children.find(child => child.id === nodeId);
             parent.children = parent.children.filter(child => child.id !== nodeId);
+            if (removed) this._unindexNodeRemoved(removed);
         }
     },
 
@@ -505,7 +522,7 @@ Object.assign(AppState, {
      */
     async _checkMetricsTableDeletion(draggedNode, newParent) {
         const hasMetricsTable = draggedNode.children?.some(
-            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (!hasMetricsTable) return ValidationCore.success();
@@ -534,7 +551,7 @@ Object.assign(AppState, {
      */
     _removeMetricsTable(node) {
         const metricsTableNode = node.children.find(
-            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
         );
 
         if (metricsTableNode) {
@@ -542,6 +559,7 @@ Object.assign(AppState, {
             node.children = node.children.filter(
                 child => child.id !== metricsTableNode.id
             );
+            this._unindexNodeRemoved(metricsTableNode);
         }
     },
 
@@ -611,8 +629,9 @@ Object.assign(AppState, {
         if (draggedParent.id === 'root') return ValidationCore.success();
 
         // Проверяем, есть ли уже кастомный пункт 7
+        // (Number вместо parseInt: '7.1' не должен считаться пунктом 7)
         const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.number ? parseInt(child.number) : null;
+            const num = child.number ? Number(child.number) : null;
             return num === 7;
         });
 
@@ -621,7 +640,7 @@ Object.assign(AppState, {
         }
 
         // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
-        const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
+        const targetNumber = targetNode.number ? Number(targetNode.number) : null;
         if (!targetNumber) return ValidationCore.success();
 
         if ((position === 'before' && targetNumber !== 7) ||
@@ -749,6 +768,9 @@ Object.assign(AppState, {
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }
+
+        // Membership поддерева не изменился — обновляем только запись родителя.
+        this._reindexNodeMoved(draggedNode, newParent);
     },
 
     /**
@@ -777,7 +799,7 @@ Object.assign(AppState, {
 
         const {TABLE} = AppConfig.nodeTypes;
         const hasTable = node.children?.some(
-            child => child.type === TABLE && child.isMetricsTable === true
+            child => child.type === TABLE && child.kind === KIND_METRICS
         );
 
         if (!hasTable) {
@@ -887,9 +909,9 @@ Object.assign(AppState, {
             ChangelogTracker.record('tb_change', nodeId, node.label, {abbr, checked});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: узел получен через findNodeById
+        // (tracked-Proxy), мутации node.tb помечают dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer/ItemsRenderer) о per-node изменении.
         // ChatEventBus задействован как ad-hoc общий event-bus; optional chaining
@@ -928,9 +950,9 @@ Object.assign(AppState, {
             ChangelogTracker.record(action, nodeId, node.label, {});
         }
 
-        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-            StorageManager.markAsUnsaved();
-        }
+        // markAsUnsaved здесь не зовём: запись/удаление node.invoice идёт через
+        // tracked-Proxy (findNodeById) и помечает dirty автоматически
+        // (закреплено tests/js/state-mutators-dirty.test.mjs).
 
         // Уведомляем подписчиков (TreeRenderer) о per-node изменении фактуры.
         window.ChatEventBus?.emit?.('node:invoice-changed', {nodeId, attached: !!invoiceData});

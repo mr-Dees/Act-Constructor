@@ -45,7 +45,11 @@ export class LinkFootnoteContextMenu {
     }
 
     /**
-     * Создает DOM для popup'а
+     * Создает DOM для popup'а.
+     * Каркас — статическая разметка БЕЗ подстановок; пользовательские данные
+     * (отображаемый текст, URL/текст сноски) присваиваются через .value /
+     * .textContent — это надёжнее экранирования при сборке HTML-строки
+     * (исторически кавычка в value="…" позволяла вырваться из атрибута).
      */
     createPopup(element, isLink, content, displayText) {
         const popup = document.createElement('div');
@@ -71,9 +75,7 @@ export class LinkFootnoteContextMenu {
                 border-bottom: 1px solid var(--border, #e0e0e0);
                 padding-bottom: 8px;
             ">
-                <span class="link-footnote-popup-label" style="font-weight: 500;">
-                    ${isLink ? '🔗 Ссылка' : '📑 Сноска'}
-                </span>
+                <span class="link-footnote-popup-label" style="font-weight: 500;"></span>
                 <button class="popup-delete-btn" title="Удалить" style="
                     background: none;
                     border: none;
@@ -91,8 +93,7 @@ export class LinkFootnoteContextMenu {
                         font-size: 0.875rem;
                         color: var(--text-secondary, #666);
                     ">Отображаемый текст:</label>
-                    <input type="text" class="link-footnote-popup-text-input" 
-                        value="${this.escapeHtml(displayText)}" style="
+                    <input type="text" class="link-footnote-popup-text-input" style="
                         width: 100%;
                         padding: 6px 8px;
                         border: 1px solid var(--border, #e0e0e0);
@@ -108,7 +109,7 @@ export class LinkFootnoteContextMenu {
                         margin-bottom: 4px;
                         font-size: 0.875rem;
                         color: var(--text-secondary, #666);
-                    ">${isLink ? 'URL:' : 'Текст сноски:'}</label>
+                    "></label>
                     <textarea class="link-footnote-popup-input" rows="3" style="
                         width: 100%;
                         padding: 6px 8px;
@@ -118,10 +119,20 @@ export class LinkFootnoteContextMenu {
                         font-family: inherit;
                         resize: vertical;
                         box-sizing: border-box;
-                    ">${this.escapeHtml(content)}</textarea>
+                    "></textarea>
                 </div>
             </div>
         `;
+
+        // Динамические части — только через присвоение свойств.
+        popup.querySelector('.link-footnote-popup-label').textContent =
+            isLink ? '🔗 Ссылка' : '📑 Сноска';
+
+        popup.querySelector('.link-footnote-popup-text-input').value = displayText;
+
+        const valueInput = popup.querySelector('.link-footnote-popup-input');
+        valueInput.previousElementSibling.textContent = isLink ? 'URL:' : 'Текст сноски:';
+        valueInput.value = content;
 
         return popup;
     }
@@ -306,14 +317,6 @@ export class LinkFootnoteContextMenu {
         }
     }
 
-    /**
-     * Экранирует HTML для безопасного отображения
-     */
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 }
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.

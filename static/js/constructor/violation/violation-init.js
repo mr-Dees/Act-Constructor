@@ -4,6 +4,16 @@
  */
 
 import { ViolationManager } from './violation-core.js';
+// Расширения прототипа должны быть применены ДО инстанцирования и initialize():
+// setupPasteHandler живёт в violation-paste.js (сброс активной зоны по ESC —
+// через EscapeStack в violation-core.js), остальные
+// методы — в соседних модулях. Импорт здесь делает модуль самодостаточным
+// при импорте violationManager из любого места (не только из entry).
+import './violation-paste.js';
+import './violation-additional-content.js';
+import './violation-rendering.js';
+import './violation-drag-drop.js';
+import './violation-file-upload.js';
 
 // Создаем глобальный экземпляр менеджера нарушений
 export const violationManager = new ViolationManager();

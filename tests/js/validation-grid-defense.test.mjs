@@ -22,7 +22,6 @@ import { validateGrid } from '../../static/js/constructor/table/grid-merges.js';
 import {
   mergeRange,
   unmergeAt,
-  autoUnmergeRow,
 } from '../../static/js/constructor/table/table-merge-core.js';
 
 /**
@@ -198,12 +197,6 @@ test('защита: merge → unmerge возвращает валидную се
   const merged = mergeRange(grid3x3(), 0, 0, 0, 2); // 1×3 шапка
   const unmerged = unmergeAt(merged, 0, 0);
   assert.equal(validateGrid(unmerged).valid, true);
-});
-
-test('защита: autoUnmergeRow даёт валидную сетку перед удалением строки', () => {
-  const merged = mergeRange(grid3x3(), 0, 0, 2, 0); // вертикальное 3×1
-  const cleared = autoUnmergeRow(merged, 1);
-  assert.equal(validateGrid(cleared).valid, true);
 });
 
 test('защита: повреждённая сетка (рваная строка) ловится гардом', () => {

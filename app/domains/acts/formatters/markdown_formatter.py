@@ -6,8 +6,10 @@
 """
 
 from app.core.config import Settings
+from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
+from .tree_walker import WalkContext, collect_blocks, walk
 from .utils import HTMLUtils, TableUtils, FormattingUtils
 
 
@@ -42,101 +44,16 @@ class MarkdownFormatter(BaseFormatter):
         """
         result = []
 
-        # Извлекаем данные (не сохраняем в self для thread-safety)
-        violations = data.get('violations', {})
-        textBlocks = data.get('textBlocks', {})
-        tables = data.get('tables', {})
-
         # Главный заголовок
         result.append("# АКТ")
         result.append("")
 
-        # Обработка дерева
-        tree = data.get('tree', {})
-        root_children = tree.get('children', [])
-
-        for item in root_children:
-            result.append(
-                self._format_item(item, violations, textBlocks, tables, level=2)
-            )
+        # Обход дерева — единый walker, представление — в визиторе.
+        visitor = _MarkdownTreeVisitor(self)
+        walk(data.get('tree', {}), visitor, collect_blocks(data))
+        result.extend(visitor.lines)
 
         return "\n".join(result)
-
-    def _format_item(
-            self,
-            item: dict,
-            violations: dict,
-            textBlocks: dict,
-            tables: dict,
-            level: int = 2
-    ) -> str:
-        """
-        Рекурсивно форматирует пункт акта.
-
-        Args:
-            item: Узел дерева акта
-            violations: Словарь нарушений
-            textBlocks: Словарь текстовых блоков
-            tables: Словарь таблиц
-            level: Уровень вложенности (для заголовков)
-
-        Returns:
-            Markdown-текст пункта
-        """
-        lines = []
-
-        label = item.get('label', '')
-        number = item.get('number', '')
-        item_type = item.get('type', 'item')
-
-        # Для item-узлов собираем полный заголовок из номера и текста
-        if item_type not in ['table', 'textblock', 'violation']:
-            full_label = f"{number}. {label}" if number and label else (label or number)
-        else:
-            full_label = item.get('customLabel') or number or label
-
-        # Заголовок
-        if full_label and item_type not in ['textblock', 'violation', 'table']:
-            heading_level = min(level, self.MAX_HEADING_LEVEL)
-            heading_prefix = '#' * heading_level
-            lines.append(f"{heading_prefix} {full_label}")
-            lines.append("")
-        elif full_label and item_type == 'table':
-            lines.append(full_label)
-            lines.append("")
-
-        # Текстовое содержание
-        content = item.get('content', '')
-        if content:
-            lines.append(content)
-            lines.append("")
-
-        # Таблица
-        table_id = item.get('tableId')
-        if table_id and table_id in tables:
-            lines.append(self._format_table(tables[table_id]))
-            lines.append("")
-
-        # Текстовый блок
-        textblock_id = item.get('textBlockId')
-        if textblock_id and textblock_id in textBlocks:
-            lines.append(self._format_textblock(textBlocks[textblock_id]))
-            lines.append("")
-
-        # Нарушение
-        violation_id = item.get('violationId')
-        if violation_id and violation_id in violations:
-            lines.append(self._format_violation(violations[violation_id]))
-            lines.append("")
-
-        # Рекурсия для детей
-        children = item.get('children', [])
-        for child in children:
-            lines.append(
-                self._format_item(child, violations, textBlocks, tables, level + 1)
-            )
-
-        return "\n".join(lines)
 
     def _format_table(self, table_data: dict) -> str:
         """
@@ -225,6 +142,7 @@ class MarkdownFormatter(BaseFormatter):
         self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
         self._add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
         self._add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
+        self._add_labeled_section(lines, "Рекомендации", violation_data.get('recommendations', {}))
 
         return "\n".join(lines)
 
@@ -343,3 +261,62 @@ class MarkdownFormatter(BaseFormatter):
         if content:
             lines.append(content)
             lines.append("")
+
+
+class _MarkdownTreeVisitor:
+    """Визитор tree-walker'а для Markdown: представление узлов дерева.
+
+    Уровень заголовка строится от глубины обхода (дети корня — '##');
+    рендеринг таблиц, текстблоков и нарушений делегируется методам
+    MarkdownFormatter.
+    """
+
+    # Дети корня дерева начинаются с заголовков второго уровня (после '# АКТ').
+    _BASE_HEADING_LEVEL = 2
+
+    def __init__(self, formatter: MarkdownFormatter):
+        self._fmt = formatter
+        self.lines: list[str] = []
+
+    def on_item_enter(self, node: dict, ctx: WalkContext) -> None:
+        label = node.get('label', '')
+        number = node.get('number', '')
+
+        # Полный заголовок пункта из номера и текста.
+        full_label = f"{number}. {label}" if number and label else (label or number)
+        if full_label:
+            heading_level = min(
+                ctx.depth + self._BASE_HEADING_LEVEL, self._fmt.MAX_HEADING_LEVEL
+            )
+            self.lines.append(f"{'#' * heading_level} {full_label}")
+            self.lines.append("")
+
+        content = node.get('content', '')
+        if content:
+            self.lines.append(content)
+            self.lines.append("")
+
+    def on_item_exit(self, node: dict, ctx: WalkContext) -> None:
+        pass
+
+    def on_table(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        if node.get('type') == NODE_TYPE_TABLE:
+            # Заголовок узла-таблицы — обычной строкой (выводится и без данных);
+            # прикреплённой к пункту таблице заголовком служит сам пункт.
+            title = node.get('customLabel') or node.get('number') or node.get('label', '')
+            if title:
+                self.lines.append(title)
+                self.lines.append("")
+        if schema is not None:
+            self.lines.append(self._fmt._format_table(schema))
+            self.lines.append("")
+
+    def on_textblock(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        if schema is not None:
+            self.lines.append(self._fmt._format_textblock(schema))
+            self.lines.append("")
+
+    def on_violation(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        if schema is not None:
+            self.lines.append(self._fmt._format_violation(schema))
+            self.lines.append("")

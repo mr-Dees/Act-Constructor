@@ -5,7 +5,25 @@
 
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from './violation-content-item.js';
+
+/**
+ * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
+ * 0 — «Авто»: натуральный размер с потолком по полезной ширине листа.
+ */
+export const IMAGE_WIDTH_OPTIONS = [
+    [0, 'Авто'],
+    [25, '25%'],
+    [50, '50%'],
+    [75, '75%'],
+    [100, '100%'],
+];
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -24,14 +42,14 @@ Object.assign(ViolationManager.prototype, {
         violation.additionalContent.items.forEach((item, index) => {
             let itemElement;
 
-            if (item.type === 'case') {
+            if (item.type === CONTENT_TYPE_CASE) {
                 const caseNumber = itemsWithNumbers[index];
                 itemElement = this.createCaseElement(violation, item, index, caseNumber);
-            } else if (item.type === 'image') {
-                const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'image', index);
+            } else if (item.type === CONTENT_TYPE_IMAGE) {
+                const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_IMAGE, index);
                 itemElement = this.createImageElement(violation, item, index, imageNumber);
-            } else if (item.type === 'freeText') {
-                const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'freeText', index);
+            } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
+                const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_FREE_TEXT, index);
                 itemElement = this.createFreeTextElement(violation, item, index, textNumber);
             }
 
@@ -89,7 +107,7 @@ Object.assign(ViolationManager.prototype, {
         let currentCaseNumber = 1;
 
         items.forEach((item, index) => {
-            if (item.type === 'case') {
+            if (item.type === CONTENT_TYPE_CASE) {
                 numbers[index] = currentCaseNumber;
                 currentCaseNumber++;
             } else {
@@ -121,14 +139,15 @@ Object.assign(ViolationManager.prototype, {
         itemDiv.className = 'content-item';
 
         const textarea = document.createElement('textarea');
-        textarea.className = 'violation-textarea';
+        textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         textarea.placeholder = 'Описание кейса';
         textarea.value = item.content;
         textarea.rows = 3;
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.update();
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);
@@ -179,18 +198,49 @@ Object.assign(ViolationManager.prototype, {
 
         const captionInput = document.createElement('input');
         captionInput.type = 'text';
-        captionInput.className = 'violation-list-input';
+        captionInput.className = RENDER_CLASSES.VIOLATION_LIST_INPUT;
         captionInput.placeholder = 'Подпись к изображению';
         captionInput.value = item.caption;
 
         captionInput.addEventListener('input', () => {
             item.caption = captionInput.value;
-            PreviewManager.update();
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
+
+        // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
+        // (натуральный размер с потолком по ширине). Пишет item.width —
+        // Proxy пометит unsaved, превью и DOCX применят значение.
+        const widthControl = document.createElement('div');
+        widthControl.className = 'image-width-control';
+
+        const widthLabel = document.createElement('label');
+        widthLabel.className = 'image-width-label';
+        widthLabel.textContent = 'Ширина:';
+
+        const widthSelect = document.createElement('select');
+        widthSelect.className = 'image-width-select';
+        for (const [value, text] of IMAGE_WIDTH_OPTIONS) {
+            const option = document.createElement('option');
+            option.value = String(value);
+            option.textContent = text;
+            widthSelect.appendChild(option);
+        }
+        widthSelect.value = String(item.width || 0);
+        widthLabel.htmlFor = widthSelect.id = `${item.id}-width`;
+
+        widthSelect.addEventListener('change', () => {
+            item.width = parseInt(widthSelect.value, 10) || 0;
+            PreviewManager.updateBlock('violation', violation.id);
+        });
+
+        widthControl.appendChild(widthLabel);
+        widthControl.appendChild(widthSelect);
 
         itemDiv.appendChild(imgContainer);
         itemDiv.appendChild(filenameDiv);
         itemDiv.appendChild(captionInput);
+        itemDiv.appendChild(widthControl);
 
         wrapper.appendChild(label);
         wrapper.appendChild(itemDiv);
@@ -218,14 +268,15 @@ Object.assign(ViolationManager.prototype, {
         itemDiv.className = 'content-item';
 
         const textarea = document.createElement('textarea');
-        textarea.className = 'violation-textarea';
+        textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         textarea.placeholder = 'Произвольный текст';
         textarea.value = item.content;
         textarea.rows = 4;
 
         textarea.addEventListener('input', () => {
             item.content = textarea.value;
-            PreviewManager.update();
+            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+            PreviewManager.scheduleTypingBlock('violation', violation.id);
         });
 
         itemDiv.appendChild(textarea);

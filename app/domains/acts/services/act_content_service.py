@@ -19,6 +19,10 @@ from app.domains.acts.repositories.act_content_version import ActContentVersionR
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
+from app.domains.acts.services.content_validation import (
+    collect_validation_issues,
+    status_from_issues,
+)
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.utils.html_sanitizer import sanitize_act_data, sanitize_tree_nodes
@@ -86,7 +90,17 @@ class ActContentService:
         }
 
     async def save_content(self, act_id: int, data: ActDataSchema, username: str) -> dict:
-        """Сохраняет содержимое акта."""
+        """Сохраняет содержимое акта.
+
+        Запись контента, diff, аудит-лог и снимок версии идут в ОДНОЙ плоской
+        транзакции (§9 зона 4): сбой на любом шаге откатывает всё — контент
+        не записывается частично, история версий не рассогласуется.
+        Вложенных transaction()/savepoint'ов нет (Greenplum): репозитории
+        работают на этом же соединении и собственных транзакций не открывают.
+        Аудит-лог через активный батчер пишется его собственным соединением
+        и в транзакцию по определению не входит (fire-and-forget by design);
+        fallback-INSERT одиночного пути попадает в общую транзакцию.
+        """
         await self.guard.require_edit_permission(act_id, username)
         await self.guard.require_lock_owner(act_id, username)
 
@@ -97,41 +111,137 @@ class ActContentService:
         # перед записью в БД. Whitelist в utils/html_sanitizer.py.
         self._sanitize_html_fields(data)
 
-        # Вычисляем diff ДО сохранения
-        diff = await self._audit.compute_content_diff(act_id, data)
-        diff["save_type"] = data.saveType
+        # Мягкая чистка рассогласования дерево ↔ словари (решение «lenient»,
+        # обе стороны). Листовые узлы-зомби с висячей ссылкой удаляются ЦЕЛИКОМ
+        # ДО diff/сохранения — сохраняемое дерево не ссылается на потерянный
+        # контент и не оставляет пустых блоков в экспорте.
+        stripped_refs = self._strip_dangling_refs(data)
 
-        # Вычисляем field-level diff для изменённых элементов
-        audit_log_cfg = self.acts_settings.audit_log
-        field_changes = await self._audit.compute_field_diffs(
-            act_id,
-            data,
-            max_elements=audit_log_cfg.max_diff_elements,
-            max_cells_per_table=audit_log_cfg.max_diff_cells_per_table,
-        )
-        if field_changes:
-            diff["field_changes"] = field_changes
+        # Состояние структурной валидации (фича #8): бэк — источник истины.
+        # WIP-сохранение НЕ блокируется (в отличие от старого фронт-гейта):
+        # акт сохраняется и помечается статусом, конкретику покажут карточка
+        # и уведомления. _validate_tree выше всё ещё бросает на жёстких
+        # дефектах (нет корня/превышена глубина) — их сохранить нельзя.
+        validation_issues = collect_validation_issues(data)
+        validation_status = status_from_issues(validation_issues)
 
-        # Сохраняем содержимое
-        result = await self._content.save_content(act_id, data, username)
+        async with self.conn.transaction():
+            # Вычисляем diff ДО сохранения
+            diff = await self._audit.compute_content_diff(act_id, data)
+            diff["save_type"] = data.saveType
 
-        # Записываем в аудит-лог (fire-and-forget)
-        await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
+            # Вычисляем field-level diff для изменённых элементов
+            audit_log_cfg = self.acts_settings.audit_log
+            field_changes = await self._audit.compute_field_diffs(
+                act_id,
+                data,
+                max_elements=audit_log_cfg.max_diff_elements,
+                max_cells_per_table=audit_log_cfg.max_diff_cells_per_table,
+            )
+            if field_changes:
+                diff["field_changes"] = field_changes
 
-        # Создаём снэпшот версии только для manual/periodic
-        if data.saveType in ("manual", "periodic"):
-            await self._versions.create_version(
-                act_id=act_id,
-                username=username,
-                save_type=data.saveType,
-                tree=data.tree,
-                tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
-                textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
-                violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
-                max_versions=self.acts_settings.audit_log.max_content_versions,
+            # Сохраняем содержимое; репозиторий возвращает число записей
+            # словарей, отброшенных orphan-фильтром (нет узла-владельца).
+            result = await self._content.save_content(
+                act_id, data, username,
+                validation_status=validation_status,
+                validation_issues=validation_issues,
             )
 
+            # Записываем в аудит-лог
+            await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
+
+            # Создаём снэпшот версии только для manual/periodic
+            if data.saveType in ("manual", "periodic"):
+                await self._versions.create_version(
+                    act_id=act_id,
+                    username=username,
+                    save_type=data.saveType,
+                    tree=data.tree,
+                    tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
+                    textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
+                    violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
+                    max_versions=self.acts_settings.audit_log.max_content_versions,
+                )
+
+        # Одно предупреждение, если что-то вычищено в любую из сторон:
+        # stripped_refs — снятые висячие ссылки узлов, dropped_orphans —
+        # записи словарей без узла-владельца. null, если чистить было нечего.
+        dropped_orphans = result.pop("dropped_orphans", 0)
+        result["warning"] = self._build_cleanup_warning(stripped_refs, dropped_orphans)
+        result["validation_status"] = validation_status
+        result["validation_issues"] = validation_issues
+
+        # Структурный статус акта (error/warning) НЕ создаёт персистентного
+        # уведомления. На лендинге его показывает серверная сводка attention
+        # (GET /acts/attention-summary, колокольчик), внутри акта — живой
+        # источник validation. Прежний error-push дублировал эту сводку и при
+        # каждом ручном сохранении плодил записи (INSERT без дедупликации) —
+        # поэтому убран. Toast о статусе остаётся на фронте (api.js).
         return result
+
+    def _strip_dangling_refs(self, data: ActDataSchema) -> int:
+        """Удаляет листовые узлы-зомби с висячей ссылкой на отсутствующую запись.
+
+        Узел-лист (table/textBlock/violation), чья ссылка
+        (tableId/textBlockId/violationId) указывает на запись, которой нет в
+        словаре, удаляется из дерева ЦЕЛИКОМ — снять только поле-ссылку мало:
+        остался бы бессодержательный узел, который walker экспорта всё равно
+        отрисует (пустая «Таблица N»), а пересохранение его не вычистит
+        (висячей ссылки уже нет). Зеркалит act-content-sanitizer.js на фронте.
+
+        Удаляем безусловно: нефункциональный лист — мусор независимо от
+        protected/deletable; защищённые секции 1–5 имеют type='item' и
+        листовых ссылок не несут, поэтому под удаление не попадают. Возвращает
+        число удалённых узлов (для предупреждения пользователю).
+        """
+        dangling = data.collect_dangling_refs()
+        if not dangling:
+            return 0
+
+        # Группируем по (node_id, ref_field) → набор «висячих» значений ссылок.
+        to_strip: dict[tuple[str | None, str], set[str]] = {}
+        for node_id, ref_field, ref in dangling:
+            to_strip.setdefault((node_id, ref_field), set()).add(ref)
+
+        def _is_zombie(node: dict) -> bool:
+            node_id = node.get("id")
+            for (target_id, ref_field), refs in to_strip.items():
+                if node_id == target_id and node.get(ref_field) in refs:
+                    return True
+            return False
+
+        # Обходим с родителями; узел-зомби вырезаем из children родителя.
+        # Корень не проверяется (ссылок не несёт) — только его поддерево.
+        removed = 0
+        stack = [data.tree] if data.tree else []
+        while stack:
+            node = stack.pop()
+            children = node.get("children")
+            if not isinstance(children, list) or not children:
+                continue
+            kept = [child for child in children if not _is_zombie(child)]
+            if len(kept) != len(children):
+                removed += len(children) - len(kept)
+                node["children"] = kept
+            stack.extend(kept)
+        return removed
+
+    @staticmethod
+    def _build_cleanup_warning(stripped_refs: int, dropped_orphans: int) -> str | None:
+        """Собирает одно русскоязычное предупреждение о вычищенных рассогласованиях.
+
+        null, если ничего не чистилось. Нулевую половину опускаем.
+        """
+        if not stripped_refs and not dropped_orphans:
+            return None
+        parts: list[str] = []
+        if stripped_refs:
+            parts.append(f"висячих ссылок: {stripped_refs}")
+        if dropped_orphans:
+            parts.append(f"записей без узла: {dropped_orphans}")
+        return "Очищено рассогласование дерево ↔ словари (" + ", ".join(parts) + ")"
 
     def _sanitize_html_fields(self, data: ActDataSchema) -> None:
         """

@@ -1,17 +1,24 @@
 /**
  * Менеджер отрисовки элементов.
  * Координирует рендеринг всех типов элементов документа: обычных пунктов,
- * таблиц, текстовых блоков и нарушений. Обеспечивает синхронизацию данных
- * между DOM и глобальным состоянием приложения.
+ * таблиц, текстовых блоков и нарушений. DOM строится из AppState; обратной
+ * синхронизации DOM→state нет — данные пишут live-обработчики ввода
+ * (write-through ячеек, input/blur текстблоков и нарушений).
  */
 import { ItemsTitleEditing } from './items-title-editing.js';
-import { AppState } from '../state/state-core.js';
+import { RENDER_CLASSES } from '../render-classes.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType, isLeafBlockType } from '../block-types.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
 import { buildColgroup } from '../table/colgroup.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
+import { shouldShowTableTitle, tableTitleText } from '../table/table-title.js';
+import { tableManager } from '../table/table-core.js';
+import { textBlockManager } from '../textblock/textblock-core.js';
+import { violationManager } from '../violation/violation-init.js';
 
 export class ItemsRenderer {
     /**
@@ -33,12 +40,18 @@ export class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        // Дропдаун ТБ живёт в document.body и переживает innerHTML='' —
+        // закрываем явно, иначе утекает он сам и его document-слушатель.
+        this._closeTbDropdownInItems();
         this._domIndex.clear();
         container.innerHTML = '';
         tableManager.clearSelection();
 
-        if (AppState.treeData?.children) {
-            AppState.treeData.children.forEach(item => {
+        // Read-only обход — по raw-дереву (renderItem сам unwrap'ает узлы);
+        // write-замыкания получают tracked-узлы точечно.
+        const rawTree = _unwrap(AppState.treeData);
+        if (rawTree?.children) {
+            rawTree.children.forEach(item => {
                 container.appendChild(this.renderItem(item, 1));
             });
         }
@@ -63,6 +76,10 @@ export class ItemsRenderer {
             return this.renderAll();
         }
 
+        // Заменяемое поддерево может содержать бейдж-якорь открытого дропдауна ТБ —
+        // закрываем дропдаун (он в document.body) вместе с его document-слушателем.
+        this._closeTbDropdownInItems();
+
         // Чистим индекс по всему поддереву старого DOM перед заменой
         this._purgeSubtreeFromIndex(oldEl);
 
@@ -85,6 +102,12 @@ export class ItemsRenderer {
     static updateTable(tableId) {
         if (!tableId) return this.renderAll();
 
+        // replaceChild оставил бы в selectedCells detached-ячейки старой
+        // section (операции по ним читают устаревшие координаты) — снимаем
+        // выделение, как это делает renderAll. Закрывает в т.ч. путь ресайза
+        // колонок (TableSizes._commitColWidths завершается updateTable).
+        tableManager.clearSelection();
+
         const oldSection = this._domIndex.get(`table:${tableId}`);
         const table = AppState.tables[tableId];
 
@@ -93,7 +116,7 @@ export class ItemsRenderer {
             return this.renderAll();
         }
 
-        const tableNode = this._findNodeById(table.nodeId);
+        const tableNode = AppState.findNodeById(table.nodeId);
         if (!tableNode) return this.renderAll();
 
         const newSection = this.renderTable(table, tableNode);
@@ -191,57 +214,52 @@ export class ItemsRenderer {
             const id = el.dataset.tableId;
             if (id) this._domIndex.delete(`table:${id}`);
         });
-        // textblock-editor / text-block-section
+        // textblock-section / textblock-editor (ищем по data-атрибуту: он есть у обоих)
         rootEl.querySelectorAll('[data-text-block-id]').forEach(el => {
             const id = el.dataset.textBlockId;
             if (id) this._domIndex.delete(`textblock:${id}`);
         });
         // violation-section
-        rootEl.querySelectorAll('.violation-section').forEach(el => {
+        rootEl.querySelectorAll(`.${RENDER_CLASSES.VIOLATION_SECTION}`).forEach(el => {
             const id = el.dataset.violationId;
             if (id) this._domIndex.delete(`violation:${id}`);
         });
     }
 
     /**
+     * Render-обработчики листовых блоков: тип из реестра → создание DOM-элемента.
+     * Сами render-методы живут в своих модулях (renderTable / textBlockManager /
+     * violationManager) — здесь только маппинг для диспетча renderItem.
+     * Полнота покрытия leaf-типов реестра закреплена tests/js/block-types.test.mjs.
+     * @type {Object<string, function(Object, Object): HTMLElement>}
+     */
+    static _leafRenderers = {
+        [AppConfig.nodeTypes.TABLE]: (data, node) => ItemsRenderer.renderTable(data, node),
+        [AppConfig.nodeTypes.TEXTBLOCK]: (data, node) => textBlockManager.createTextBlockElement(data, node),
+        [AppConfig.nodeTypes.VIOLATION]: (data, node) => violationManager.createViolationElement(data, node),
+    };
+
+    /**
      * Рекурсивная отрисовка элемента дерева с обработкой различных типов узлов.
-     * Создает соответствующий DOM-элемент в зависимости от типа: обычный пункт,
-     * таблица, текстовый блок или нарушение.
+     * Листовые блоки (таблица, текстовый блок, нарушение) диспетчатся через
+     * реестр типов (block-types.js): словарь, поле-ссылка и префикс _domIndex
+     * берутся из описания типа, создание элемента — из _leafRenderers.
      * @param {Object} node - Узел дерева для отрисовки
      * @param {number} level - Уровень вложенности (определяет размер заголовка)
      * @returns {HTMLElement} Созданный DOM-элемент с содержимым узла
      */
     static renderItem(node, level) {
+        // Горячий read-путь: обход по raw-узлу (updateItem может передать proxy).
+        node = _unwrap(node);
         const itemDiv = this._createItemContainer(node, level);
 
-        // Проверяем специальные типы узлов
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        if (node.type === TABLE) {
-            const table = AppState.tables[node.tableId];
-            if (table) {
-                const section = this.renderTable(table, node);
-                itemDiv.appendChild(section);
-                this._domIndex.set(`table:${table.id}`, section);
-            }
-            return itemDiv;
-        }
-
-        if (node.type === TEXTBLOCK) {
-            const textBlock = AppState.textBlocks[node.textBlockId];
-            if (textBlock) {
-                const tbEl = textBlockManager.createTextBlockElement(textBlock, node);
-                itemDiv.appendChild(tbEl);
-                this._domIndex.set(`textblock:${textBlock.id}`, tbEl);
-            }
-            return itemDiv;
-        }
-
-        if (node.type === VIOLATION) {
-            const violation = AppState.violations[node.violationId];
-            if (violation) {
-                const vEl = violationManager.createViolationElement(violation, node);
-                itemDiv.appendChild(vEl);
-                this._domIndex.set(`violation:${violation.id}`, vEl);
+        const spec = getBlockType(node.type);
+        if (spec && spec.idProp) {
+            const data = AppState[spec.dictName][node[spec.idProp]];
+            if (data) {
+                const el = this._leafRenderers[spec.type](data, node);
+                itemDiv.appendChild(el);
+                this._domIndex.set(`${spec.domIndexPrefix}:${data.id}`, el);
             }
             return itemDiv;
         }
@@ -312,7 +330,9 @@ export class ItemsRenderer {
         title.appendChild(textSpan);
 
         if (!node.protected) {
-            this._setupTitleEditing(textSpan, node);
+            // Tracked-узел: замыкание редактирования пишет node.label,
+            // запись обязана ловиться markAsUnsaved.
+            this._setupTitleEditing(textSpan, AppState._trackedNode(node));
         }
 
         header.appendChild(title);
@@ -327,27 +347,15 @@ export class ItemsRenderer {
 
     /**
      * Настраивает редактирование заголовка по двойному клику.
-     * Использует таймер для определения двойного клика (300мс).
+     * Нативное событие dblclick — браузер сам различает одиночный/двойной клик
+     * (раньше это эмулировал ручной 300мс таймер).
      * @param {HTMLElement} title - Элемент заголовка
      * @param {Object} node - Узел дерева
      * @private
      */
     static _setupTitleEditing(textSpan, node) {
-        let clickCount = 0;
-        let clickTimer = null;
-
-        textSpan.addEventListener('click', () => {
-            clickCount++;
-
-            if (clickCount === 1) {
-                clickTimer = setTimeout(() => {
-                    clickCount = 0;
-                }, 300);
-            } else if (clickCount === 2) {
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingItemTitle(textSpan, node);
-            }
+        textSpan.addEventListener('dblclick', () => {
+            ItemsTitleEditing.startEditingItemTitle(textSpan, node);
         });
 
         textSpan.style.cursor = 'pointer';
@@ -534,7 +542,7 @@ export class ItemsRenderer {
      * @private
      */
     static _updateParentTbInItems(node) {
-        let parent = TreeUtils.findParentNode(node.id);
+        let parent = AppState.findParentNode(node.id);
         while (parent && parent.id !== 'root') {
             if (TreeUtils.isUnderSection5(parent)) {
                 const parentBlock = document.querySelector(`.item-block[data-node-id="${parent.id}"]`);
@@ -546,7 +554,7 @@ export class ItemsRenderer {
                     }
                 }
             }
-            parent = TreeUtils.findParentNode(parent.id);
+            parent = AppState.findParentNode(parent.id);
         }
     }
 
@@ -562,11 +570,8 @@ export class ItemsRenderer {
         const childrenDiv = document.createElement('div');
         childrenDiv.className = 'item-children';
 
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        const specialTypes = new Set([TABLE, TEXTBLOCK, VIOLATION]);
-
         children.forEach(child => {
-            const childLevel = specialTypes.has(child.type) ? parentLevel : parentLevel + 1;
+            const childLevel = isLeafBlockType(child.type) ? parentLevel : parentLevel + 1;
             childrenDiv.appendChild(this.renderItem(child, childLevel));
         });
 
@@ -585,8 +590,8 @@ export class ItemsRenderer {
         section.className = 'table-section';
         section.dataset.tableId = table.id;
 
-        // Показываем заголовок только если есть customLabel
-        if (node.customLabel !== '') {
+        // Единый с превью и DOCX предикат показа заголовка (render-8).
+        if (shouldShowTableTitle(node)) {
             section.appendChild(this._createTableTitle(table, node));
         }
 
@@ -606,7 +611,7 @@ export class ItemsRenderer {
         const tableTitle = document.createElement('h4');
         tableTitle.className = 'table-title';
         tableTitle.contentEditable = false;
-        tableTitle.textContent = node.customLabel || node.number || node.label;
+        tableTitle.textContent = tableTitleText(node);
 
         // Применяем стили
         Object.assign(tableTitle.style, {
@@ -617,7 +622,8 @@ export class ItemsRenderer {
         });
 
         if (!table.protected) {
-            this._setupTableTitleEditing(tableTitle, node);
+            // Tracked-узел: замыкание пишет node.customLabel.
+            this._setupTableTitleEditing(tableTitle, AppState._trackedNode(node));
         } else {
             tableTitle.addEventListener('click', () => {
                 Notifications.info('Название защищенной таблицы нельзя редактировать');
@@ -629,26 +635,14 @@ export class ItemsRenderer {
 
     /**
      * Настраивает редактирование заголовка таблицы по двойному клику.
+     * Нативное событие dblclick вместо ручного 300мс таймера.
      * @param {HTMLElement} tableTitle - Элемент заголовка таблицы
      * @param {Object} node - Узел дерева таблицы
      * @private
      */
     static _setupTableTitleEditing(tableTitle, node) {
-        let clickCount = 0;
-        let clickTimer = null;
-
-        tableTitle.addEventListener('click', () => {
-            clickCount++;
-
-            if (clickCount === 1) {
-                clickTimer = setTimeout(() => {
-                    clickCount = 0;
-                }, 300);
-            } else if (clickCount === 2) {
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
-            }
+        tableTitle.addEventListener('dblclick', () => {
+            ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
         });
     }
 
@@ -761,179 +755,13 @@ export class ItemsRenderer {
         return cellEl;
     }
 
-    /**
-     * Перерисовка только конкретной таблицы (оптимизация).
-     * Ширины колонок рендерятся из colWidths через colgroup — отдельное
-     * сохранение/восстановление размеров не требуется.
-     * @param {string} tableId - ID таблицы для перерисовки
-     */
-    static renderSingleTable(tableId) {
-        const section = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
-        if (!section) {
-            // Если секция не найдена, делаем полную перерисовку
-            this.renderAll();
-            return;
-        }
-
-        const table = AppState.tables[tableId];
-        if (!table) return;
-
-        const tableNode = this._findNodeById(table.nodeId);
-        if (!tableNode) return;
-
-        // Перерисовываем таблицу
-        const newTableSection = this.renderTable(table, tableNode);
-        section.replaceWith(newTableSection);
-
-        tableManager.attachEventListeners();
-    }
-
-    /**
-     * Поиск узла в дереве по ID (рекурсивный обход).
-     * @param {string} id - ID узла для поиска
-     * @param {Object} [node=AppState.treeData] - Узел, с которого начинать поиск
-     * @returns {Object|null} Найденный узел или null
-     * @private
-     */
-    static _findNodeById(id, node = AppState.treeData) {
-        if (node.id === id) return node;
-
-        if (node.children) {
-            for (const child of node.children) {
-                const found = this._findNodeById(id, child);
-                if (found) return found;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Синхронизация данных из DOM обратно в глобальное состояние AppState.
-     * Извлекает актуальные значения из редактируемых элементов (таблицы, текстовые блоки,
-     * нарушения) и обновляет соответствующие объекты в состоянии.
-     * Вызывается перед сохранением или экспортом документа.
-     */
-    static syncDataToState() {
-        this._syncTables();
-        this._syncTextBlocks();
-        this._syncViolations();
-    }
-
-    /**
-     * Синхронизация содержимого всех таблиц из DOM в AppState.
-     * Обновляет текст ячеек в матричной структуре grid.
-     * @private
-     */
-    static _syncTables() {
-        document.querySelectorAll('.table-section').forEach(section => {
-            const tableId = section.dataset.tableId;
-            const table = AppState.tables[tableId];
-            if (!table) return;
-
-            const tableEl = section.querySelector('.editable-table');
-            if (!tableEl) return;
-
-            // Обновляем содержимое ячеек
-            tableEl.querySelectorAll('tr').forEach(tr => {
-                tr.querySelectorAll('td, th').forEach(cell => {
-                    const row = parseInt(cell.dataset.row);
-                    const col = parseInt(cell.dataset.col);
-
-                    const cellData = table.grid?.[row]?.[col];
-                    if (cellData && !cellData.isSpanned) {
-                        cellData.content = cell.textContent.trim();
-                    }
-                });
-            });
-        });
-    }
-
-    /**
-     * Синхронизация содержимого всех текстовых блоков из DOM в AppState.
-     * Сохраняет HTML-контент для поддержки форматирования.
-     * @private
-     */
-    static _syncTextBlocks() {
-        document.querySelectorAll('.text-block-section').forEach(section => {
-            const textBlockId = section.dataset.textBlockId;
-            const textBlock = AppState.textBlocks[textBlockId];
-            if (!textBlock) return;
-
-            const editor = section.querySelector('.text-block-editor');
-            if (editor) {
-                textBlock.content = editor.innerHTML;
-            }
-        });
-    }
-
-    /**
-     * Синхронизация данных всех нарушений из DOM в AppState.
-     * Обновляет поля ввода, списки описаний и опциональные поля.
-     * @private
-     */
-    static _syncViolations() {
-        document.querySelectorAll('.violation-section').forEach(section => {
-            const violationId = section.dataset.violationId;
-            const violation = AppState.violations[violationId];
-            if (!violation) return;
-
-            this._syncViolationFields(section, violation);
-        });
-    }
-
-    /**
-     * Синхронизация полей конкретного нарушения.
-     * Обновляет основные поля, список описаний и опциональные блоки.
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncViolationFields(section, violation) {
-        // Синхронизация основных полей
-        const violatedInput = section.querySelector('input[data-field="violated"]');
-        if (violatedInput) {
-            violation.violated = violatedInput.value;
-        }
-
-        const establishedInput = section.querySelector('textarea[data-field="established"]');
-        if (establishedInput) {
-            violation.established = establishedInput.value;
-        }
-
-        // Синхронизация списка описаний (метрик)
-        const descItems = section.querySelectorAll('.violation-desc-item');
-        if (descItems.length > 0) {
-            violation.descriptionList.items = Array.from(descItems, item => item.value);
-        }
-
-        // Синхронизация опциональных полей
-        this._syncOptionalViolationFields(section, violation);
-    }
-
-    /**
-     * Синхронизация опциональных полей нарушения (причины, последствия, ответственные).
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncOptionalViolationFields(section, violation) {
-        const optionalFields = ['reasons', 'consequences', 'responsible'];
-
-        optionalFields.forEach(field => {
-            const textarea = section.querySelector(`textarea[data-field="${field}"]`);
-            if (textarea && violation[field]) {
-                violation[field].content = textarea.value;
-            }
-        });
-    }
 }
 
 // Подписчик на 'node:tb-changed' — обновляет бейджи ТБ на шаге 2 без полного
 // renderAll. Симметричен подписчику в TreeRenderer (он обновляет дерево).
 // AppState.setNodeTb эмитит событие, оба подписчика срабатывают независимо.
 window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
-    const node = typeof TreeUtils !== 'undefined' ? TreeUtils.findNodeById?.(nodeId) : null;
+    const node = typeof AppState !== 'undefined' ? AppState.findNodeById?.(nodeId) : null;
     if (!node) return;
 
     const itemBlock = document.querySelector(`.item-block[data-node-id="${nodeId}"]`);

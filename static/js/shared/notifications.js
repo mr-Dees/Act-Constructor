@@ -53,17 +53,27 @@ export class NotificationManager {
      * @param {string} message - Текст уведомления
      * @param {'success'|'error'|'info'|'warning'} type - Тип уведомления
      * @param {number} [duration] - Длительность отображения в миллисекундах (0 = не скрывать)
+     * @param {Object} [options] - Дополнительные опции
+     * @param {{label: string, onClick: Function}} [options.action] - Action-кнопка
+     *        внутри уведомления (например «Отменить» у toast'а удаления).
+     *        Клик скрывает уведомление и вызывает onClick.
      * @returns {string} ID уведомления
      */
-    show(message, type = 'info', duration = AppConfig.notifications.duration.info) {
-        const cacheKey = `${type}:${message}`;
+    show(message, type = 'info', duration = AppConfig.notifications.duration.info, options = {}) {
+        const action = options.action || null;
 
-        // Проверяем наличие дубликата
-        const existingId = this._handleDuplicate(cacheKey, duration);
-        if (existingId) return existingId;
+        // Уведомления с action-кнопкой не группируются: каждое удаление —
+        // отдельный toast со своим обработчиком (cacheKey не используется).
+        const cacheKey = action ? null : `${type}:${message}`;
+
+        if (cacheKey) {
+            // Проверяем наличие дубликата
+            const existingId = this._handleDuplicate(cacheKey, duration);
+            if (existingId) return existingId;
+        }
 
         // Создаем новое уведомление
-        return this._createNotification(message, type, duration, cacheKey);
+        return this._createNotification(message, type, duration, cacheKey, action);
     }
 
     /**
@@ -125,10 +135,11 @@ export class NotificationManager {
      * @param {string} message - Текст уведомления
      * @param {string} type - Тип уведомления
      * @param {number} duration - Длительность
-     * @param {string} cacheKey - Ключ кеша
+     * @param {string|null} cacheKey - Ключ кеша (null — без группировки)
+     * @param {{label: string, onClick: Function}|null} [action] - Action-кнопка
      * @returns {string} ID уведомления
      */
-    _createNotification(message, type, duration, cacheKey) {
+    _createNotification(message, type, duration, cacheKey, action = null) {
         // H-N8-UX: глобальный cap. При переполнении вытесняем самый старый
         // (Map хранит порядок вставки, keys().next() → oldest) синхронно,
         // без hide()-анимации — иначе DOM-узел висит ещё ~250 мс и cap течёт.
@@ -140,7 +151,7 @@ export class NotificationManager {
         }
 
         const id = this._generateId();
-        const notification = this._buildNotificationElement(id, message, type);
+        const notification = this._buildNotificationElement(id, message, type, action);
 
         this.container.appendChild(notification);
         this.notifications.set(id, notification);
@@ -148,8 +159,10 @@ export class NotificationManager {
         // Настраиваем автоматическое скрытие
         const timer = this._setupAutoHide(id, duration, cacheKey);
 
-        // Сохраняем в кеш
-        this.messageCache.set(cacheKey, {id, count: 1, timer});
+        // Сохраняем в кеш (только для группируемых уведомлений)
+        if (cacheKey) {
+            this.messageCache.set(cacheKey, {id, count: 1, timer});
+        }
 
         return id;
     }
@@ -194,9 +207,10 @@ export class NotificationManager {
      * @param {string} id - ID уведомления
      * @param {string} message - Текст
      * @param {string} type - Тип
+     * @param {{label: string, onClick: Function}|null} [action] - Action-кнопка
      * @returns {HTMLElement} Элемент уведомления
      */
-    _buildNotificationElement(id, message, type) {
+    _buildNotificationElement(id, message, type, action = null) {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         notification.dataset.notificationId = id;
@@ -213,7 +227,7 @@ export class NotificationManager {
         notification.setAttribute('aria-atomic', 'true');
 
         notification.appendChild(this._createIcon(type));
-        notification.appendChild(this._createContent(message));
+        notification.appendChild(this._createContent(message, id, action));
         notification.appendChild(this._createCounter());
         notification.appendChild(this._createCloseButton(id));
 
@@ -237,9 +251,11 @@ export class NotificationManager {
      * Создает контент уведомления
      * @private
      * @param {string} message - Текст сообщения
+     * @param {string} id - ID уведомления (для скрытия по клику на action)
+     * @param {{label: string, onClick: Function}|null} [action] - Action-кнопка
      * @returns {HTMLElement} Элемент контента
      */
-    _createContent(message) {
+    _createContent(message, id, action = null) {
         const content = document.createElement('div');
         content.className = 'notification-content';
 
@@ -248,6 +264,26 @@ export class NotificationManager {
         messageElement.textContent = message;
 
         content.appendChild(messageElement);
+
+        if (action && action.label) {
+            const actions = document.createElement('div');
+            actions.className = 'notification-actions';
+
+            const actionButton = document.createElement('button');
+            actionButton.className = 'notification-action';
+            actionButton.type = 'button';
+            actionButton.textContent = action.label;
+            actionButton.addEventListener('click', () => {
+                this.hide(id);
+                if (typeof action.onClick === 'function') {
+                    action.onClick();
+                }
+            });
+
+            actions.appendChild(actionButton);
+            content.appendChild(actions);
+        }
+
         return content;
     }
 

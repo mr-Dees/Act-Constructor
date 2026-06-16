@@ -6,24 +6,14 @@
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from './violation-content-item.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
-    /**
-     * Настраивает обработчик клавиши Escape для сброса активной зоны
-     */
-    setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                if (this.currentActiveContainer) {
-                    this.currentActiveContainer = null;
-                    this.cursorInsertPosition = null;
-                    Notifications.info('Активная зона сброшена');
-                }
-            }
-        });
-    },
-
     /**
      * Настраивает глобальный обработчик вставки изображений и текста из буфера обмена
      */
@@ -88,6 +78,10 @@ Object.assign(ViolationManager.prototype, {
                 const file = imageItem.getAsFile();
 
                 if (file) {
+                    // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
+                    const accepted = this.filterAcceptedImageFiles([file], violation);
+                    if (accepted.length === 0) return;
+
                     const reader = new FileReader();
 
                     reader.onload = (event) => {
@@ -95,7 +89,7 @@ Object.assign(ViolationManager.prototype, {
                         const extension = file.type.split('/')[1] || 'png';
                         const filename = `pasted_image_${timestamp}.${extension}`;
 
-                        this.addContentItemAtPosition(violation, 'image', targetContainer, insertIndex, {
+                        this.addContentItemAtPosition(violation, CONTENT_TYPE_IMAGE, targetContainer, insertIndex, {
                             url: event.target.result,
                             filename: filename
                         });
@@ -125,7 +119,7 @@ Object.assign(ViolationManager.prototype, {
                     let type, content, message;
 
                     if (startsWithCase) {
-                        type = 'case';
+                        type = CONTENT_TYPE_CASE;
                         // Убираем "кейс" (4 символа) и затем номер с разделителем
                         content = textContent
                             .substring(4)
@@ -133,7 +127,7 @@ Object.assign(ViolationManager.prototype, {
                             .trim();
                         message = 'Кейс добавлен из буфера обмена';
                     } else {
-                        type = 'freeText';
+                        type = CONTENT_TYPE_FREE_TEXT;
                         content = textContent;
                         message = 'Текст добавлен из буфера обмена';
                     }
@@ -143,7 +137,7 @@ Object.assign(ViolationManager.prototype, {
                         content: content
                     });
 
-                    PreviewManager.update();
+                    PreviewManager.updateBlock('violation', violation.id);
                     Notifications.success(message);
                 }
             }

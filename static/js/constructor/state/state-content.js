@@ -9,10 +9,19 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType } from '../block-types.js';
+import {
+    KIND_MAIN_METRICS,
+    KIND_METRICS,
+    KIND_OPERATIONAL_RISK,
+    KIND_OTHER_RISK,
+    KIND_REGULAR_RISK,
+    KIND_TAX_RISK,
+} from '../table/table-kind.js';
 
 Object.assign(AppState, {
     /**
@@ -35,6 +44,7 @@ Object.assign(AppState, {
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, '', false, true);
 
         node.children.push(tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const headers = this._generateDefaultHeaders(cols);
         const grid = this._createTableGrid(rows, cols, headers);
@@ -77,6 +87,7 @@ Object.assign(AppState, {
         const textBlockNode = this._createContentNode(nodeId, textBlockId, AppConfig.nodeTypes.TEXTBLOCK);
 
         node.children.push(textBlockNode);
+        this._indexNodeAdded(textBlockNode, node);
 
         const textBlock = this._createTextBlockObject(textBlockId, textBlockNode.id);
 
@@ -107,6 +118,7 @@ Object.assign(AppState, {
         const violationNode = this._createContentNode(nodeId, violationId, AppConfig.nodeTypes.VIOLATION);
 
         node.children.push(violationNode);
+        this._indexNodeAdded(violationNode, node);
 
         const violation = this._createViolationObject(violationId, violationNode.id);
 
@@ -131,23 +143,14 @@ Object.assign(AppState, {
      * @returns {Object} Узел контента
      */
     _createContentNode(parentId, contentId, type, label = '', isProtected = false, deletable = true) {
-        const defaultLabels = {
-            table: AppConfig.tree.labels.table,
-            textblock: AppConfig.tree.labels.textBlock,
-            violation: AppConfig.tree.labels.violation
-        };
-
-        const idProps = {
-            table: 'tableId',
-            textblock: 'textBlockId',
-            violation: 'violationId'
-        };
+        // Метка по умолчанию и поле-ссылка на словарь — из реестра типов блоков.
+        const spec = getBlockType(type);
 
         const node = {
             id: `${parentId}_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            label: label || defaultLabels[type],
+            label: label || spec.defaultLabel,
             type,
-            [idProps[type]]: contentId,
+            [spec.idProp]: contentId,
             parentId,
             protected: isProtected,
             deletable
@@ -240,14 +243,16 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
-        const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
+        // Каноническая авто-метка (единый источник с updateMetricsTableLabel).
+        const tableLabel = buildMetricsTableLabel(nodeNumber);
 
         // Сводная таблица неудаляема вручную (deletable=false): guard deleteNode
         // блокирует её. Удаляется только автоматически каскадом при исчезновении рисков.
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
-        tableNode.isMetricsTable = true;
+        tableNode.kind = KIND_METRICS;
 
         node.children.unshift(tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
@@ -258,8 +263,9 @@ Object.assign(AppState, {
             grid,
             colWidths: preset.colWidths,
             protected: true,
-            deletable: true,
-            isMetricsTable: true
+            // Зеркалит deletable узла: сводная неудаляема вручную.
+            deletable: false,
+            kind: KIND_METRICS
         };
 
         this.tables[tableId] = table;
@@ -383,7 +389,7 @@ Object.assign(AppState, {
         }
 
         const existingTable = node5.children?.find(
-            child => child.type === AppConfig.nodeTypes.TABLE && child.isMainMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_MAIN_METRICS
         );
 
         if (existingTable) {
@@ -397,9 +403,10 @@ Object.assign(AppState, {
 
         // Главная сводная таблица неудаляема вручную (deletable=false).
         const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
-        tableNode.isMainMetricsTable = true;
+        tableNode.kind = KIND_MAIN_METRICS;
 
         node5.children.unshift(tableNode);
+        this._indexNodeAdded(tableNode, node5);
 
         const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
@@ -410,8 +417,9 @@ Object.assign(AppState, {
             grid,
             colWidths: preset.colWidths,
             protected: true,
-            deletable: true,
-            isMainMetricsTable: true
+            // Зеркалит deletable узла: главная сводная неудаляема вручную.
+            deletable: false,
+            kind: KIND_MAIN_METRICS
         };
 
         this.tables[tableId] = table;
@@ -453,7 +461,7 @@ Object.assign(AppState, {
         // Единый предикат (metrics-risk-core.shouldHaveMetricsTable).
         if (parentNode?.id === '5' && shouldHaveMetricsTable(ancestorNode, n => this._findRiskTablesInSubtree(n))) {
             const hasMetricsTable = ancestorNode.children?.some(
-                child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+                child => child.type === AppConfig.nodeTypes.TABLE && child.kind === KIND_METRICS
             );
 
             if (!hasMetricsTable) {
@@ -486,7 +494,7 @@ Object.assign(AppState, {
         for (const firstLevelNode of firstLevelNodes) {
             if (!shouldHaveMetricsTable(firstLevelNode, findRisks)) {
                 const metricsTableNode = firstLevelNode.children?.find(
-                    child => child.type === TABLE && child.isMetricsTable === true
+                    child => child.type === TABLE && child.kind === KIND_METRICS
                 );
 
                 if (metricsTableNode) {
@@ -494,6 +502,7 @@ Object.assign(AppState, {
                     firstLevelNode.children = firstLevelNode.children.filter(
                         child => child.id !== metricsTableNode.id
                     );
+                    this._unindexNodeRemoved(metricsTableNode);
                 }
             }
         }
@@ -501,7 +510,7 @@ Object.assign(AppState, {
         // Проверяем необходимость главной таблицы метрик (единый предикат).
         if (!shouldHaveMainMetrics(node5, findRisks)) {
             const mainMetricsTableNode = node5.children?.find(
-                child => child.type === TABLE && child.isMainMetricsTable === true
+                child => child.type === TABLE && child.kind === KIND_MAIN_METRICS
             );
 
             if (mainMetricsTableNode) {
@@ -509,6 +518,7 @@ Object.assign(AppState, {
                 node5.children = node5.children.filter(
                     child => child.id !== mainMetricsTableNode.id
                 );
+                this._unindexNodeRemoved(mainMetricsTableNode);
             }
         }
 
@@ -531,11 +541,12 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
-        // E-2: pinned-флаг на node (структурное свойство), а не только на table-объекте.
-        tableNode.isRegularRiskTable = true;
+        // E-2: подвид на node (структурное свойство), а не только на table-объекте.
+        tableNode.kind = KIND_REGULAR_RISK;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createTableGrid(preset.rows, preset.headers.length, preset.headers);
 
@@ -546,7 +557,7 @@ Object.assign(AppState, {
             colWidths: preset.colWidths,
             protected: true,
             deletable: true,
-            isRegularRiskTable: true
+            kind: KIND_REGULAR_RISK
         };
 
         this.tables[tableId] = table;
@@ -569,11 +580,12 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
-        // E-2: pinned-флаг на node.
-        tableNode.isOperationalRiskTable = true;
+        // E-2: подвид на node.
+        tableNode.kind = KIND_OPERATIONAL_RISK;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createOperationalRiskGrid();
 
@@ -584,7 +596,7 @@ Object.assign(AppState, {
             colWidths: preset.colWidths,
             protected: true,
             deletable: true,
-            isOperationalRiskTable: true
+            kind: KIND_OPERATIONAL_RISK
         };
 
         this.tables[tableId] = table;
@@ -707,10 +719,11 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
-        tableNode.isTaxRiskTable = true;
+        tableNode.kind = KIND_TAX_RISK;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         const grid = this._createTaxRiskGrid();
 
@@ -721,7 +734,7 @@ Object.assign(AppState, {
             colWidths: preset.colWidths,
             protected: true,
             deletable: true,
-            isTaxRiskTable: true
+            kind: KIND_TAX_RISK
         };
 
         this.tables[tableId] = table;
@@ -794,10 +807,11 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, otherPreset.label, true, true);
-        tableNode.isOtherRiskTable = true;
+        tableNode.kind = KIND_OTHER_RISK;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
+        this._indexNodeAdded(tableNode, node);
 
         // Явно переиспользуем общую шапку метрик: «прочие риски» намеренно
         // имеют ту же сводную сетку (см. docstring _createMetricsHeaderGrid).
@@ -810,7 +824,7 @@ Object.assign(AppState, {
             colWidths: metricsPreset.colWidths,
             protected: true,
             deletable: true,
-            isOtherRiskTable: true
+            kind: KIND_OTHER_RISK
         };
 
         this.tables[tableId] = table;

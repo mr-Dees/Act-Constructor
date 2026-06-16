@@ -39,6 +39,23 @@ export class TreeManager {
 
         // Инициализируем drag-and-drop
         this.dragDrop.init();
+
+        // Кеш списка видимых treeitem'ов для клавиатурной навигации:
+        // без него каждая стрелка пересчитывала полный querySelectorAll+filter.
+        // Наблюдаем только childList — он ловит пересборку узлов (render/
+        // renderSubtree). Атрибуты НЕ наблюдаем: class-перебор при
+        // выделении/драге/подсветке давал ложные инвалидации. Сворачивание —
+        // тоже class-toggle (childList его не видит), поэтому кеш на двух
+        // точках collapse инвалидируется явно через _invalidateVisibleItemsCache.
+        /** @type {HTMLElement[]|null} */
+        this._visibleItemsCache = null;
+        this._visibleItemsObserver = new MutationObserver(() => {
+            this._visibleItemsCache = null;
+        });
+        this._visibleItemsObserver.observe(this.container, {
+            childList: true,
+            subtree: true
+        });
     }
 
     /**
@@ -374,8 +391,8 @@ export class TreeManager {
                     const label = li.querySelector(':scope > .tree-label');
                     if (label && !li.classList.contains('protected') && typeof ItemsTitleEditing !== 'undefined') {
                         const nodeId = li.dataset.nodeId;
-                        const node = (typeof TreeUtils !== 'undefined')
-                            ? TreeUtils.findNodeById(nodeId)
+                        const node = (typeof AppState !== 'undefined')
+                            ? AppState.findNodeById(nodeId)
                             : null;
                         if (node) {
                             const editTarget = label.querySelector('.tree-node-text') || label;
@@ -389,13 +406,27 @@ export class TreeManager {
     }
 
     /**
+     * Сбрасывает кеш видимых treeitem'ов. Вызывается явно из точек
+     * сворачивания (class-toggle, который childList-наблюдатель не ловит):
+     * toggle-иконка в TreeRenderer и клавиатурный _setExpanded.
+     * @private
+     */
+    _invalidateVisibleItemsCache() {
+        this._visibleItemsCache = null;
+    }
+
+    /**
      * Все «видимые» treeitem'ы — те, чьи предки не collapsed.
+     * Результат кешируется; кеш сбрасывается MutationObserver'ом (childList,
+     * ловит ререндер) и явно в точках collapse через _invalidateVisibleItemsCache.
      * @private
      * @returns {HTMLElement[]}
      */
     _allVisibleTreeItems() {
+        if (this._visibleItemsCache) return this._visibleItemsCache;
+
         const all = Array.from(this.container.querySelectorAll('li.tree-item'));
-        return all.filter(li => {
+        this._visibleItemsCache = all.filter(li => {
             // Если любой предок-tree-item имеет .collapsed — li невидим.
             let parentLi = li.parentElement?.closest('li.tree-item');
             while (parentLi) {
@@ -404,6 +435,7 @@ export class TreeManager {
             }
             return true;
         });
+        return this._visibleItemsCache;
     }
 
     /** @private */
@@ -434,12 +466,17 @@ export class TreeManager {
         } else {
             return;
         }
+        // Сворачивание — class-toggle, childList-наблюдатель его не видит:
+        // инвалидируем кеш видимых узлов явно.
+        this._invalidateVisibleItemsCache();
         li.setAttribute('aria-expanded', expanded ? 'true' : 'false');
         const toggle = li.querySelector(':scope > .toggle-icon');
         if (toggle && AppConfig?.tree?.interaction?.toggleIcons) {
             const icons = AppConfig.tree.interaction.toggleIcons;
             toggle.textContent = expanded ? icons.expanded : icons.collapsed;
         }
+        // Персист свёрнутости per-act (M.24) — симметрично клику по toggle-иконке.
+        this.renderer?.persistCollapsed?.(li.dataset.nodeId, !expanded);
     }
 
     /**

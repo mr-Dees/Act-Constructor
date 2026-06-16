@@ -25,7 +25,7 @@
 **API между фронтом и бэком.**
 
 - На загрузку: `ActContentRepository.get_content(act_id)` возвращает `{tree, tables, textBlocks, violations}` (`app/domains/acts/repositories/act_content.py:41-61`). Фактуры подмешиваются в `node.invoice` фронт-кодом `APIClient._attachInvoicesToTree` (`static/js/shared/api.js:602-626`).
-- На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py:319-358`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Сохранение оборачивается в транзакцию: `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT` (`act_content.py:252-394`).
+- На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Единую плоскую транзакцию (контент + diff аудита + снимок версии) держит сервис `ActContentService.save_content`; репозиторий собственную транзакцию не открывает (контракт в его докстринге). `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT`.
 
 Денормализация (дублирование `node_number`, `audit_point_id`, `audit_act_id` в `act_tables`/`act_textblocks`/`act_violations`/`act_invoices`) нужна для BI/выгрузок и поиска. Источник истины — `tree_data`; при сохранении бэк рассчитывает `node_map` и `audit_point_map` единым обходом дерева (`act_content.py:197-238`) и проставляет денормализованные поля.
 
@@ -51,9 +51,11 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 
 **Ссылочная целостность (на app-уровне).** Жёсткой FK между узлами и `act_tables`/`act_textblocks`/`act_violations` нет (всё перезаписывается одной транзакцией). Связь идёт по `id` контейнера и `nodeId` узла:
 
-- Узел `type=table` имеет `tableId`, соответствующая запись в `tables[tableId]` обязательна, `tables[tableId].nodeId === node.id`.
+- Узел `type=table` имеет `tableId`, ожидается запись в `tables[tableId]`, `tables[tableId].nodeId === node.id`. **Рассогласование лечится мягко в обе стороны, без 422** (решение «lenient», findings 3+8): листовой узел с висячей ссылкой (запись словаря отсутствует) **удаляется из дерева ЦЕЛИКОМ** при сохранении, а не просто снимается с него ссылка. `ActDataSchema.collect_dangling_refs()` собирает такие ссылки, `ActContentService._strip_dangling_refs` вырезает узлы-носители из `children` родителя перед записью. Снять только поле-ссылку было мало: оставался бы бессодержательный «узел-зомби», который walker экспорта всё равно отрисует (пустая «Таблица N»), а пересохранение его не вычистит (висячей ссылки уже нет). Фронт зеркалит это в `act-content-sanitizer.js` (поле отчёта `removedNodes`). Удаление безусловно: защищённые секции 1–5 это `type='item'` без листовых ссылок, под удаление не попадают.
 - Аналогично для `type=textblock` (`textBlockId` ↔ `textBlocks[id]`) и `type=violation` (`violationId` ↔ `violations[id]`).
-- Записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя сохранятся в БД (бэк не валидирует обратную связь), но окажутся «бесхозными» — фронт их не отрисует. Чистка таких сирот — обязанность фронта (`_deleteNodeData` в `state-tree.js:264-273`).
+- Обратная сторона: записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя в БД не попадают — orphan-фильтр репозитория отбрасывает их при сохранении (с warning-логом) для всех трёх словарей. Фронт дополнительно чистит сирот при удалении узлов (`_deleteNodeData` в `state-tree.js`).
+- Когда при сохранении что-то вычищено (удалённые узлы-зомби и/или отброшенные сироты), ответ `PUT /content` несёт одно русскоязычное предупреждение в поле `warning` (`SaveContentResponse.warning`, `str | null`; фронт читает `result.warning`); `status` остаётся `success`. Нулевая половина в тексте опускается, `null` — если чистить было нечего.
+- **Статус валидации содержимого.** При каждом сохранении (и при restore версии) бэк вычисляет статус структуры акта (`services/content_validation.py::collect_validation_issues` — чистая, не бросающая) и персистит его в колонки `acts.validation_status` (`'ok'`/`'warning'`/`'error'`, CHECK `check_acts_validation_status_values`) + `acts.validation_issues` (JSONB). `error` — при любом замечании `severity='error'`; `warning` — при только мягких замечаниях (напр. пустые таблицы); иначе `ok`. Поля возвращаются в `SaveContentResponse` (`validation_status`/`validation_issues`) и выставляются в `ActListItem`/`ActResponse`. Это **отдельная** от `verification_status` (фактуры) и lock-полей система-сигнал «есть что проверить». Структурно невалидный WIP **сохраняется** (гейт снят), но **экспорт в файл** требует валидной структуры (error-level). Поверхности по уровню: `error` краснит карточку (`validation-error`, как фактура) + персистентное уведомление автору; `warning` карточку не красит, идёт агрегатом в колокольчик лендинга; полный список — внутри акта. Подробнее — dev-guide §10.5a.
 - `invoiceNodeIds` — плоский список ID узлов, у которых на фронте проставлено `node.invoice`. По нему бэк синхронизирует `act_invoices`: всё, чего нет в списке, удаляется (`act_content.py:396-433`).
 
 ---
@@ -81,8 +83,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `customLabel`         | опц.                 | опц.                 | опц.                 | опц.                 | пользовательское название (приоритет над автоматическим)                                        |
 | `protected`           | опц., default false  | опц., default false  | опц., default false  | опц., default false  | защита от перемещения и удаления (для разделов 1–5: `true`)                                     |
 | `deletable`           | опц., default true   | опц., default true   | опц., default true   | опц., default true   | разрешено ли удаление; работает независимо от `protected`                                       |
-| `isMetricsTable`      | —                    | опц., default false  | —                    | —                    | таблица метрик для пункта `5.X` (см. §6)                                                       |
-| `isMainMetricsTable`  | —                    | опц., default false  | —                    | —                    | главная сводная таблица метрик раздела 5                                                        |
+| `kind`                | —                    | опц., default `'regular'` | —               | —                    | подвид таблицы (enum, см. §6): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`. Источник истины на узле; дублируется в `tables[tableId].kind` (`table-kind.js`) |
 | `tb`                  | опц., только под 5.* | —                    | —                    | —                    | массив аббревиатур территориальных банков (см. `AppConfig.territorialBanks`, `app-config.js:16-28`) |
 | `invoice`             | опц., только под 5.* | —                    | —                    | —                    | прикреплённая фактура (см. §7); НЕ сериализуется бэкендом, существует только во фронт-объекте  |
 | `auditPointId`        | опц.                 | опц.                 | опц.                 | опц.                 | UUID точки аудита, выданный внешним сервисом (`AuditIdService`, `services/id-generator.js`)    |
@@ -90,8 +91,8 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 
 Замечания:
 
-- Поля `isMetricsTable`/`isMainMetricsTable` дублируются в `node` (для быстрого определения «закреплённости» без обращения к `tables`) и в `tables[tableId].isMetricsTable`/`isMainMetricsTable` (для денормализованной выгрузки в `act_tables`). Согласованность поддерживает фронт.
-- `isRegularRiskTable` / `isOperationalRiskTable` НЕ хранятся в `node` — только в `tables[tableId]`. Проверка «является ли узел risk-таблицей» делается через lookup в `AppState.tables` (`tree-utils.js:309-317`).
+- Подвид таблицы кодируется единым enum-полем `kind` (а не набором boolean-флагов `is*Table` — те убраны в kind-рефакторе, `table-kind.js`). Источник истины — `kind` на узле-таблице; значение дублируется в `tables[tableId].kind` для денормализованной выгрузки в `act_tables` (колонка `kind VARCHAR(20)` + CHECK `check_table_kind_values`). Согласованность node↔table при загрузке поддерживает `reconcileTableKind`.
+- Проверка «закреплённости»: `isPinnedTable(node)` = `kind !== 'regular'`; «является ли risk-таблицей»: `isRiskTable(node)` = `kind ∈ {regularRisk, operationalRisk, taxRisk, otherRisk}` (`table-kind.js`).
 - В сохранённом дереве `_serializeTree` (`state-core.js:361-391`) форсирует `protected` и `deletable` к булевым значениям и взаимоисключает `content` ↔ `tableId/textBlockId/violationId` (content пишется только для item-узлов).
 
 ### 3.1. Подсхемы вложенных сущностей
@@ -119,17 +120,14 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `colWidths`               | `list[int]`, max 16, все > 0 | относительные веса ширины колонок (DOCX-билдер нормирует по сумме; редактор рендерит colgroup в %)        |
 | `protected`               | bool, default false          | защита от изменения структуры (добавление/удаление строк/колонок)                                       |
 | `deletable`               | bool, default true           | можно ли удалить таблицу                                                                                |
-| `isMetricsTable`          | bool, default false          | таблица метрик пункта `5.X`                                                                             |
-| `isMainMetricsTable`      | bool, default false          | главная сводная таблица раздела 5                                                                       |
-| `isRegularRiskTable`      | bool, default false          | таблица регулярных рисков                                                                               |
-| `isOperationalRiskTable`  | bool, default false          | таблица операционных рисков                                                                             |
+| `kind`                    | `TableKind`, default `'regular'` | подвид таблицы (`act_content.py:60,143`): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`; зеркалит `node.kind`. CHECK `check_table_kind_values` в миграциях PG/GP |
 
 `TextBlockFormattingSchema` (`act_content.py:142-165`):
 
 | Поле        | Тип / default                          | Назначение                                  |
 |-------------|-----------------------------------------|---------------------------------------------|
 | `fontSize`  | int 8–72, default 14                    | базовый размер шрифта                       |
-| `alignment` | `"left" | "center" | "right" | "justify"`, default `"left"` | выравнивание                                |
+| `alignment` | `"left" | "center" | "right" | "justify"`, default `"justify"` (как тело акта) | выравнивание                                |
 | `bold`      | bool, default false                     | жирный                                      |
 | `italic`    | bool, default false                     | курсив                                      |
 | `underline` | bool, default false                     | подчёркивание                                |
@@ -169,6 +167,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `caption`  | str, default `""`                  | подпись изображения                       |
 | `filename` | str, default `""`                  | имя файла                                 |
 | `order`    | int ≥ 0                            | порядок отображения                       |
+| `width`    | int 0–100, default `0`             | ширина картинки, % полезной ширины листа (0 = авто: натуральный размер с потолком по ширине) |
 
 ---
 
@@ -176,33 +175,27 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 
 **Что это.** Узлы, которые удерживаются в начале массива `children` родителя и не могут быть перетащены/смещены ниже обычных пунктов. Используется для спец-таблиц.
 
-**Какие узлы считаются pinned.** Определение в `TreeUtils.isPinnedTable` (`static/js/constructor/tree/tree-utils.js:309-317`):
+**Какие узлы считаются pinned.** `TreeUtils.isPinnedTable` (`static/js/constructor/tree/tree-utils.js:313-315`) делегирует единому дискриминатору `table-kind.js::isPinnedTable` (один источник истины):
 
 ```js
+// tree-utils.js
 isPinnedTable(node) {
-    if (node.type !== 'table') return false;
-    if (node.isMetricsTable || node.isMainMetricsTable) return true;
-    if (node.tableId) {
-        const table = AppState.tables[node.tableId];
-        if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) return true;
-    }
-    return false;
+    return kindIsPinnedTable(node);   // table-kind.js: node.type === 'table' && node.kind !== 'regular'
 }
 ```
 
-То есть pinned — это:
+То есть pinned — любая таблица с подвидом `kind`, отличным от `'regular'`:
 
-1. таблицы метрик пункта `5.X` (`isMetricsTable`),
-2. главная сводная таблица метрик раздела 5 (`isMainMetricsTable`),
-3. таблицы регулярных рисков (`isRegularRiskTable` — поле в `tables[tableId]`),
-4. таблицы операционных рисков (`isOperationalRiskTable` — поле в `tables[tableId]`).
+1. таблицы метрик пункта `5.X` (`kind='metrics'`),
+2. главная сводная таблица метрик раздела 5 (`kind='mainMetrics'`),
+3. таблицы рисков (`kind ∈ {regularRisk, operationalRisk, taxRisk, otherRisk}`).
 
 **Правила сортировки.** Метод `AppState._getFirstNonPinnedIndex(parent)` (`state-tree.js:708-714`) ищет первый незакреплённый индекс в `children` родителя — это «нижняя граница» pinned-зоны. Используется в двух местах:
 
 - При drag-and-drop: если `position === 'before'/'after'` указывает в pinned-зону, эффективный индекс прижимается вниз (`_performMove`, `state-tree.js:686-693`). Дополнительно `_calculateDropPosition` (`tree-drag-drop.js:226-240`) запрещает `'before'` на pinned-узле и блокирует `'after'` между двумя соседними pinned-таблицами.
 - При создании risk-таблицы: вставляется через `splice(firstNonPinnedIdx, 0, tableNode)` (`state-content.js:594-596`, `state-content.js:629-631`).
 
-Метрик-таблицы (`isMetricsTable`, `isMainMetricsTable`) создаются через `node.children.unshift(tableNode)` (`state-content.js:295`, `state-content.js:442`) — то есть всегда первыми. Если в `children` уже есть pinned-таблицы, новая всё равно встаёт нулевой; порядок между metrics и risk на одном уровне определяется временем создания.
+Метрик-таблицы (`kind='metrics'`, `kind='mainMetrics'`) создаются через `node.children.unshift(tableNode)` (`state-content.js:295`, `state-content.js:442`) — то есть всегда первыми. Если в `children` уже есть pinned-таблицы, новая всё равно встаёт нулевой; порядок между metrics и risk на одном уровне определяется временем создания.
 
 ---
 
@@ -246,8 +239,8 @@ isPinnedTable(node) {
 
 **Подтипы.**
 
-- `isMetricsTable: true` — таблица метрик одного пункта `5.X`. Создаётся, когда в потомках узла `5.X` (т.е. на уровне `5.X.X+`) появляется хотя бы одна risk-таблица (`_updateMetricsTablesAfterRiskTableCreated`, `state-content.js:490-519`). Удаляется автоматически, когда последняя глубокая risk-таблица исчезает (`_cleanupMetricsTablesAfterRiskTableDeleted`, `state-content.js:526-576`).
-- `isMainMetricsTable: true` — главная сводная для всего раздела 5. Создаётся при появлении ЛЮБОЙ risk-таблицы в дереве 5, удаляется при их полном отсутствии (та же функция).
+- `kind='metrics'` — таблица метрик одного пункта `5.X`. Создаётся, когда в потомках узла `5.X` (т.е. на уровне `5.X.X+`) появляется хотя бы одна risk-таблица (`_updateMetricsTablesAfterRiskTableCreated`, `state-content.js:490-519`). Удаляется автоматически, когда последняя глубокая risk-таблица исчезает (`_cleanupMetricsTablesAfterRiskTableDeleted`, `state-content.js:526-576`).
+- `kind='mainMetrics'` — главная сводная для всего раздела 5. Создаётся при появлении ЛЮБОЙ risk-таблицы в дереве 5, удаляется при их полном отсутствии (та же функция).
 
 **Структура `grid`.** Сетка 4×7 с двумя строками заголовков и двумя строками данных. Заголовки используют объединения (`colSpan`/`rowSpan`/`isSpanned`/`spanOrigin`) для группировки «Количество клиентов / элементов» (ФЛ/ЮЛ под общей шапкой) и «Сумма, руб.» / «Код БП» / «Пункт акта». Полный шаблон — `_createMetricsHeaderGrid` (`state-content.js`).
 
@@ -269,7 +262,7 @@ isPinnedTable(node) {
 
 В коде ячейки-«дырки» под объединениями явно описаны как `isSpanned: true` с `spanOrigin: {row, col}` — это нужно для корректной отрисовки и редактирования (cм. `headerRow2` в `_createMetricsHeaderGrid`).
 
-**Имя таблицы (`label`).** `"Объем выявленных отклонений (В метриках) по {nodeNumber}"` для `isMetricsTable` и `"Объем выявленных отклонений"` для `isMainMetricsTable`. При перенумерации узла `5.X` фронт обновляет label автоматически — `updateMetricsTableLabel` (`state-tree.js:102-115`).
+**Имя таблицы (`label`).** `"Объем выявленных отклонений (В метриках) по {nodeNumber}"` для `kind='metrics'` и `"Объем выявленных отклонений"` для `kind='mainMetrics'`. При перенумерации узла `5.X` фронт обновляет label автоматически — `updateMetricsTableLabel` (`state-tree.js:102-115`), не затирая пользовательский `customLabel` (guard `isAutoMetricsTableLabel`).
 
 **Ограничения.**
 
@@ -281,10 +274,11 @@ isPinnedTable(node) {
 
 **Подтипы.**
 
-- `isRegularRiskTable: true` — регулярные риски. Шаблон в `AppConfig.content.tablePresets.regularRisk` (см. `app-config.js`), создаётся через `_createRegularRiskTable` (`state-content.js:584-612`).
-- `isOperationalRiskTable: true` — операционные риски. Шаблон 4×6, заголовки с объединениями, см. `_createOperationalRiskGrid` (`state-content.js:655-745`).
+- `kind='regularRisk'` — регулярные риски. Шаблон в `AppConfig.content.tablePresets.regularRisk` (см. `app-config.js`), создаётся через `_createRegularRiskTable` (`state-content.js:584-612`).
+- `kind='operationalRisk'` — операционные риски. Шаблон 4×6, заголовки с объединениями, см. `_createOperationalRiskGrid` (`state-content.js:655-745`).
+- Дополнительно схема допускает `kind='taxRisk'`/`'otherRisk'` (полный набор из 7 подвидов).
 
-Флаги хранятся ТОЛЬКО в `tables[tableId]`, в `node` их нет. Чтобы понять, что узел — risk-таблица, нужно сделать lookup в `AppState.tables` (`_isRiskTable`, `state-tree.js:252-257`).
+Подвид `kind` хранится на узле-таблице (источник истины) и дублируется в `tables[tableId].kind`. Проверка «узел — risk-таблица»: `isRiskTable(node)` (`table-kind.js`; `TreeUtils.isPinnedTable`/`isRiskTable` делегируют туда).
 
 **Правила размещения.**
 
@@ -300,7 +294,7 @@ isPinnedTable(node) {
 
 **Куда прикрепляются.** К листовым item-узлам под разделом 5 («TB-leaf»: item под `5.*` без дочерних item-узлов). Проверка: `TreeUtils.isTbLeaf` (`tree-utils.js:282-286`).
 
-**Структура `node.invoice`.** Объект на узле, существующий ТОЛЬКО во фронт-объекте — в сериализованный `tree_data` он не попадает (см. `_serializeTree`, `state-core.js:361-391`). Содержимое (`dialog-invoice.js:1137-1144`, `api.js:611-619`):
+**Структура `node.invoice`.** Объект на узле, существующий ТОЛЬКО во фронт-объекте — в сериализованный `tree_data` он не попадает (см. `_serializeTree`, `state-core.js:361-391`). Содержимое (`dialog-invoice.js:~769-810`, `api.js:611-619`):
 
 ```jsonc
 {
@@ -317,7 +311,7 @@ isPinnedTable(node) {
 
 **Как привязывается.**
 
-1. На фронте `InvoiceDialog._handleSave` отправляет POST `/api/v1/acts/invoices/save` через `APIClient.saveInvoice` и сразу проставляет `this._currentNode.invoice = {...}` (`dialog-invoice.js:1133-1145`).
+1. На фронте `InvoiceDialog` при сохранении отправляет POST `/api/v1/acts/invoices/save` через `APIClient.saveInvoice` (`dialog-invoice.js:795`) и сразу проставляет фактуру на узел через мутатор `AppState.setNodeInvoice(this._currentNode.id, {...})` (`dialog-invoice.js:803-810`; мутатор помечает dirty через Proxy-трекинг — ручной `markAsUnsaved` убран, см. state-6).
 2. На бэке создаётся/обновляется строка в `act_invoices` (`{SCHEMA}.{PREFIX}act_invoices`, схема в `migrations/postgresql/schema.sql:279-307`). `UNIQUE(act_id, node_id)` гарантирует одну фактуру на узел.
 3. При следующем `save_content` бэк синхронизирует `act_invoices`: всё, что отсутствует в `data.invoiceNodeIds`, удаляется; для оставшихся обновляются `node_number`, `audit_act_id`, `audit_point_id` (`act_content.py:396-433`).
 4. На загрузке акта `APIClient._attachInvoicesToTree` обходит дерево и навешивает `node.invoice` на узлы с прикреплёнными фактурами (`api.js:602-626`).
@@ -399,7 +393,7 @@ isPinnedTable(node) {
             "label": "Объем выявленных отклонений",
             "type": "table",
             "tableId": "table_1717000000000_abc",
-            "isMainMetricsTable": true,
+            "kind": "mainMetrics",
             "protected": true, "deletable": true,
             "number": "Таблица 1"
           },
@@ -411,7 +405,7 @@ isPinnedTable(node) {
               {
                 "id": "...", "label": "Объем выявленных отклонений (В метриках) по 5.1",
                 "type": "table", "tableId": "table_metrics_5_1",
-                "isMetricsTable": true, "protected": true, "deletable": true,
+                "kind": "metrics", "protected": true, "deletable": true,
                 "number": "Таблица 1"
               },
               {
@@ -421,7 +415,7 @@ isPinnedTable(node) {
                   {
                     "id": "...", "label": "Таблица регулярных рисков",
                     "type": "table", "tableId": "table_risk_reg_1",
-                    "protected": true, "deletable": true, "number": "Таблица 1"
+                    "kind": "regularRisk", "protected": true, "deletable": true, "number": "Таблица 1"
                   }
                 ]
               }
@@ -438,10 +432,10 @@ isPinnedTable(node) {
       "grid": [ /* 4×7 шаблон метрик из _createMetricsHeaderGrid */ ],
       "colWidths": [120, 200, 80, 80, 100, 80, 120],
       "protected": true, "deletable": true,
-      "isMainMetricsTable": true
+      "kind": "mainMetrics"
     },
-    "table_metrics_5_1": { /* такой же шаблон, isMetricsTable: true */ },
-    "table_risk_reg_1":  { /* шаблон regularRisk, isRegularRiskTable: true */ }
+    "table_metrics_5_1": { /* такой же шаблон, kind: "metrics" */ },
+    "table_risk_reg_1":  { /* шаблон regularRisk, kind: "regularRisk" */ }
   },
   "textBlocks": {},
   "violations": {},
@@ -506,14 +500,14 @@ isPinnedTable(node) {
 - Поле `version` или аналог в `tree_data` отсутствует — ни Pydantic-схема (`ActDataSchema`, `ActItemSchema`), ни таблица `act_tree` не содержат такого поля.
 - Эволюция структуры идёт через:
   1. SQL-миграции — изменения схемы таблиц (`migrations/postgresql/schema.sql`, `migrations/greenplum/schema.sql`); схема исполняется при старте через `create_tables_if_not_exist` (см. [`developer-guide.md §6.5`](../guides/developer-guide.md#65-миграции)).
-  2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации (`act_content.py:376`) и `field_validator`'ы на `TableSchema.grid`/`colWidths`. При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — обратная совместимость держится на том, что новые поля добавляются как опциональные с `default=`.
+  2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации и `field_validator`'ы на `TableSchema.grid`/`colWidths`. Политика незнакомых полей задана явно: словарные схемы и `ActDataSchema` — `extra="forbid"` (незадекларированное поле → 422), узлы дерева (`ActItemSchema`) — явный `extra="ignore"` с нормализацией через `model_dump` (дерево хранится нормализованным). При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — новые поля добавляются опциональными с `default=` и обязательно декларируются в схеме.
   3. Денормализация — если меняется набор флагов в `act_tables` (например, новый тип спец-таблицы), нужно одновременно обновить SQL-миграции (новая колонка, индекс при необходимости) и `ActContentRepository._load_tables`/`_save_tables`.
 
 **Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:354-368`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data` по номерам версий, для просмотра истории и восстановления. Это версионирование данных конкретного акта, а не схемы.
 
 **Рекомендации при изменении модели.**
 
-- Новые поля узлов или контейнеров добавлять с `default=` (обратная совместимость старых документов).
+- Новые поля узлов или контейнеров добавлять с `default=` и явной декларацией в схеме: для словарных схем действует `extra="forbid"` — незадекларированное поле от фронта отклоняется 422.
 - Удаление полей делать в два шага: сначала перевод в опциональные, миграция данных, потом удаление.
 - При добавлении нового `node.type` — обновлять `Literal[...]` в `ActItemSchema.type`, фронтовый `AppConfig.nodeTypes`, проверки `_isInformationalNode` / `canAcceptAsChild` и сериализатор `_serializeTree`.
 - При добавлении нового флага спец-таблицы — добавлять колонку в `act_tables` (миграции PG + GP), маппинг в `_load_tables`/`_save_tables`, поле в `TableSchema` и учёт в `TreeUtils.isPinnedTable`, если таблица должна быть pinned.

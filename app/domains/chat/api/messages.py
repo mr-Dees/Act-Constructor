@@ -14,6 +14,7 @@ from app.core.responses import PaginatedResponse
 from app.domains.chat.deps import (
     get_agent_channel_poller,
     get_agent_channel_service,
+    get_chat_settings,
     get_conversation_service,
     get_file_service,
     get_message_service,
@@ -22,7 +23,11 @@ from app.domains.chat.deps import (
 from app.domains.chat.exceptions import (
     ChatFileValidationError,
 )
+from app.domains.chat.repositories.chat_message_feedback_repository import (
+    ChatMessageFeedbackRepository,
+)
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
+from app.domains.chat.services.chat_feedback_service import feedback_public_dict
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -232,18 +237,42 @@ async def get_message(
     клиент периодически запрашивает сообщение по message_id и ждёт
     перехода status из 'streaming' в 'complete' или 'failed'.
 
-    Возвращает {"id", "status", "content"}.
+    Возвращает {"id", "status", "content"} и, для streaming-черновиков
+    агента, "status_details": {"bus_status", "queue_ahead"}.
     Отвечает 404 если сообщение не найдено или принадлежит другой беседе.
     """
     # Проверяем принадлежность беседы пользователю
     await conv_service.get(conversation_id, username)
 
     message = await msg_service.get_message(conversation_id, message_id)
-    return {
+    result = {
         "id": message["id"],
         "status": message.get("status", "complete"),
         "content": message.get("content") or [],
     }
+
+    # Промежуточный статус очереди агента — только для streaming-черновиков,
+    # привязанных к шине (agent_ref). Best-effort: сбой чтения шины не должен
+    # ломать поллинг готовности. Сервис строим на соединении msg_service —
+    # второе соединение пула на горячем пути поллинга не берём (pool 5/20).
+    agent_ref = message.get("agent_ref")
+    if result["status"] == "streaming" and agent_ref:
+        from app.domains.chat.services.agent_channel import AgentChannelService
+        try:
+            channel_service = AgentChannelService(
+                msg_service.msg_repo.conn,
+                get_chat_settings(),
+            )
+            details = await channel_service.get_queue_details(agent_ref)
+            if details:
+                result["status_details"] = details
+        except Exception:
+            logger.warning(
+                "Не удалось получить статус очереди агента: message_id=%s",
+                message_id, exc_info=True,
+            )
+
+    return result
 
 
 @router.get(
@@ -264,6 +293,10 @@ async def get_messages(
     По умолчанию отдаёт всю историю (лимит практически неограничен) в порядке
     ASC — клиент (chat-context.js) ничего не пагинирует. Усечение до 50
     скрывало бы свежие сообщения активных бесед.
+
+    Каждое сообщение обогащается полем ``feedback`` — оценкой ТЕКУЩЕГО
+    пользователя (или None) — чтобы фронт восстановил состояние кнопок
+    лайк/дизлайк после перезагрузки беседы.
     """
     # Проверяем принадлежность беседы пользователю
     await conv_service.get(conversation_id, username)
@@ -273,6 +306,26 @@ async def get_messages(
         limit=limit,
         offset=offset,
     )
+
+    # Обогащаем сообщения оценками текущего пользователя (best-effort): сбой
+    # обогащения НЕ должен ломать загрузку истории. Репозиторий строим на
+    # соединении msg_service — второе соединение пула на горячем пути
+    # истории не берём (pool 5/20 выедается вдвое быстрее, troubleshooting №17).
+    try:
+        feedback_repo = ChatMessageFeedbackRepository(msg_service.msg_repo.conn)
+        fb_map = await feedback_repo.get_map_for_conversation(
+            conversation_id=conversation_id, user_id=username,
+        )
+        for item in items:
+            fb = fb_map.get(item.get("id"))
+            if fb is not None:
+                item["feedback"] = feedback_public_dict(fb)
+    except Exception:
+        logger.warning(
+            "Не удалось обогатить историю оценками: conversation=%s",
+            conversation_id, exc_info=True,
+        )
+
     return PaginatedResponse[MessageResponse](
         items=items, total=total, limit=limit, offset=offset,
     )

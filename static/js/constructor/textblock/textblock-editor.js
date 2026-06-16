@@ -4,6 +4,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML } from '../../shared/sanitize.js';
 
@@ -13,7 +14,7 @@ Object.assign(TextBlockManager.prototype, {
      */
     createTextBlockElement(textBlock, node) {
         const section = document.createElement('div');
-        section.className = 'textblock-section';
+        section.className = RENDER_CLASSES.TEXTBLOCK_SECTION;
         section.dataset.textBlockId = textBlock.id;
 
         const editor = this.createEditor(textBlock);
@@ -27,7 +28,7 @@ Object.assign(TextBlockManager.prototype, {
      */
     createEditor(textBlock) {
         const editor = document.createElement('div');
-        editor.className = 'textblock-editor';
+        editor.className = RENDER_CLASSES.TEXTBLOCK_EDITOR;
         editor.dataset.textBlockId = textBlock.id;
         editor.dataset.placeholder = 'Введите текст...';
         // Sanitize: textBlock.content приходит из БД, мог быть сохранён до того,
@@ -61,18 +62,23 @@ Object.assign(TextBlockManager.prototype, {
         const elements = editor.querySelectorAll('.text-link, .text-footnote');
 
         elements.forEach(element => {
-            element._mouseenterHandler = () => {
+            // Слушатели через per-element AbortController _lfAbort: при фокусе
+            // редактора attachLinkFootnoteHandlers вызовет abort() и навесит
+            // полный набор — initial tooltip-обработчики не задвоятся.
+            if (element._lfAbort) element._lfAbort.abort();
+            const controller = new AbortController();
+            element._lfAbort = controller;
+            const { signal } = controller;
+
+            element.addEventListener('mouseenter', () => {
                 this.tooltipTimeout = setTimeout(() => {
                     this.showTooltip(element);
                 }, 700);
-            };
+            }, { signal });
 
-            element._mouseleaveHandler = () => {
+            element.addEventListener('mouseleave', () => {
                 this.hideTooltip();
-            };
-
-            element.addEventListener('mouseenter', element._mouseenterHandler);
-            element.addEventListener('mouseleave', element._mouseleaveHandler);
+            }, { signal });
         });
     },
 
@@ -108,6 +114,16 @@ Object.assign(TextBlockManager.prototype, {
     handleEditorBlur(editor, textBlock) {
         textBlock.content = editor.innerHTML;
 
+        // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
+        // успеть сработать, и превью оставалось бы с устаревшим текстом до
+        // следующего ввода. Сбрасываем висящий save-таймер — он бы повторил
+        // ту же работу. Тот же узкий патч, что у saveContent (updateBlock).
+        if (editor.saveTimeout) {
+            clearTimeout(editor.saveTimeout);
+            editor.saveTimeout = null;
+        }
+        PreviewManager.updateBlock('textblock', textBlock.id);
+
         setTimeout(() => {
             if (document.activeElement !== editor &&
                 !this.globalToolbar?.contains(document.activeElement)) {
@@ -136,7 +152,8 @@ Object.assign(TextBlockManager.prototype, {
             this.applyFormattingToNewNodes(editor);
 
             // typing-flow: дополнительный 150 мс debounce поверх 500 мс save-debounce.
-            PreviewManager.scheduleTyping();
+            // Контентная правка одного блока → точечный патч.
+            PreviewManager.scheduleTypingBlock('textblock', textBlock.id);
         }, 500);
     },
 

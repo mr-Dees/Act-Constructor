@@ -6,9 +6,14 @@
  */
 
 import { ChangelogTracker } from '../changelog-tracker.js';
+import { invalidateTableWarningsCache } from './notifications-source-tables.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { LockManager } from '../lock-manager.js';
 import { StorageManager } from '../storage-manager.js';
+import { UndoDeleteManager } from '../state/undo-delete.js';
+import { tableManager } from '../table/table-core.js';
+import { linkFootnoteContextMenu } from '../textblock/textblock-links-footnotes.js';
+import { violationManager } from '../violation/violation-init.js';
 import { ActsBroadcast } from '../../portal/acts-manager/acts-broadcast.js';
 import { CreateActDialog } from '../../portal/acts-manager/dialog-create-act.js';
 import { APIClient } from '../../shared/api.js';
@@ -396,6 +401,29 @@ export class ActsMenuManager {
     }
 
     /**
+     * Единый сброс пер-актного UI-состояния перед загрузкой другого акта.
+     * Сбрасывает ТОЛЬКО то, что принадлежит покидаемому акту: реестр активных
+     * нарушений (вместе с document-слушателями drop), выделение ячеек таблиц,
+     * открытый дропдаун ТБ и popup ссылок/сносок, DOM-индекс контент-панели
+     * и кеш замечаний по таблицам.
+     * Document-слушатели синглтон-менеджеров (TableManager, TreeManager и др.)
+     * НЕ снимаются — они нужны следующему акту, это by design.
+     */
+    static resetForActSwitch() {
+        violationManager.destroy();
+        tableManager.clearSelection();
+        ItemsRenderer._closeTbDropdownInItems();
+        linkFootnoteContextMenu.hide();
+        // renderAll и так чистит индекс, но при ошибке загрузки нового акта
+        // явная очистка гарантирует отсутствие ссылок на DOM старого акта.
+        ItemsRenderer._domIndex.clear();
+        invalidateTableWarningsCache();
+        // Снимки удалений принадлежат покидаемому акту — откат в новом
+        // акте привёл бы к вставке чужого поддерева.
+        UndoDeleteManager.clear();
+    }
+
+    /**
      * Переключается на другой акт
      * @private
      * @param {number} actId - ID акта для переключения
@@ -418,7 +446,6 @@ export class ActsMenuManager {
             });
             if (confirmed) {
                 try {
-                    ItemsRenderer?.syncDataToState();
                     await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
                     Notifications.success('Изменения сохранены');
                 } catch (err) {
@@ -459,6 +486,11 @@ export class ActsMenuManager {
                 }
             }
 
+            // Сброс пер-актного UI-состояния покидаемого акта — строго после
+            // успешного захвата лока (при отказе остаёмся на старом акте
+            // с нетронутым состоянием) и до загрузки контента нового.
+            this.resetForActSwitch();
+
             await APIClient.loadActContent(actId);
 
             // Сохраняем дефолтную структуру после блокировки (для новых актов)
@@ -475,7 +507,7 @@ export class ActsMenuManager {
             // Сброс per-act трекеров перед init нового акта:
             //  - ChangelogTracker.destroy: иначе pending debounce/persist старого акта
             //    запишут отложенный entry с уже сменённым _storageKey;
-            //  - violationManager — сброс через removeViolation на удаление узлов (state-tree).
+            //  - остальное пер-актное UI-состояние сброшено в resetForActSwitch() выше.
             if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.destroy === 'function') {
                 ChangelogTracker.destroy();
             }
@@ -673,12 +705,19 @@ export class ActsMenuManager {
         if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
 
         try {
-            // Сначала загружаем контент - это установит readOnlyMode на основе прав пользователя
-            await APIClient.loadActContent(actId);
-
-            // Инициализируем LockManager только после загрузки контента
-            // В режиме read-only блокировка будет пропущена
+            // §3.4: загрузку акта разбиваем на две фазы, чтобы диалог
+            // восстановления черновика показывался ПОСЛЕ захвата лока (когда
+            // уже известно, занят ли акт другим пользователем).
+            // 1) Сеть: получаем content.
+            const content = await APIClient._fetchActContent(actId);
+            // 2) Права: устанавливаем readOnlyMode из content ДО лока, чтобы
+            //    LockManager.init корректно пропустил лок для read-only.
+            APIClient._applyUserPermission(content);
+            // 3) Лок: захватываем (в read-only пропускается внутри init).
             if (LockManager?.init) await LockManager.init(actId);
+            // 4) Применение: метаданные/дерево/рендер + диалог черновика —
+            //    уже после лока.
+            await APIClient._applyActContent(actId, content);
 
             // Сохраняем дефолтную структуру ПОСЛЕ блокировки (для новых актов)
             if (APIClient._pendingDefaultStructureSave) {

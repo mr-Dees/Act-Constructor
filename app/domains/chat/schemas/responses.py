@@ -38,6 +38,15 @@ class MessageResponse(BaseModel):
     # совместимости со старыми клиентами и таблицами без колонки status.
     status: str | None = None
     created_at: datetime
+    # Оценка ТЕКУЩЕГО пользователя на это сообщение (или None). Наполняется
+    # только в GET истории беседы — для восстановления состояния кнопок
+    # лайк/дизлайк после перезагрузки. Форма: {rating, reasons, comment, updated_at}.
+    feedback: dict[str, Any] | None = None
+
+
+class MessageFeedbackResponse(BaseModel):
+    """Ответ PUT/DELETE оценки сообщения. None — оценка снята/отсутствует."""
+    feedback: dict[str, Any] | None = None
 
 
 class FileUploadResponse(BaseModel):

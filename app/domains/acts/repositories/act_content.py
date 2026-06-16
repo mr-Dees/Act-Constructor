@@ -15,6 +15,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.acts.block_types import LEAF_BLOCK_TYPES
 from app.domains.acts.utils import ActDirectivesValidator, ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema
 
@@ -60,12 +61,28 @@ class ActContentRepository(BaseRepository):
             "violations": violations,
         }
 
-    async def save_content(self, act_id: int, data: ActDataSchema, username: str) -> dict:
+    async def save_content(
+        self,
+        act_id: int,
+        data: ActDataSchema,
+        username: str,
+        *,
+        validation_status: str = "ok",
+        validation_issues: list[dict] | None = None,
+    ) -> dict:
         """
-        Сохраняет содержимое акта в транзакции.
+        Сохраняет содержимое акта.
 
         Обновляет дерево, пересоздаёт таблицы/текстовые блоки/нарушения,
-        синхронизирует фактуры и поручения, обновляет метку редактирования.
+        синхронизирует фактуры и поручения, обновляет метку редактирования и
+        состояние структурной валидации (validation_status/validation_issues,
+        вычислены сервисом — фича #8).
+
+        КОНТРАКТ: вызывается внутри УЖЕ ОТКРЫТОЙ транзакции вызывающего
+        сервиса (ActContentService.save_content / AuditLogService.
+        restore_version) — собственную транзакцию метод не открывает,
+        чтобы не плодить savepoint'ы (вложенный conn.transaction()
+        в asyncpg = SAVEPOINT, на Greenplum вложенность не используем).
 
         Args:
             act_id: ID акта
@@ -75,30 +92,50 @@ class ActContentRepository(BaseRepository):
         Returns:
             Словарь {status, message}
         """
-        async with self.conn.transaction():
-            # Получаем audit_act_id из таблицы acts
-            audit_act_id = await self.conn.fetchval(
-                f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
-                act_id
-            )
+        # Получаем audit_act_id из таблицы acts
+        audit_act_id = await self.conn.fetchval(
+            f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
+            act_id
+        )
 
-            # Маппинг {node_id -> audit_point_id} обходом дерева
-            audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
+        # Маппинг {node_id -> audit_point_id} обходом дерева
+        audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
 
-            # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
-            node_map = self._build_node_map(data.tree)
+        # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
+        node_map = self._build_node_map(data.tree)
 
-            await self._save_tree(act_id, data.tree)
-            await self._save_tables(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._save_textblocks(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
-            await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
-            await self._update_edit_timestamp(act_id, username)
+        await self._save_tree(act_id, data.tree)
+        dropped_tables = await self._save_tables(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
+        dropped_textblocks = await self._save_textblocks(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
+        dropped_violations = await self._save_violations(
+            act_id, audit_act_id, data, audit_point_map, node_map
+        )
+        await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
+        await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
+        updated_at = await self._update_edit_timestamp(
+            act_id, username,
+            validation_status=validation_status,
+            validation_issues=validation_issues or [],
+        )
 
-            logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
+        logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
 
-            return {"status": "success", "message": "Содержимое акта сохранено"}
+        # updated_at отдаётся фронту: он запоминает его как базу метаданных
+        # снимка-черновика localStorage (baseUpdatedAt) для решения о
+        # восстановлении черновика при следующей загрузке акта.
+        # dropped_orphans — суммарное число записей словарей, отброшенных
+        # orphan-фильтром (нет узла-владельца в дереве); сервис включает его
+        # в warning пользователю.
+        return {
+            "status": "success",
+            "message": "Содержимое акта сохранено",
+            "updated_at": updated_at,
+            "dropped_orphans": dropped_tables + dropped_textblocks + dropped_violations,
+        }
 
     # -------------------------------------------------------------------------
     # ЗАГРУЗКА
@@ -119,9 +156,7 @@ class ActContentRepository(BaseRepository):
         rows = await self.conn.fetch(
             f"""
             SELECT table_id, node_id, grid_data, col_widths, is_protected,
-                   is_deletable, is_metrics_table, is_main_metrics_table,
-                   is_regular_risk_table, is_operational_risk_table,
-                   is_tax_risk_table, is_other_risk_table
+                   is_deletable, kind
             FROM {self.tables}
             WHERE act_id = $1
             """,
@@ -135,12 +170,7 @@ class ActContentRepository(BaseRepository):
                 'colWidths': json.loads(row['col_widths']),
                 'protected': row['is_protected'],
                 'deletable': row['is_deletable'],
-                'isMetricsTable': row['is_metrics_table'],
-                'isMainMetricsTable': row['is_main_metrics_table'],
-                'isRegularRiskTable': row['is_regular_risk_table'],
-                'isOperationalRiskTable': row['is_operational_risk_table'],
-                'isTaxRiskTable': row['is_tax_risk_table'],
-                'isOtherRiskTable': row['is_other_risk_table']
+                'kind': row['kind']
             }
             for row in rows
         }
@@ -216,14 +246,14 @@ class ActContentRepository(BaseRepository):
             node_type = node.get("type", "item")
 
             # Определяем current_item_id по логике find_parent_item_node_id
-            if node_type == "item" or node_type not in ("table", "textblock", "violation"):
+            if node_type == "item" or node_type not in LEAF_BLOCK_TYPES:
                 current_item_id = node_id
             else:
                 current_item_id = parent_item_id
 
             # Для content-узлов parent_item_node_id = parent_item_id,
             # для item-узлов = собственный id
-            if node_type in ("table", "textblock", "violation"):
+            if node_type in LEAF_BLOCK_TYPES:
                 resolved_parent = parent_item_id
             else:
                 resolved_parent = node_id
@@ -256,8 +286,13 @@ class ActContentRepository(BaseRepository):
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт таблицы акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт таблицы акта (batch INSERT через executemany).
+
+        Returns:
+            Число таблиц-сирот (nodeId отсутствует в дереве), отброшенных
+            orphan-фильтром — сервис агрегирует это в warning пользователю.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.tables} WHERE act_id = $1",
             act_id
@@ -291,12 +326,7 @@ class ActContentRepository(BaseRepository):
                 json.dumps(table_data.colWidths),
                 table_data.protected,
                 table_data.deletable,
-                getattr(table_data, 'isMetricsTable', False),
-                getattr(table_data, 'isMainMetricsTable', False),
-                getattr(table_data, 'isRegularRiskTable', False),
-                getattr(table_data, 'isOperationalRiskTable', False),
-                getattr(table_data, 'isTaxRiskTable', False),
-                getattr(table_data, 'isOtherRiskTable', False),
+                getattr(table_data, 'kind', 'regular') or 'regular',
             ))
 
         if dropped:
@@ -312,29 +342,39 @@ class ActContentRepository(BaseRepository):
                     act_id, audit_act_id, audit_point_id,
                     table_id, node_id, node_number, table_label,
                     grid_data, col_widths, is_protected, is_deletable,
-                    is_metrics_table, is_main_metrics_table,
-                    is_regular_risk_table, is_operational_risk_table,
-                    is_tax_risk_table, is_other_risk_table
+                    kind
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 """,
                 args,
             )
+
+        return dropped
 
     async def _save_textblocks(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт текстовые блоки акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт текстовые блоки акта (batch INSERT через executemany).
+
+        Returns:
+            Число текстблоков-сирот, отброшенных orphan-фильтром.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.textblocks} WHERE act_id = $1",
             act_id
         )
 
         args: list[tuple] = []
+        dropped = 0
         for tb_id, tb_data in data.textBlocks.items():
             node_id = tb_data.nodeId
+            # Orphan-фильтр: текстблок без узла-владельца в дереве не пишется
+            # (единообразно с _save_tables, см. pbe-4).
+            if node_id not in node_map:
+                dropped += 1
+                continue
             info = node_map.get(node_id, {})
             parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
@@ -350,6 +390,12 @@ class ActContentRepository(BaseRepository):
                 json.dumps(tb_data.formatting.model_dump()),
             ))
 
+        if dropped:
+            logger.warning(
+                "Пропущено %d текстблок(ов) без узла-владельца в дереве (act_id=%s)",
+                dropped, act_id,
+            )
+
         if args:
             await self.conn.executemany(
                 f"""
@@ -362,20 +408,32 @@ class ActContentRepository(BaseRepository):
                 args,
             )
 
+        return dropped
+
     async def _save_violations(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
         node_map: dict[str, dict]
-    ) -> None:
-        """Пересоздаёт нарушения акта (batch INSERT через executemany)."""
+    ) -> int:
+        """Пересоздаёт нарушения акта (batch INSERT через executemany).
+
+        Returns:
+            Число нарушений-сирот, отброшенных orphan-фильтром.
+        """
         await self.conn.execute(
             f"DELETE FROM {self.violations} WHERE act_id = $1",
             act_id
         )
 
         args: list[tuple] = []
+        dropped = 0
         for v_id, v_data in data.violations.items():
             node_id = v_data.nodeId
+            # Orphan-фильтр: нарушение без узла-владельца в дереве не пишется
+            # (единообразно с _save_tables, см. pbe-4).
+            if node_id not in node_map:
+                dropped += 1
+                continue
             info = node_map.get(node_id, {})
             parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
@@ -397,6 +455,12 @@ class ActContentRepository(BaseRepository):
                 json.dumps(v_data.recommendations.model_dump()),
             ))
 
+        if dropped:
+            logger.warning(
+                "Пропущено %d нарушение(й) без узла-владельца в дереве (act_id=%s)",
+                dropped, act_id,
+            )
+
         if args:
             await self.conn.executemany(
                 f"""
@@ -410,6 +474,8 @@ class ActContentRepository(BaseRepository):
                 """,
                 args,
             )
+
+        return dropped
 
     async def _sync_invoices(
         self, act_id: int, audit_act_id: str | None,
@@ -541,20 +607,15 @@ class ActContentRepository(BaseRepository):
         is_deletable: bool,
         node_number: str | None = None,
         table_label: str | None = None,
-        is_metrics_table: bool = False,
-        is_main_metrics_table: bool = False,
-        is_regular_risk_table: bool = False,
-        is_operational_risk_table: bool = False,
-        is_tax_risk_table: bool = False,
-        is_other_risk_table: bool = False,
+        kind: str = "regular",
     ) -> None:
         """Вставляет одну системную таблицу (qualityAssessment и т.п.).
 
         Используется при перестройке разделов 1-2: при переходе на процессный
         тип проверки добавляются специальные таблицы оценки качества.
 
-        Заполняет денормализацию (node_number/table_label) и все 6 флагов
-        подвидов — чтобы вставленная системная таблица была согласована с теми,
+        Заполняет денормализацию (node_number/table_label) и подвид kind —
+        чтобы вставленная системная таблица была согласована с теми,
         что пишет _save_tables, и не теряла классификацию.
         """
         await self.conn.execute(
@@ -562,10 +623,8 @@ class ActContentRepository(BaseRepository):
             INSERT INTO {self.tables}
                 (act_id, table_id, node_id, node_number, table_label,
                  grid_data, col_widths, is_protected, is_deletable,
-                 is_metrics_table, is_main_metrics_table,
-                 is_regular_risk_table, is_operational_risk_table,
-                 is_tax_risk_table, is_other_risk_table)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 kind)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             act_id,
             table_id,
@@ -576,24 +635,38 @@ class ActContentRepository(BaseRepository):
             json.dumps(col_widths),
             is_protected,
             is_deletable,
-            is_metrics_table,
-            is_main_metrics_table,
-            is_regular_risk_table,
-            is_operational_risk_table,
-            is_tax_risk_table,
-            is_other_risk_table,
+            kind,
         )
 
-    async def _update_edit_timestamp(self, act_id: int, username: str) -> None:
-        """Обновляет метку последнего редактирования."""
+    async def _update_edit_timestamp(
+        self,
+        act_id: int,
+        username: str,
+        *,
+        validation_status: str = "ok",
+        validation_issues: list[dict] | None = None,
+    ):
+        """Обновляет метку редактирования и состояние валидации акта.
+
+        Возвращает фактическое значение updated_at отдельным SELECT
+        (не UPDATE ... RETURNING — для совместимости с Greenplum).
+        """
         await self.conn.execute(
             f"""
             UPDATE {self.acts}
             SET last_edited_by = $1,
                 last_edited_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CURRENT_TIMESTAMP,
+                validation_status = $3,
+                validation_issues = $4::jsonb
             WHERE id = $2
             """,
             username,
+            act_id,
+            validation_status,
+            json.dumps(validation_issues or [], ensure_ascii=False),
+        )
+        return await self.conn.fetchval(
+            f"SELECT updated_at FROM {self.acts} WHERE id = $1",
             act_id
         )

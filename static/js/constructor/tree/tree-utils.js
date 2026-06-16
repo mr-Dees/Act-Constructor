@@ -4,11 +4,53 @@
  * Централизованные функции поиска, обхода и манипуляции узлами дерева.
  * Используется всеми модулями для избежания дублирования логики.
  */
-import { AppState } from '../state/state-core.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType } from '../block-types.js';
 import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 
 export const TreeUtils = {
+    /**
+     * Deep-копия plain-данных (узлы дерева и записи словарей JSON-сериализуемы,
+     * они и так уходят на бэкенд через exportData). Единый хелпер для
+     * undo-delete и буфера обмена дерева.
+     * @param {*} value - Копируемое значение
+     * @returns {*} Глубокая копия
+     */
+    deepCopy(value) {
+        return typeof structuredClone === 'function'
+            ? structuredClone(value)
+            : JSON.parse(JSON.stringify(value));
+    },
+
+    /**
+     * Собирает записи словарей (tables/textBlocks/violations) для всех
+     * листьев-блоков поддерева. Обход по реестру block-types (idProp/dictName).
+     * Чистая функция: читает raw-узлы и raw-словари, возвращает deep-копии.
+     * Единый хелпер для снимков undo-delete и сериализации буфера обмена.
+     * @param {Object} rawNode - Raw-корень поддерева
+     * @param {Object} rawDicts - Сырые словари {tables, textBlocks, violations}
+     * @returns {Object} Словарь dictName → {contentId: deep-копия записи}
+     */
+    collectSubtreeDictEntries(rawNode, rawDicts) {
+        const result = {};
+        const walk = (n) => {
+            const spec = n.type ? getBlockType(n.type) : null;
+            if (spec?.idProp && spec.dictName) {
+                const contentId = n[spec.idProp];
+                const dict = rawDicts[spec.dictName];
+                const entry = contentId && dict ? _unwrap(dict[contentId]) : null;
+                if (entry) {
+                    if (!result[spec.dictName]) result[spec.dictName] = {};
+                    result[spec.dictName][contentId] = this.deepCopy(entry);
+                }
+            }
+            (n.children || []).forEach((child) => walk(_unwrap(child)));
+        };
+        walk(_unwrap(rawNode));
+        return result;
+    },
+
     /**
      * Находит узел по ID
      * @param {string} nodeId - ID искомого узла

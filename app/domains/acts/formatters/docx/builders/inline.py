@@ -1,7 +1,13 @@
 """Inline HTML → docx runs.
 
-Поддерживает <b>, <strong>, <i>, <em>, <u>, <span style="font-size: ...">,
+Поддерживает <b>, <strong>, <i>, <em>, <u>, <s>/<strike>/<del>,
+<span style="font-size: ...">, <span style="text-decoration: line-through">,
 <br>, <a href="...">. Любой другой тег игнорируется (содержимое сохраняется).
+
+Зачёркивание (M.19): Chromium execCommand('strikeThrough') эмитит <strike>
+(тег-форма, styleWithCSS в приложении не включается); CSS-форма
+text-decoration(-line): line-through поддержана для вставленного извне
+контента, прошедшего bleach (text-decoration в ALLOWED_CSS_PROPERTIES).
 
 Спец-разметка редактора текстблоков:
     <span class="text-footnote" data-footnote-text="...">якорь</span>
@@ -40,11 +46,14 @@ class _RunState:
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    strike: bool = False
     size_pt: float = 12.0
 
 
 _PX_TO_PT = 0.75
 _SIZE_RE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*(px|pt)", re.IGNORECASE)
+# Зачёркивание CSS-формой: и text-decoration, и text-decoration-line.
+_STRIKE_RE = re.compile(r"text-decoration(?:-line)?\s*:\s*[^;]*line-through", re.IGNORECASE)
 
 
 def apply_inline_html(paragraph: Paragraph, html: str, base_size_pt: float) -> None:
@@ -84,11 +93,16 @@ class _InlineParser(HTMLParser):
             self.stack.append(replace(current, italic=True))
         elif tag == "u":
             self.stack.append(replace(current, underline=True))
+        elif tag in ("s", "strike", "del"):
+            self.stack.append(replace(current, strike=True))
         elif tag == "span":
             self._open_span(dict(attrs), current)
         elif tag == "br":
+            # Void-тег: кадр НЕ пушим (как в handle_startendtag), иначе
+            # закрывающий </b> снял бы лишний кадр вместо bold-фрейма и
+            # текст после </b> остался бы жирным (H7). </br>, если придёт,
+            # игнорируется в handle_endtag.
             self._add_run("\n")
-            self.stack.append(current)  # поглощает </br>, если придёт
         else:
             self.stack.append(current)
 
@@ -115,9 +129,17 @@ class _InlineParser(HTMLParser):
             return
         size = _extract_size_pt(attrs)
         self._span_kinds.append(("plain", None))
-        self.stack.append(replace(current, size_pt=size) if size else current)
+        state = current
+        if size:
+            state = replace(state, size_pt=size)
+        if _STRIKE_RE.search(attrs.get("style", "")):
+            state = replace(state, strike=True)
+        self.stack.append(state)
 
     def handle_endtag(self, tag):
+        if tag == "br":
+            # Void-тег: handle_starttag кадр не пушил — снимать нечего.
+            return
         if tag == "a" and self._hyperlink is not None:
             self._close_hyperlink()
         if tag == "span" and self._span_kinds:
@@ -145,6 +167,8 @@ class _InlineParser(HTMLParser):
             run.italic = self.state.italic
             if self.state.underline:
                 run.underline = True
+            if self.state.strike:
+                run.font.strike = True
             return
 
         # Внутри <a> конструируем `w:r` напрямую через oxml,
@@ -165,6 +189,8 @@ class _InlineParser(HTMLParser):
             r_pr.append(OxmlElement("w:b"))
         if self.state.italic:
             r_pr.append(OxmlElement("w:i"))
+        if self.state.strike:
+            r_pr.append(OxmlElement("w:strike"))
         if self.state.underline:
             u = OxmlElement("w:u")
             u.set(qn("w:val"), "single")

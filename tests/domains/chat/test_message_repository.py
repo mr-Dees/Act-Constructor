@@ -1,7 +1,7 @@
 """Тесты репозитория chat_messages (mock_conn).
 
 Покрывают streaming-методы Phase 0 «D»: create_streaming, append_block,
-finalize, mark_failed. RMW-стратегия (read-modify-write под FOR UPDATE)
+upsert_block, finalize, mark_failed. RMW-стратегия (read-modify-write под FOR UPDATE)
 проверяется через ассерты на SELECT … FOR UPDATE и последующий UPDATE.
 """
 
@@ -187,8 +187,8 @@ async def test_finalize_happy_path_with_merge(mock_conn):
     assert msg_id == "msg-1"
 
 
-async def test_finalize_dedupes_by_block_id(mock_conn):
-    """Final блок с block_id, который уже в existing, не дублируется."""
+async def test_finalize_does_not_duplicate_block_with_same_block_id(mock_conn):
+    """Повторно присланный финальный блок с тем же block_id не дублируется — замещает накопленный на его месте."""
     mock_conn.fetchrow.return_value = {
         "content": [
             {"type": "reasoning", "block_id": "r1", "content": "th"},
@@ -197,7 +197,7 @@ async def test_finalize_dedupes_by_block_id(mock_conn):
         "status": "streaming",
     }
     repo = MessageRepository(mock_conn)
-    # Final присылает тот же t1 заново — фронт уже его видел через append.
+    # Final присылает t1 заново — блок замещается на месте, дубля нет.
     final_blocks = [
         {"type": "text", "block_id": "t1", "content": "partial"},
         {"type": "buttons", "block_id": "b1", "items": []},
@@ -224,6 +224,111 @@ async def test_finalize_returns_false_when_not_streaming(mock_conn):
     ok = await repo.finalize(message_id="msg-1", final_blocks=[])
     assert ok is False
     mock_conn.execute.assert_not_called()
+
+
+# ── upsert_block ─────────────────────────────────────────────────────────
+
+
+async def test_upsert_block_updates_existing_by_block_id(mock_conn):
+    """upsert_block заменяет блок с тем же block_id на его позиции, не плодит дубли."""
+    existing = [{"type": "reasoning", "content": "стар", "block_id": "a:reasoning:0"}]
+    mock_conn.fetchrow.return_value = {
+        "content": json.dumps(existing),
+        "status": "streaming",
+    }
+    repo = MessageRepository(mock_conn)
+    ok = await repo.upsert_block(
+        message_id="m1",
+        block={"type": "reasoning", "content": "стар и новый", "block_id": "a:reasoning:0"},
+    )
+    assert ok is True
+    # SELECT … FOR UPDATE должен быть вызван
+    select_sql = mock_conn.fetchrow.call_args.args[0]
+    assert "FOR UPDATE" in select_sql
+    # UPDATE выполнен, payload содержит ровно один блок с обновлённым content
+    update_sql, payload, msg_id = mock_conn.execute.call_args.args
+    assert "UPDATE" in update_sql
+    content = json.loads(payload)
+    assert len(content) == 1
+    assert content[0]["content"] == "стар и новый"
+    assert msg_id == "m1"
+
+
+async def test_upsert_block_appends_when_absent(mock_conn):
+    """upsert_block дописывает блок, если block_id ещё не встречался."""
+    mock_conn.fetchrow.return_value = {
+        "content": json.dumps([]),
+        "status": "streaming",
+    }
+    repo = MessageRepository(mock_conn)
+    new_block = {"type": "reasoning", "content": "первый", "block_id": "a:reasoning:0"}
+    ok = await repo.upsert_block(message_id="m1", block=new_block)
+    assert ok is True
+    _, payload, _ = mock_conn.execute.call_args.args
+    content = json.loads(payload)
+    assert len(content) == 1
+    assert content[0] == new_block
+
+
+async def test_upsert_block_false_when_not_streaming(mock_conn):
+    """upsert_block возвращает False и не делает UPDATE, если status != 'streaming'."""
+    mock_conn.fetchrow.return_value = {
+        "content": json.dumps([]),
+        "status": "complete",
+    }
+    repo = MessageRepository(mock_conn)
+    ok = await repo.upsert_block(
+        message_id="m1",
+        block={"type": "reasoning", "content": "x", "block_id": "a:reasoning:0"},
+    )
+    assert ok is False
+    mock_conn.execute.assert_not_called()
+
+
+async def test_upsert_block_false_without_block_id(mock_conn):
+    """upsert_block возвращает False без обращения к БД, если блок не имеет block_id."""
+    repo = MessageRepository(mock_conn)
+    ok = await repo.upsert_block(
+        message_id="m1",
+        block={"type": "text", "content": "нет id"},
+    )
+    assert ok is False
+    mock_conn.fetchrow.assert_not_called()
+    mock_conn.execute.assert_not_called()
+
+
+# ── finalize — replace-мерж ───────────────────────────────────────────────
+
+
+async def test_finalize_replaces_existing_block_with_same_block_id(mock_conn):
+    """finalize ЗАМЕЩАЕТ накопленный блок финальным на той же позиции.
+
+    Если поллер накопил частичный reasoning (block_id="X"), а финальный блок
+    агента содержит полный текст с тем же block_id="X", финальная версия
+    должна встать на место частичной (не дублироваться), а новые блоки без
+    совпадения по id дописываются в конец.
+    """
+    mock_conn.fetchrow.return_value = {
+        "content": json.dumps([
+            {"type": "reasoning", "block_id": "X", "content": "частичный"},
+        ]),
+        "status": "streaming",
+    }
+    repo = MessageRepository(mock_conn)
+    final_blocks = [
+        {"type": "reasoning", "block_id": "X", "content": "полный"},
+        {"type": "text", "content": "Ответ"},  # без block_id — дописывается в конец
+    ]
+    ok = await repo.finalize(message_id="msg-1", final_blocks=final_blocks)
+    assert ok is True
+    _, content_json, *_ = mock_conn.execute.call_args.args
+    merged = json.loads(content_json)
+    # Итого 2 блока: reasoning на месте (индекс 0) + text в конце
+    assert len(merged) == 2
+    assert merged[0]["block_id"] == "X"
+    assert merged[0]["content"] == "полный"
+    assert merged[1]["type"] == "text"
+    assert merged[1]["content"] == "Ответ"
 
 
 # ── mark_failed ──────────────────────────────────────────────────────────

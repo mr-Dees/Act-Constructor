@@ -6,9 +6,18 @@ import { InvoiceDialog } from '../dialog/dialog-invoice.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { PreviewManager } from '../preview/preview.js';
 import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
+import { UndoDeleteManager } from '../state/undo-delete.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import {
+    KIND_MAIN_METRICS,
+    KIND_METRICS,
+    KIND_OPERATIONAL_RISK,
+    KIND_OTHER_RISK,
+    KIND_REGULAR_RISK,
+    KIND_TAX_RISK,
+    isRiskTable as kindIsRiskTable,
+} from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics } from '../state/metrics-risk-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
@@ -82,6 +91,9 @@ export class TreeContextMenu {
             const isAddChildBlocked = node.number?.match(/^5\.\d+$/) && this._hasRiskTablesAtLevel5x();
             addChildItem.classList.toggle('disabled', !!isAddChildBlocked);
         }
+
+        // Доступность инъецированных пунктов «Копировать»/«Вставить» (clipboard).
+        window.NodeClipboard?.refreshMenuState?.(node);
     }
 
     /**
@@ -129,15 +141,15 @@ export class TreeContextMenu {
     /** Проверяет, есть ли у узла прямая дочерняя таблица риска данного типа. */
     _hasDirectRiskTableOfType(node, riskType) {
         if (!node.children) return false;
-        const flagByType = {
-            'regular':     'isRegularRiskTable',
-            'operational': 'isOperationalRiskTable',
-            'tax':         'isTaxRiskTable',
-            'other':       'isOtherRiskTable',
+        const kindByType = {
+            'regular':     KIND_REGULAR_RISK,
+            'operational': KIND_OPERATIONAL_RISK,
+            'tax':         KIND_TAX_RISK,
+            'other':       KIND_OTHER_RISK,
         };
-        const flag = flagByType[riskType];
-        if (!flag) return false;
-        return node.children.some(child => child.type === AppConfig.nodeTypes.TABLE && !!child[flag]);
+        const kind = kindByType[riskType];
+        if (!kind) return false;
+        return node.children.some(child => child.type === AppConfig.nodeTypes.TABLE && child.kind === kind);
     }
 
     /**
@@ -417,7 +429,7 @@ export class TreeContextMenu {
             const findRisks = n => AppState._findRiskTablesInSubtree(n);
 
             // Проверка под узлом 5.* (единый предикат необходимости сводной).
-            if (table?.isMetricsTable) {
+            if (table?.kind === KIND_METRICS) {
                 const parentUnder5 = this._findParentFirstLevelUnderPoint5(node);
                 if (parentUnder5 && shouldHaveMetricsTable(parentUnder5, findRisks)) {
                     Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
@@ -426,7 +438,7 @@ export class TreeContextMenu {
             }
 
             // Проверка главной таблицы метрик (единый предикат).
-            if (table?.isMainMetricsTable) {
+            if (table?.kind === KIND_MAIN_METRICS) {
                 const node5 = AppState.findNodeById('5');
                 if (shouldHaveMainMetrics(node5, findRisks)) {
                     Notifications.error('Нельзя удалить общую таблицу метрик, пока в пункте 5 есть таблицы рисков');
@@ -468,7 +480,8 @@ export class TreeContextMenu {
                 const deleted = AppState.deleteNode(nodeId);
                 if (deleted) {
                     this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
-                    Notifications.info('Элемент удалён');
+                    // Toast с кнопкой «Отменить» — откат последнего удаления (Б-4).
+                    UndoDeleteManager.showDeletedToast();
                 }
             }
         });
@@ -511,7 +524,7 @@ export class TreeContextMenu {
 
         // Главная сводная: останутся ли риски в §5 кроме удаляемого?
         const remaining = AppState._findRiskTablesInSubtree(node5).filter(n => n.id !== node.id);
-        const mainNode = node5.children?.find(c => c.type === TABLE && c.isMainMetricsTable === true);
+        const mainNode = node5.children?.find(c => c.type === TABLE && c.kind === KIND_MAIN_METRICS);
         const mainSvod = !!mainNode && remaining.length === 0;
 
         // Per-point сводная по 5.X-предку (только для глубоких рисков 5.X.Y+).
@@ -525,7 +538,7 @@ export class TreeContextMenu {
                 }
             }
             deep = deep.filter(n => n.id !== node.id);
-            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.isMetricsTable === true);
+            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.kind === KIND_METRICS);
             if (perNode && deep.length === 0) {
                 perPoint = ancestor5x.number;
             }
@@ -537,12 +550,18 @@ export class TreeContextMenu {
     /**
      * Обновление UI после изменения дерева.
      * @param {string} [scopeNodeId] - ID узла-родителя, чьё поддерево достаточно перерисовать.
-     *   Если не указан — fallback на полный renderAll (используется для рисковых таблиц,
+     *   Если не указан — fallback на полный рендер (используется для рисковых таблиц,
      *   которые затрагивают метрики-таблицы в произвольных местах раздела 5).
      */
     updateTreeViews(scopeNodeId) {
-        treeManager.render();
-        PreviewManager.update('previewTrim', 30);
+        if (scopeNodeId) {
+            // Точечная пересборка поддерева в дереве (внутри — fallback на
+            // полный render, если узел не отрисован, напр. scope === 'root').
+            treeManager.renderer.renderSubtree(scopeNodeId);
+        } else {
+            treeManager.render();
+        }
+        PreviewManager.update();
         if (AppState.currentStep === 2) {
             if (scopeNodeId) {
                 ItemsRenderer.updateItem(scopeNodeId);

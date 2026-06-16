@@ -16,6 +16,7 @@ notifications-домена: так acts не зависит от наличия 
 async def emit_act_notification(
     *,
     title: str,
+    body: str | None = None,
     severity: str = "info",
     link: str | None = None,
     recipient_user_id: str | None = None,
@@ -27,6 +28,7 @@ async def emit_act_notification(
 
     Args:
         title: заголовок уведомления (пользовательский текст).
+        body: подробности (например, список конкретных замечаний акта).
         severity: важность ('info'/'success'/'warning'/'error').
         link: proxy-safe относительный путь к акту (например
             ``/constructor?act_id=42``).
@@ -40,6 +42,7 @@ async def emit_act_notification(
     await push_notification(
         source="acts",
         title=title,
+        body=body,
         severity=severity,
         link=link,
         recipient_user_id=recipient_user_id,

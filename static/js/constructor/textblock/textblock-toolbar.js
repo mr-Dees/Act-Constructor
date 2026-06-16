@@ -2,6 +2,7 @@
  * Расширение для работы с панелью инструментов
  */
 import { TextBlockManager } from './textblock-core.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -138,6 +139,12 @@ Object.assign(TextBlockManager.prototype, {
     applyFontSize(fontSize) {
         if (!this.activeEditor) return;
 
+        // Кламп по границам шрифта из настроек (ACTS__TEXTBLOCKS__* через
+        // /limits): схема отвергнет размер вне диапазона — не даём UI выйти
+        // за него даже если в списке остались крайние значения.
+        const { fontSizeMin, fontSizeMax } = getStructureLimits();
+        fontSize = Math.max(fontSizeMin, Math.min(fontSizeMax, fontSize));
+
         this.activeEditor.focus();
         const selection = window.getSelection();
 
@@ -156,11 +163,21 @@ Object.assign(TextBlockManager.prototype, {
                 }
             });
 
+            // Запоминаем font[size="7"], уже существовавшие ДО операции (юзер
+            // мог раньше явно выставить word-размер 7) — execCommand добавит
+            // новые такие теги только для текущего выделения. Преобразуем только
+            // их, чужие не трогаем.
+            const preExistingFont7 = new Set(
+                this.activeEditor.querySelectorAll('font[size="7"]')
+            );
+
             // Применяем к обычному тексту через execCommand
             this.execCommand('fontSize', '7');
 
-            // Заменяем font tags на span с точным размером, сохраняя выделение
-            const fontTags = [...this.activeEditor.querySelectorAll('font[size="7"]')];
+            // Заменяем font tags на span с точным размером, сохраняя выделение.
+            // Берём только теги, созданные текущим execCommand (не пред-существующие).
+            const fontTags = [...this.activeEditor.querySelectorAll('font[size="7"]')]
+                .filter(font => !preExistingFont7.has(font));
             const newSpans = [];
             fontTags.forEach(font => {
                 const span = document.createElement('span');

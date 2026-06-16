@@ -19,33 +19,75 @@
 --    Если имя шины / префикс в .env другие — замени глобально.
 --    На GP к имени дополнительно прибавляется схема: `{SCHEMA}.<table>`.
 --
---  ВАЖНО — семантика колонок chat_agent_messages_bus:
---    • chat_id         = uid треда (= chat_conversations.id, он же chat_messages.conversation_id)
---    • conversation_id = uid одного СООБЩЕНИЯ (уникальный строковый идентификатор
---                        данной строки в рамках диалога)
---    • reply_to        = conversation_id строки-ОТВЕТА; проставляется агентом
---                        на строке-вопросе — это сигнал «ответ готов»
---    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента) | 'tool'
+--  ВАЖНО — семантика колонок chat_agent_messages_bus
+--  (структуру задаёт сторона агента — владелец таблицы; отдельной колонки
+--   conversation_id в шине НЕТ):
+--    • id       (uuid) = uid одного СООБЩЕНИЯ шины — уникальный идентификатор
+--                        данной строки. Его же хранит chat_messages.agent_ref
+--    • chat_id  (text) = uid треда (= chat_conversations.id,
+--                        он же chat_messages.conversation_id)
+--    • reply_to (uuid) = ссылка на id ВОПРОСА; проставляется агентом
+--                        НА СТРОКЕ-ОТВЕТЕ — наличие ответа с
+--                        reply_to=<id вопроса> и есть сигнал «ответ готов»
+--    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента)
+--                        | 'system'; CHECK владельца роль 'tool' НЕ допускает
 --    • metadata        = JSONB: у вопроса ключи {mode, kb}; у ответа ключ
---                        {thinking} — все рассуждения агента
+--                        {reasoning} — рассуждения агента (стримятся дельтами,
+--                        пока пишется ответ; legacy-ключ {thinking} AW тоже
+--                        понимает)
 --    • buttons         = JSONB: массив [{action_id, label, params}]
 --    • media           = JSONB: [{file_id, filename, mime_type, file_size}]
+--    • status          = pending | processing | completed | failed
+--                        (CHECK владельца, подтверждённая спека; 'timeout'
+--                        и 'error' ЗАПРЕЩЕНЫ — записи статуса от AW best-effort)
+--    У владельца на колонках есть DEFAULT'ы (id, status, таймстемпы, JSONB),
+--    но AW на них не полагается и передаёт значения явно.
 --
---  ВАЖНО — поток данных:
+--  ВАЖНО — поток данных (подтверждённая спека агента):
 --    1. AW INSERT'ит строку-вопрос (role='user', status='pending').
---    2. Агент UPDATE SET status='in_progress' на строке-вопросе.
---    3. Агент INSERT'ит строку-ответа (role='assistant', новый conversation_id,
---       content, metadata.thinking, опц. buttons/media, status='complete').
---    4. Агент UPDATE строки-вопроса: SET reply_to=<uid ответа>, status='complete'.
---    5. AW поллит reply_to строки-вопроса (или status='complete'/'error'/'timeout')
---       и рисует ответ + рассуждения.
---    Таймаут 10 минут — AW сам ставит 'timeout'/'error' на зависших строках.
---    Шаги 2 и 3+4 можно объединить в одну транзакцию.
+--    2. Агент claim'ит вопрос: UPDATE SET status='processing'.
+--    3. Агент INSERT'ит строку-ответа (role='assistant', новый id,
+--       reply_to=<id вопроса>) с пустым content и status='processing',
+--       затем дописывает reasoning-дельты в metadata.reasoning (UPDATE … updated_at=now()),
+--       потом пишет финальный content и status='completed' (или 'failed').
+--    4. Агент UPDATE строки-вопроса: SET status='completed' (или 'failed').
+--    5. AW поллит строку-ответ по reply_to=<id вопроса> (role='assistant');
+--       финализирует, когда статус ответа терминальный.
+--    Пока вопрос pending AW показывает позицию очереди:
+--       «В очереди: впереди N запросов» — N = число pending-вопросов всех пользователей (включая свои) с created_at раньше.
+--    Признаки жизни, продлевающие claim-таймер (30 мин idle для pending):
+--       уменьшение N, переход pending→processing.
+--    Признаки жизни, продлевающие answer-таймер (10 мин idle для processing):
+--       рост metadata.reasoning на строке-ответа, изменение её updated_at.
+--    Сообщения одного chat_id агент НЕ обрабатывает параллельно — ждёт
+--    завершения активного, затем берёт следующее из той же беседы.
+--    Idle-таймауты двухфазные, отсчёт от последнего признака жизни:
+--    30 мин для pending (CLAIM_TIMEOUT_SEC) и 10 мин для processing
+--    (ANSWER_TIMEOUT_SEC); по истечении AW сам закрывает зависший draft
+--    в chat_messages и best-effort ставит вопросу status='failed'.
+--
+--  СТРУКТУРА ФАЙЛА:
+--    0. ПОДГОТОВКА          — просмотр активных вопросов, копирование <QUESTION_ID>
+--    1. Успешный ответ       — нормальный поток: вопрос → ответ
+--    2. Ответ с кнопками     — поле buttons с action_id/label/params
+--    3. Ответ с файлом/медиа — поле media, заливка файла в chat_files
+--    4. Ошибка               — status='failed' на вопросе и/или ответе
+--    5. Агент думает         — UPDATE вопроса до processing (простой индикатор)
+--    6. ДИАГНОСТИКА          — счётчики, старые pending, пара вопрос–ответ
+--    7. ОЧИСТКА ПО TTL       — удаление завершённых строк, ручное закрытие зависших
+--    8. ОЧЕРЕДЬ              — второй pending-вопрос раньше, фронт показывает
+--                              «впереди N запросов»; движение очереди (completed/DELETE)
+--    9. ЗАДЕРЖКА ВЗЯТИЯ В РАБОТУ — pending держится N минут, затем → processing
+--   10. ПОРЦИОННЫЙ REASONING — строка-ответ с пустым content, 4 UPDATE дописывают
+--                              metadata.reasoning, фронт допечатывает дельты; финализация
+--   11. ВИТРИНА MARKDOWN   — ответ со всеми основными md-элементами (заголовки,
+--                              списки, таблица, код, цитата) для проверки рендера
 --
 --  ВАЖНО — GP-ограничения (Greenplum 6.x = PostgreSQL 9.4):
 --    БЕЗ ON CONFLICT DO UPDATE, БЕЗ gen_random_uuid(), БЕЗ jsonb_set,
 --    БЕЗ CREATE INDEX IF NOT EXISTS. UUID генерируем через
---    md5(random()::text || clock_timestamp()::text).
+--    md5(random()::text || clock_timestamp()::text)::uuid
+--    (32 hex-символа без дефисов — валидный ввод для типа uuid).
 -- ============================================================================
 
 
@@ -55,12 +97,12 @@
 
 -- Активные вопросы, ждущие ответа от агента.
 -- ┌────────────────────────────────────────────────────────────────────────┐
--- │ СКОПИРУЙ значение колонки `conversation_id` строки с role='user'.        │
--- │ Именно его (и ТОЛЬКО его) нужно подставить в <QUESTION_CONV_ID> ниже     │
--- │ во всех сценариях 1–5. Это uid сообщения-вопроса, НЕ колонка `id` (PK)!  │
+-- │ СКОПИРУЙ значение колонки `id` строки с role='user'.                     │
+-- │ Именно его нужно подставить в <QUESTION_ID> ниже во всех сценариях 1–5.  │
+-- │ Это uid сообщения-вопроса (его же хранит chat_messages.agent_ref).       │
 -- └────────────────────────────────────────────────────────────────────────┘
-SELECT conversation_id,   -- ← ЭТО копируем в <QUESTION_CONV_ID>
-       id, chat_id, user_id,
+SELECT id,   -- ← ЭТО копируем в <QUESTION_ID>
+       chat_id, user_id,
        content, metadata, status, created_at
 FROM chat_agent_messages_bus
 WHERE role = 'user'
@@ -68,70 +110,69 @@ WHERE role = 'user'
 ORDER BY created_at DESC
 LIMIT 20;
 
--- СТАДИИ status на строке-вопросе:
+-- СТАДИИ status на строке-вопросе (CHECK владельца):
 --   pending     — вопрос вставлен AW, агент ещё не взял.
---   in_progress — агент взял (UPDATE после SELECT FOR UPDATE или просто UPDATE).
---   complete    — агент проставил reply_to и закончил ответ.
---   error       — агент зафиксировал ошибку.
---   timeout     — AW сам закрыл по таймауту (10 мин без ответа).
+--   processing  — агент claim'ит вопрос и работает над ответом.
+--   completed   — агент вставил ответ (reply_to=<id вопроса> НА ОТВЕТЕ) и закрыл вопрос.
+--   failed      — агент зафиксировал ошибку; этим же статусом AW best-effort
+--                 закрывает вопрос по таймауту (слот лимита дополнительно
+--                 страхует отсечка по возрасту в count_active_for_user).
 --
 -- Для наблюдения «всё, что в работе»:
-SELECT id, chat_id, conversation_id, content, status, created_at
+SELECT id, chat_id, content, status, created_at
 FROM chat_agent_messages_bus
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
 ORDER BY created_at DESC
 LIMIT 20;
 
 -- Полная строка одного вопроса (metadata содержит mode и kb):
-SELECT id, chat_id, user_id, conversation_id, content, metadata, status, created_at
+SELECT id, chat_id, user_id, content, metadata, status, created_at
 FROM chat_agent_messages_bus
-WHERE conversation_id = '<QUESTION_CONV_ID>';
+WHERE id = '<QUESTION_ID>';
 
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 1. СЦЕНАРИЙ "успешный ответ агента" (нормальный поток)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Единый самодостаточный блок. Замени ТОЛЬКО <QUESTION_CONV_ID>
--- (значение conversation_id строки-вопроса из запроса 0). Всё остальное —
--- uid строки-ответа, её conversation_id, chat_id, user_id — вычисляется
--- автоматически и связывается внутри блока.
+-- Единый самодостаточный блок. Замени ТОЛЬКО <QUESTION_ID>
+-- (значение id строки-вопроса из запроса 0). Всё остальное —
+-- id строки-ответа, chat_id, user_id — вычисляется автоматически
+-- и связывается внутри блока.
 --
 -- PL/pgSQL DO-блок работает и в PostgreSQL, и в Greenplum 6.x.
 
 DO $$
 DECLARE
-    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
-    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
-    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
+    a_id    uuid := md5(random()::text || clock_timestamp()::text)::uuid;  -- id ответа (авто)
     v_chat  text;
     v_user  text;
 BEGIN
-    -- Берём chat_id/user_id из строки-вопроса по её conversation_id:
+    -- Берём chat_id/user_id из строки-вопроса по её id:
     SELECT chat_id, user_id INTO v_chat, v_user
     FROM chat_agent_messages_bus
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 
-    -- Строка-ответ ассистента:
+    -- Строка-ответ ассистента (reply_to = id ВОПРОСА — на ответе):
     INSERT INTO chat_agent_messages_bus
-        (id, chat_id, user_id, conversation_id, role,
-         content, metadata, status, created_at, updated_at)
-    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+        (id, chat_id, user_id, role,
+         content, metadata, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
             'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
-            '{"thinking": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
-            'complete', now(), now());
+            '{"reasoning": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
+            q_id, 'completed', now(), now());
 
-    -- Закрываем строку-вопрос: reply_to = conversation_id ответа, status='complete':
+    -- Закрываем строку-вопрос:
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_conv,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 END$$;
 
--- После блока: AW увидит reply_to на вопросе → загрузит строку-ответ
--- по conversation_id и отрендерит content + metadata.thinking.
+-- После блока: AW найдёт строку-ответ по reply_to = id вопроса
+-- и отрендерит content + metadata.reasoning.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -142,34 +183,32 @@ END$$;
 -- action_id 'acts.open_act_page' (открывает страницу акта по km_number).
 -- Кнопки рендерятся под текстом ответа как интерактивные элементы.
 --
--- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 DO $$
 DECLARE
-    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
-    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
-    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
+    a_id    uuid := md5(random()::text || clock_timestamp()::text)::uuid;  -- id ответа (авто)
     v_chat  text;
     v_user  text;
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
     FROM chat_agent_messages_bus
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 
     INSERT INTO chat_agent_messages_bus
-        (id, chat_id, user_id, conversation_id, role,
-         content, metadata, buttons, status, created_at, updated_at)
-    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+        (id, chat_id, user_id, role,
+         content, metadata, buttons, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
             'Найдены 2 связанных акта:',
-            '{"thinking": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
+            '{"reasoning": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
             '[{"action_id":"acts.open_act_page","label":"Открыть 11-11111","params":{"km_number":"11-11111"}},{"action_id":"acts.open_act_page","label":"Открыть 22-22222","params":{"km_number":"22-22222"}}]'::jsonb,
-            'complete', now(), now());
+            q_id, 'completed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_conv,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 END$$;
 
 
@@ -183,16 +222,15 @@ END$$;
 -- GET /api/v1/chat/files/{file_id} вернёт 404. AW определяет превью по mime_type:
 --   image/* — встроенное изображение; остальные — иконка + кнопка «Скачать».
 --
--- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 -- Блок сам заливает реально скачиваемый TXT-файл в chat_files и связывает его
 -- с ответом через media.
 
 DO $$
 DECLARE
-    q_conv   text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
-    a_conv   text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
-    a_id     text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
-    f_id     text := md5(random()::text || clock_timestamp()::text); -- file_id (авто)
+    q_id     uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
+    a_id     uuid := md5(random()::text || clock_timestamp()::text)::uuid;  -- id ответа (авто)
+    f_id     text := md5(random()::text || clock_timestamp()::text);        -- file_id (авто)
     f_name   text := 'отчёт.txt';
     f_mime   text := 'text/plain; charset=utf-8';
     f_body   bytea := convert_to(
@@ -203,7 +241,7 @@ DECLARE
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
     FROM chat_agent_messages_bus
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 
     -- Файл в chat_files (conversation_id в chat_files = chat_id треда;
     -- message_id NULL: у ответа агента ещё нет id chat-сообщения):
@@ -215,9 +253,9 @@ BEGIN
 
     -- Строка-ответ с media, ссылающимся на свежий file_id:
     INSERT INTO chat_agent_messages_bus
-        (id, chat_id, user_id, conversation_id, role,
-         content, media, status, created_at, updated_at)
-    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+        (id, chat_id, user_id, role,
+         content, media, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
             'Сформировал отчёт, прикладываю файл:',
             jsonb_build_array(
                 jsonb_build_object(
@@ -227,13 +265,12 @@ BEGIN
                     'file_size', octet_length(f_body)
                 )
             ),
-            'complete', now(), now());
+            q_id, 'completed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_conv,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 END$$;
 
 -- Другие типы файлов — замени f_mime/f_name и f_body на decode(...):
@@ -246,41 +283,40 @@ END$$;
 -- 4. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Можно вставить строку-ответ с описанием ошибки и/или просто закрыть вопрос
--- со status='error'. AW рендерит статусный блок на основе статуса вопроса.
--- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
+-- Можно вставить строку-ответ со status='failed' и текстом ошибки, либо просто
+-- закрыть вопрос со status='failed' без ответа — AW в обоих случаях покажет
+-- error-блок (во втором — стандартный текст «Внешний агент вернул ошибку»).
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 -- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
 UPDATE chat_agent_messages_bus
-SET status     = 'error',
+SET status     = 'failed',
     updated_at = now()
-WHERE conversation_id = '<QUESTION_CONV_ID>';
+WHERE id = '<QUESTION_ID>';
 
--- Вариант Б — вставить строку-ответ с текстом ошибки + закрыть вопрос:
+-- Вариант Б — вставить строку-ответ со status='failed' и текстом ошибки:
 DO $$
 DECLARE
-    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
-    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
-    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
+    a_id    uuid := md5(random()::text || clock_timestamp()::text)::uuid;  -- id ответа (авто)
     v_chat  text;
     v_user  text;
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
     FROM chat_agent_messages_bus
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 
     INSERT INTO chat_agent_messages_bus
-        (id, chat_id, user_id, conversation_id, role,
-         content, status, created_at, updated_at)
-    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+        (id, chat_id, user_id, role,
+         content, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
             'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
-            'complete', now(), now());
+            q_id, 'failed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_conv,
-        status     = 'error',
+    SET status     = 'failed',
         updated_at = now()
-    WHERE conversation_id = q_conv;
+    WHERE id = q_id;
 END$$;
 
 
@@ -288,14 +324,16 @@ END$$;
 -- 5. СЦЕНАРИЙ "агент думает" (промежуточный статус)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Если хочется увидеть индикатор «думает...» в UI — просто поставь in_progress.
--- AW показывает typing-индикатор, пока reply_to = NULL и status = 'in_progress'.
--- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
+-- Если хочется увидеть индикатор «думает...» в UI — просто поставь processing
+-- (агент claim'ит вопрос этим статусом). AW показывает typing-индикатор, пока
+-- нет строки-ответа (role='assistant' с reply_to = id вопроса) с терминальным
+-- статусом.
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 UPDATE chat_agent_messages_bus
-SET status     = 'in_progress',
+SET status     = 'processing',
     updated_at = now()
-WHERE conversation_id = '<QUESTION_CONV_ID>'
+WHERE id = '<QUESTION_ID>'
   AND status = 'pending';
 
 -- Затем в любой момент завершить через сценарии 1, 2, 3 или 4.
@@ -317,11 +355,12 @@ SELECT id, chat_id, user_id, content,
        created_at
 FROM chat_agent_messages_bus
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
 ORDER BY created_at ASC
 LIMIT 20;
 
--- Полная пара вопрос–ответ по conversation_id вопроса (<QUESTION_CONV_ID>):
+-- Полная пара вопрос–ответ по id вопроса (<QUESTION_ID>):
+-- (ответ ищется по reply_to НА ОТВЕТЕ — он ссылается на id вопроса)
 SELECT am.id, am.role, am.status, am.reply_to,
        am.content,
        am.metadata,
@@ -329,16 +368,12 @@ SELECT am.id, am.role, am.status, am.reply_to,
        am.media,
        am.created_at
 FROM chat_agent_messages_bus am
-WHERE am.conversation_id = '<QUESTION_CONV_ID>'
-   OR am.conversation_id = (
-       SELECT reply_to
-       FROM chat_agent_messages_bus
-       WHERE conversation_id = '<QUESTION_CONV_ID>'
-   )
+WHERE am.id = '<QUESTION_ID>'
+   OR am.reply_to = '<QUESTION_ID>'
 ORDER BY am.created_at;
 
 -- Все сообщения одного треда (chat_id):
-SELECT id, role, status, conversation_id, reply_to,
+SELECT id, role, status, reply_to,
        content, created_at
 FROM chat_agent_messages_bus
 WHERE chat_id = '<chat_id>'
@@ -356,27 +391,341 @@ LIMIT 10;
 -- 7. ОЧИСТКА ПО TTL (для админов)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Удаляем только завершённые строки: complete / error / timeout.
--- pending и in_progress НЕ ТРОГАТЬ — это активные диалоги.
+-- Удаляем только завершённые строки: completed / failed.
+-- pending и processing НЕ ТРОГАТЬ — это активные диалоги.
 -- Видимая пользователю история чата живёт в chat_messages и НЕ затрагивается.
 --
 -- Рекомендуемые сроки хранения:
---   complete / error / timeout  — 180 дней
+--   completed / failed  — 180 дней
 -- Подстройте под свои аудит-требования.
 
 DELETE FROM chat_agent_messages_bus
-WHERE status IN ('complete', 'error', 'timeout')
+WHERE status IN ('completed', 'failed')
   AND updated_at < now() - INTERVAL '180 days';
 
 -- На Greenplum после массивных DELETE'ов полезен VACUUM ANALYZE
 -- (PG обычно справляется автовакуумом, но не помешает):
 -- VACUUM ANALYZE chat_agent_messages_bus;
 
--- Зависшие in_progress/pending дольше 2 часов — ручное закрытие:
--- (AW обычно закрывает сам через 10 мин, но при рестарте uvicorn может остаться)
+-- Зависшие processing/pending дольше 2 часов — ручное закрытие:
+-- (AW закрывает draft в chat_messages сам по idle-таймауту — 30 мин для
+-- pending, 10 мин для processing — и best-effort ставит вопросу 'failed';
+-- если запись не прошла, строки остаются в pending —
+-- закрываем вручную тем же 'failed' из словаря CHECK'а владельца.)
 UPDATE chat_agent_messages_bus
-SET status     = 'timeout',
+SET status     = 'failed',
     updated_at = now()
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
   AND created_at < now() - INTERVAL '2 hours';
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 8. СЦЕНАРИЙ "очередь" (другой пользователь стоит впереди)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Цель: фронт AW должен показать «В очереди: впереди 1 запрос» рядом с
+-- индикатором ожидания ответа на ВАШ вопрос (<QUESTION_ID>).
+--
+-- Механика: позиция = число pending-вопросов всех пользователей (включая свои,
+-- role='user', status='pending') с created_at РАНЬШЕ, чем у вашего вопроса.
+-- Поллер продлевает claim-таймер
+-- (30 мин idle) при уменьшении этого числа — движение очереди тоже считается
+-- «признаком жизни».
+--
+-- ШАГ 1 — Вставить «чужой» pending-вопрос с более ранним временем.
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
+-- (chat_id/user_id чужого вопроса намеренно другие, чтобы имитировать
+--  другого пользователя; user_id 'other_user_42' — просто заглушка.)
+
+DO $$
+DECLARE
+    q_id     uuid := '<QUESTION_ID>';   -- ← id ВАШЕГО вопроса из запроса 0
+    other_id uuid := md5(random()::text || clock_timestamp()::text)::uuid;
+    v_chat   text;
+BEGIN
+    SELECT chat_id INTO v_chat
+    FROM chat_agent_messages_bus
+    WHERE id = q_id;
+
+    -- Вставляем вопрос другого пользователя, датированный на 1 минуту раньше.
+    -- Его created_at < created_at вашего вопроса → позиция вашего = 1.
+    INSERT INTO chat_agent_messages_bus
+        (id, chat_id, user_id, role,
+         content, metadata, status, created_at, updated_at)
+    VALUES (other_id,
+            'other-chat-' || left(other_id::text, 8),  -- другой chat_id
+            'other_user_42',                            -- другой пользователь
+            'user',
+            'Другой пользователь: что такое КМ-99-00001?',
+            '{"mode": "adaptive", "kb": "acts_default"}'::jsonb,
+            'pending',
+            now() - INTERVAL '1 minute',               -- РАНЬШЕ вашего вопроса
+            now() - INTERVAL '1 minute');
+
+    RAISE NOTICE 'Вставлен чужой pending id=%; ваш вопрос встал в очередь за ним', other_id;
+END$$;
+
+-- Проверить позицию вашего вопроса в очереди (должно быть 1):
+SELECT COUNT(*) AS ahead_count
+FROM chat_agent_messages_bus
+WHERE role = 'user'
+  AND status = 'pending'
+  AND created_at < (SELECT created_at FROM chat_agent_messages_bus WHERE id = '<QUESTION_ID>');
+
+-- ── Фронт должен показать «В очереди: впереди 1 запрос». ──
+-- Подожди несколько секунд и выполни ШАГ 2.
+
+-- ШАГ 2 — Продвинуть очередь: завершить чужой вопрос (статус completed).
+-- После этого ahead_count станет 0, фронт обновит строку статуса.
+-- Можно также DELETE вместо UPDATE completed — результат для AW одинаков.
+UPDATE chat_agent_messages_bus
+SET status     = 'completed',
+    updated_at = now()
+WHERE user_id  = 'other_user_42'
+  AND role     = 'user'
+  AND status   = 'pending';
+
+-- Проверить: впереди должно стать 0.
+SELECT COUNT(*) AS ahead_count
+FROM chat_agent_messages_bus
+WHERE role = 'user'
+  AND status = 'pending'
+  AND user_id <> (SELECT user_id FROM chat_agent_messages_bus WHERE id = '<QUESTION_ID>')
+  AND created_at < (SELECT created_at FROM chat_agent_messages_bus WHERE id = '<QUESTION_ID>');
+
+-- ── Фронт должен обновить статус на «Агент скоро возьмёт в работу…» или убрать
+-- ── счётчик очереди. Поллер продлил claim-таймер, зафиксировав движение очереди.
+-- ── Далее — сценарий 9 (взятие в работу) или 1/2/3 (сразу завершить ваш вопрос).
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 9. СЦЕНАРИЙ "задержка взятия в работу"
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Цель: наблюдать, что фронт продолжает показывать «В очереди: впереди 0 запросов»
+-- (или «Ожидаем агента…») пока вопрос остаётся pending — даже без чужих запросов.
+-- Claim-таймер AW — 30 мин idle для pending; пока вопрос живой (обновляется
+-- или уменьшается очередь) — таймер не истечёт.
+--
+-- ШАГ 1 — Просто НЕ ДЕЛАЙ ничего с вопросом N минут.
+--   Фронт будет показывать статус ожидания. Поллер продолжает проверять позицию.
+--   Это не требует SQL — просто подожди.
+--
+-- ШАГ 2 — Когда будешь готов «взять вопрос в работу», выполни:
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
+
+UPDATE chat_agent_messages_bus
+SET status     = 'processing',
+    updated_at = now()
+WHERE id     = '<QUESTION_ID>'
+  AND role   = 'user'
+  AND status = 'pending';
+
+-- ── После этого UPDATE фронт покажет «Агент работает над ответом…»
+-- ── вместо строки с позицией в очереди. Поллер зафиксировал переход
+-- ── pending→processing как признак жизни и продлил answer-таймер (10 мин idle).
+-- ── Далее — сценарий 10 (порционный reasoning) или 1/2/3 (сразу ответить).
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 10. СЦЕНАРИЙ "порционный reasoning" (агент стримит рассуждения)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Цель: наблюдать, как фронт допечатывает рассуждения агента по мере их роста.
+-- AW поллит строку-ответ (role='assistant', reply_to=<id вопроса>) и при каждом
+-- обновлении updated_at / росте metadata.reasoning отображает новый фрагмент.
+-- Изменение updated_at — признак жизни, продлевающий answer-таймер (10 мин idle).
+--
+-- ВАЖНО: сценарий рассчитан на PostgreSQL (dev-имитация). jsonb_set() недоступен
+-- в Greenplum 6.x — но шина в проде принадлежит агенту и это не нужно там руками.
+--
+-- Предполагается, что вопрос уже в статусе processing (выполнен сценарий 9
+-- или сценарий 5). Замени ТОЛЬКО <QUESTION_ID>.
+
+-- ШАГ 1 — Создать строку-ответ с пустым content и начальным reasoning.
+-- Статус 'processing' означает «агент ещё пишет», AW показывает typing-индикатор
+-- и начинает отображать reasoning по мере роста.
+
+DO $$
+DECLARE
+    q_id    uuid := '<QUESTION_ID>';                                        -- ← подставь сюда
+    a_id    uuid := md5(random()::text || clock_timestamp()::text)::uuid;   -- id ответа (авто)
+    v_chat  text;
+    v_user  text;
+BEGIN
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM chat_agent_messages_bus
+    WHERE id = q_id;
+
+    INSERT INTO chat_agent_messages_bus
+        (id, chat_id, user_id, role,
+         content, metadata, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
+            '',   -- content пустой: агент ещё не сформулировал итоговый текст
+            '{"reasoning": "Шаг 1: Разбираю вопрос пользователя."}'::jsonb,
+            q_id, 'processing', now(), now());
+
+    RAISE NOTICE 'Строка-ответ создана с id=%; copy для ШАГОВ 2–5', a_id;
+END$$;
+
+-- После ШАГА 1 скопируй id строки-ответа из NOTICE выше
+-- и подставь в <ANSWER_ID> в шагах 2–4.
+
+-- ── Фронт увидел строку-ответа, начал показывать reasoning «Шаг 1: …».
+-- ── Подожди 3–5 секунд, затем выполни ШАГ 2.
+
+-- ШАГ 2 — Дописать следующий фрагмент reasoning.
+-- jsonb_set конкатенирует новый текст к существующему reasoning.
+-- Изменение updated_at продлевает answer-таймер поллера.
+UPDATE chat_agent_messages_bus
+SET metadata   = jsonb_set(
+                     metadata,
+                     '{reasoning}',
+                     to_jsonb(coalesce(metadata->>'reasoning', '') ||
+                              ' Шаг 2: Ищу релевантные документы в базе знаний.')
+                 ),
+    updated_at = now()
+WHERE id = '<ANSWER_ID>';   -- ← id строки-ответа из NOTICE шага 1
+
+-- ── Подожди 3–5 секунд, затем выполни ШАГ 3.
+
+-- ШАГ 3 — Дописать ещё фрагмент.
+UPDATE chat_agent_messages_bus
+SET metadata   = jsonb_set(
+                     metadata,
+                     '{reasoning}',
+                     to_jsonb(coalesce(metadata->>'reasoning', '') ||
+                              ' Шаг 3: Нашёл 4 документа, выбираю наиболее релевантные.')
+                 ),
+    updated_at = now()
+WHERE id = '<ANSWER_ID>';
+
+-- ── Подожди 3–5 секунд (или дольше — каждый UPDATE продлевает answer-таймер),
+-- ── фронт допечатает дельту. Затем — ШАГ 4.
+
+-- ШАГ 4 — Финальный фрагмент reasoning перед формированием ответа.
+UPDATE chat_agent_messages_bus
+SET metadata   = jsonb_set(
+                     metadata,
+                     '{reasoning}',
+                     to_jsonb(coalesce(metadata->>'reasoning', '') ||
+                              ' Шаг 4: Формирую итоговый ответ на основе найденных источников.')
+                 ),
+    updated_at = now()
+WHERE id = '<ANSWER_ID>';
+
+-- ── Подожди 3–5 секунд, затем выполни ШАГ 5 — финализацию.
+
+-- ШАГ 5 — Финализация: записать итоговый content и закрыть оба статуса.
+-- После этого AW финализирует черновик chat_messages и рендерит
+-- готовый ответ (content + полный reasoning) с декоративным эффектом печати.
+DO $$
+DECLARE
+    q_id uuid := '<QUESTION_ID>';   -- ← id вопроса
+    a_id uuid := '<ANSWER_ID>';     -- ← id строки-ответа из NOTICE шага 1
+BEGIN
+    -- Финальный content + закрываем строку-ответ:
+    UPDATE chat_agent_messages_bus
+    SET content    = 'Согласно регламенту 2024 года, КСО охватывает три направления: '
+                     'социальную политику, экологические инициативы и корпоративное управление. '
+                     'Подробнее — в разделе 4.2 документа «Политика КСО».',
+        status     = 'completed',
+        updated_at = now()
+    WHERE id = a_id;
+
+    -- Закрываем строку-вопрос:
+    UPDATE chat_agent_messages_bus
+    SET status     = 'completed',
+        updated_at = now()
+    WHERE id = q_id;
+END$$;
+
+-- ── AW поллер найдёт status='completed' на строке-ответа, прочитает итоговый
+-- ── content и накопленный metadata.reasoning, финализирует chat_messages.
+-- ── Фронт допечатает только недостающий хвост: уже показанные рассуждения
+-- ── не переанимируются (в т.ч. после reload/переключения беседы).
+-- ── Панель реакций (лайк/дизлайк) появляется ПОД финальным ответом.
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 11. СЦЕНАРИЙ "витрина markdown" (проверка рендера ответа)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Цель: один ответ со всеми основными markdown-элементами — заголовки,
+-- жирный/курсив/зачёркнутый, inline-код и код-блок с подсветкой, ссылки,
+-- списки (включая task-list ☑/☐), таблица, цитата, горизонтальная линия.
+-- Фронт рендерит content через marked + DOMPurify (класс .chat-md);
+-- reasoning тоже поддерживает markdown.
+--
+-- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
+-- Текст ответа задан dollar-quoted строкой $md$...$md$ — кавычки и
+-- переводы строк внутри неё экранировать не нужно.
+
+DO $$
+DECLARE
+    q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
+    a_id    uuid := md5(random()::text || clock_timestamp()::text)::uuid;  -- id ответа (авто)
+    v_chat  text;
+    v_user  text;
+    v_md    text;
+BEGIN
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM chat_agent_messages_bus
+    WHERE id = q_id;
+
+    v_md := $md$## Витрина markdown
+
+**Жирный**, *курсив*, ~~зачёркнутый~~, `inline-код` и [ссылка на регламент](https://example.com/policy).
+
+### Списки
+
+- Маркированный пункт
+- Ещё пункт
+  - Вложенный подпункт
+
+1. Первый шаг
+2. Второй шаг
+
+- [x] Проверка выполнена
+- [ ] Ожидает подтверждения
+
+### Таблица
+
+| КМ-номер    | Статус    | Сумма, тыс. |
+|-------------|-----------|------------:|
+| КМ-11-11111 | Завершён  |       1 200 |
+| КМ-22-22222 | В работе  |         340 |
+
+### Код
+
+```python
+def check_km(km_number: str) -> bool:
+    """Проверяет формат КМ-номера."""
+    return km_number.startswith("КМ-")
+```
+
+> Цитата: блок-квота с **вложенным** форматированием и `кодом`.
+
+---
+
+Текст после горизонтальной линии.$md$;
+
+    INSERT INTO chat_agent_messages_bus
+        (id, chat_id, user_id, role,
+         content, metadata, reply_to, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, 'assistant',
+            v_md,
+            '{"reasoning": "Готовлю **витрину** markdown: списки, таблица, `код`, цитата."}'::jsonb,
+            q_id, 'completed', now(), now());
+
+    UPDATE chat_agent_messages_bus
+    SET status     = 'completed',
+        updated_at = now()
+    WHERE id = q_id;
+END$$;
+
+-- ── Ожидаемый рендер: заголовки, форматирование, ссылка (target=_blank),
+-- ── чекбоксы ☑/☐, таблица в пузыре, fenced-код с цветной подсветкой hljs
+-- ── (кнопки «Копировать» нет — это код внутри text-блока, а не отдельный
+-- ── code-блок), цитата, линия. Reasoning над ответом — тоже с markdown.

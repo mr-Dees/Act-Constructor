@@ -5,14 +5,133 @@ Pydantic схемы для валидации данных актов.
 таблицы, текстовые блоки, нарушения и древовидную структуру.
 """
 
+import re
+from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.domains.acts.block_types import LEAF_BLOCK_REFS
+
+# Фолбэк-дефолты границ таблиц и шрифта текстблоков. Единый ИСТОЧНИК ИСТИНЫ —
+# настройки (ACTS__TABLES__* / ACTS__TEXTBLOCKS__*, см. settings.py); схема и
+# эндпоинт GET /acts/limits читают их в рантайме (_acts_settings). Константы
+# ниже используются только когда реестр настроек ещё не заполнен (импорт-тайм,
+# юнит-тесты) и обязаны совпадать с дефолтами settings (пин — тест
+# test_settings_defaults_match_schema_fallbacks).
+TABLE_MAX_ROWS = 64
+TABLE_MAX_COLS = 16
+FONT_SIZE_MIN = 8
+FONT_SIZE_MAX = 72
+
+# Лимиты картинок нарушений (4.3.M.2 + 5.2.2). Лимит длины url — константа:
+# схема статична и не может читать настройки. Инвариант согласованности:
+# константа обязана быть заведомо выше ACTS__IMAGES__MAX_FILE_SIZE с учётом
+# base64-оверхеда (×4/3 + префикс data:image/...;base64,): 10 МБ файла
+# ≈ 14 млн символов data-URL < 15 млн. Пин — тест
+# test_url_max_length_covers_max_file_size_in_base64.
+VIOLATION_IMAGE_URL_MAX_LENGTH = 15_000_000
+# Фолбэк-дефолт числа элементов нарушения. ИСТОЧНИК ИСТИНЫ —
+# ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION (валидатор validate_items_count читает
+# его в рантайме); константа — только для импорт-тайма/тестов.
+VIOLATION_CONTENT_ITEMS_MAX = 50
+
+# Whitelist data-URL картинок. ИСТОЧНИК ИСТИНЫ форматов —
+# ACTS__IMAGES__ALLOWED_MIME_TYPES (settings.py): и валидатор схемы
+# (_image_data_url_re), и DOCX-builder нарушений
+# (formatters/docx/builders/violation.py через image_data_url_pattern())
+# выводят regex из ОДНОГО списка настроек — whitelist не разъезжается между
+# валидацией и сборкой DOCX. IMAGE_DATA_URL_PATTERN/_IMAGE_DATA_URL_RE ниже —
+# фолбэк-дефолт (растровые png/jpeg/gif; без SVG — XSS; без webp — python-docx
+# его не встраивает) для импорт-тайма/тестов.
+IMAGE_DATA_URL_PATTERN = r"data:image/(?:png|jpe?g|gif);base64,"
+_IMAGE_DATA_URL_RE = re.compile("^" + IMAGE_DATA_URL_PATTERN)
+
+
+def _acts_settings():
+    """ActsSettings из реестра; на старте/в тестах (реестр пуст) — дефолты.
+
+    Ленивый импорт: схема импортируется задолго до discover_domains, а реестр
+    заполняется на старте. Валидаторы вызываются на парсинге запроса (реестр
+    уже жив), поэтому читать настройки внутри валидатора безопасно.
+    """
+    try:
+        from app.core.settings_registry import get as _get
+        from app.domains.acts import DOMAIN_NAME
+        from app.domains.acts.settings import ActsSettings
+        return _get(DOMAIN_NAME, ActsSettings)
+    except Exception:
+        from app.domains.acts.settings import ActsSettings
+        return ActsSettings()
+
+
+@lru_cache(maxsize=8)
+def _image_data_url_body(mime_types: tuple[str, ...]) -> str:
+    """Строит тело regex whitelist'а data:image-URL из списка MIME настроек.
+
+    `image/jpeg`/`image/jpg` → алиас `jpe?g` (браузеры эмитят и `jpg`).
+    Прочие — экранированный подтип. Кэш по кортежу MIME.
+    """
+    subtypes: set[str] = set()
+    for mime in mime_types:
+        if not mime.startswith("image/"):
+            continue
+        sub = mime.split("/", 1)[1].strip().lower()
+        if sub in ("jpeg", "jpg"):
+            subtypes.add("jpe?g")
+        elif sub:
+            subtypes.add(re.escape(sub))
+    if not subtypes:
+        # Пустой whitelist — не матчим ничего (валидатор отвергнет любой url).
+        return r"(?!x)x"
+    return r"data:image/(?:" + "|".join(sorted(subtypes)) + r");base64,"
+
+
+@lru_cache(maxsize=8)
+def _image_data_url_re(mime_types: tuple[str, ...]) -> re.Pattern:
+    """Компилированный whitelist data:image-URL для текущих MIME настроек."""
+    return re.compile("^" + _image_data_url_body(mime_types))
+
+
+def image_data_url_pattern() -> str:
+    """Тело regex whitelist'а data:image-URL из настроек (без якорей).
+
+    Единый источник формата для валидатора схемы (`validate_image_url`) и
+    DOCX-builder'а нарушений (`formatters/docx/builders/violation.py`).
+    """
+    return _image_data_url_body(tuple(_acts_settings().images.allowed_mime_types))
+
+# Подвиды таблиц (enum kind). 'regular' — обычная таблица (дефолт/отсутствие
+# подвида). Единый источник значений на бэке; СИНХРОНИЗИРУЕТСЯ ВРУЧНУЮ с
+# фронтом (static/js/constructor/table/table-kind.js, TABLE_KINDS) и с
+# CHECK-констрейнтом check_table_kind_values в миграциях
+# (app/domains/acts/migrations/{postgresql,greenplum}/schema.sql).
+TABLE_KINDS = (
+    "regular",
+    "metrics",
+    "mainMetrics",
+    "regularRisk",
+    "operationalRisk",
+    "taxRisk",
+    "otherRisk",
+)
+
+# Literal статичен сознательно (Literal из переменных капризен для type
+# checker'ов). Соответствие TABLE_KINDS пинит
+# test_table_kind_roundtrip.py::test_table_kind_literal_matches_tuple.
+TableKind = Literal[
+    "regular", "metrics", "mainMetrics", "regularRisk",
+    "operationalRisk", "taxRisk", "otherRisk",
+]
 
 
 class TableCellSchema(BaseModel):
     """
     Схема ячейки таблицы с матричной структурой.
+
+    M.20: extra='forbid' — состав полей зеркалит фронтовый
+    _serializeTables (state-core.js); неизвестное поле = рассинхрон
+    контракта и отбивается 422, а не теряется молча.
 
     Attributes:
         content: Содержимое ячейки
@@ -24,15 +143,19 @@ class TableCellSchema(BaseModel):
         originRow: Исходная строка ячейки
         originCol: Исходная колонка ячейки
     """
+    model_config = ConfigDict(extra="forbid")
+
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
+    # Верхняя граница span'ов — по лимиту колонок/строк из настроек; проверяется
+    # в TableSchema.validate_grid_dimensions (по живым настройкам), не Field-ом.
     colSpan: int = Field(
-        default=1, ge=1, le=16,
-        description="Число объединённых колонок (1..16, по лимиту колонок таблицы)"
+        default=1, ge=1,
+        description="Число объединённых колонок (≥1, потолок — по лимиту колонок таблицы)"
     )
     rowSpan: int = Field(
-        default=1, ge=1, le=64,
-        description="Число объединённых строк (1..64, по лимиту строк таблицы)"
+        default=1, ge=1,
+        description="Число объединённых строк (≥1, потолок — по лимиту строк таблицы)"
     )
     isSpanned: bool = Field(default=False, description="Часть объединения")
     spanOrigin: dict[str, int] | None = Field(default=None, description="Координаты главной ячейки")
@@ -54,24 +177,19 @@ class TableSchema(BaseModel):
         colWidths: Массив относительных весов ширины колонок (целые > 0; нормируются по сумме)
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
-        isMetricsTable: Является ли таблицей метрик для пункта под разделом 5
-        isMainMetricsTable: Является ли главной таблицей метрик раздела 5
-        isRegularRiskTable: Является ли таблицей регулярных рисков
-        isOperationalRiskTable: Является ли таблицей операционных рисков
-        isTaxRiskTable: Является ли таблицей налоговых рисков
-        isOtherRiskTable: Является ли таблицей прочих рисков
+        kind: Подвид таблицы (TABLE_KINDS); 'regular' — обычная таблица
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
     grid: list[list[TableCellSchema]] = Field(
         default_factory=list,
-        description="Матрица ячеек",
-        max_length=64
+        description="Матрица ячеек (потолок строк/колонок — по настройкам ACTS__TABLES__*)",
     )
     colWidths: list[int] = Field(
         default_factory=list,
         description="Относительные веса ширины колонок (целые > 0; нормируются по сумме)",
-        max_length=16
     )
     protected: bool = Field(
         default=False,
@@ -82,56 +200,51 @@ class TableSchema(BaseModel):
         description="Разрешено ли удаление таблицы"
     )
 
-    # Флаги специальных таблиц
-    isMetricsTable: bool | None = Field(
-        default=False,
-        description="Таблица метрик для пункта под разделом 5"
-    )
-    isMainMetricsTable: bool | None = Field(
-        default=False,
-        description="Главная таблица метрик раздела 5"
-    )
-    isRegularRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица регулярных рисков"
-    )
-    isOperationalRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица операционных рисков"
-    )
-    isTaxRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица налоговых рисков"
-    )
-    isOtherRiskTable: bool | None = Field(
-        default=False,
-        description="Таблица прочих рисков"
+    # Подвид таблицы: enum взаимоисключающ по построению (заменил 6 булевых
+    # флагов is*Table и валидатор «не более одного типа»).
+    kind: TableKind = Field(
+        default="regular",
+        description="Подвид таблицы (метрики / риски); 'regular' — обычная"
     )
 
     @field_validator("grid")
     @classmethod
     def validate_grid_dimensions(cls, v: list[list[TableCellSchema]]) -> list[list[TableCellSchema]]:
         """
-        Проверяет размеры матрицы (макс 64 строки × 16 колонок).
+        Проверяет размеры матрицы и span'ы ячеек по лимитам из настроек.
 
-        Args:
-            v: Матрица для валидации
-
-        Returns:
-            Валидированная матрица
+        Потолки строк/колонок берутся из ACTS__TABLES__* (settings.py), а не
+        из статических констант — env реально меняет лимит по всей цепочке.
 
         Raises:
-            ValueError: Если превышен лимит колонок
+            ValueError: Если превышен лимит строк/колонок или span ячейки.
         """
         if not v:
             return v
 
+        tables = _acts_settings().tables
+        max_rows, max_cols = tables.max_rows, tables.max_cols
+
+        if len(v) > max_rows:
+            raise ValueError(
+                f"Таблица содержит {len(v)} строк, максимум допустимо {max_rows}"
+            )
+
         for row_idx, row in enumerate(v):
-            if len(row) > 16:
+            if len(row) > max_cols:
                 raise ValueError(
                     f"Строка {row_idx} содержит {len(row)} колонок, "
-                    f"максимум допустимо 16"
+                    f"максимум допустимо {max_cols}"
                 )
+            for cell in row:
+                if cell.colSpan > max_cols:
+                    raise ValueError(
+                        f"colSpan ячейки ({cell.colSpan}) превышает лимит колонок ({max_cols})"
+                    )
+                if cell.rowSpan > max_rows:
+                    raise ValueError(
+                        f"rowSpan ячейки ({cell.rowSpan}) превышает лимит строк ({max_rows})"
+                    )
 
         return v
 
@@ -139,17 +252,16 @@ class TableSchema(BaseModel):
     @classmethod
     def validate_col_widths(cls, v: list[int]) -> list[int]:
         """
-        Проверяет что все ширины положительные.
-
-        Args:
-            v: Список ширин для валидации
-
-        Returns:
-            Валидированный список
+        Проверяет положительность ширин и их число (по лимиту колонок настроек).
 
         Raises:
-            ValueError: Если есть неположительные ширины
+            ValueError: Если есть неположительные ширины или их больше лимита колонок.
         """
+        max_cols = _acts_settings().tables.max_cols
+        if len(v) > max_cols:
+            raise ValueError(
+                f"Число ширин колонок ({len(v)}) превышает лимит ({max_cols})"
+            )
         if any(width <= 0 for width in v):
             raise ValueError("Ширины колонок должны быть положительными")
         return v
@@ -167,8 +279,10 @@ class TableSchema(BaseModel):
         3. объединения ячеек не выходят за границы матрицы (закрывает
            IndexError в DOCX-builder'е);
         4. объединения не пересекаются — покрытия двух origin-ячеек не
-           накладываются (закрывает крэш DOCX-builder'а на наложении merge);
-        5. взаимоисключение флагов подвида таблицы (не более одного типа).
+           накладываются (закрывает крэш DOCX-builder'а на наложении merge).
+
+        Взаимоисключение подвидов таблицы НЕ проверяется: поле kind —
+        enum, взаимоисключающ по построению.
 
         СОЗНАТЕЛЬНО НЕ проверяется когерентность spanOrigin и пометка
         поглощённых ячеек isSpanned: легаси-операции вставки/удаления колонок
@@ -233,22 +347,6 @@ class TableSchema(BaseModel):
                             )
                         coverage[rr][cc] = (r, c)
 
-        # 5. Взаимоисключение флагов подвида таблицы.
-        type_flags = {
-            "isMetricsTable": self.isMetricsTable,
-            "isMainMetricsTable": self.isMainMetricsTable,
-            "isRegularRiskTable": self.isRegularRiskTable,
-            "isOperationalRiskTable": self.isOperationalRiskTable,
-            "isTaxRiskTable": self.isTaxRiskTable,
-            "isOtherRiskTable": self.isOtherRiskTable,
-        }
-        active = [name for name, value in type_flags.items() if value]
-        if len(active) > 1:
-            raise ValueError(
-                f"Таблица не может одновременно иметь несколько типов: "
-                f"{', '.join(active)}"
-            )
-
         return self
 
 
@@ -263,19 +361,32 @@ class TextBlockFormattingSchema(BaseModel):
         italic: Курсив
         underline: Подчеркивание
     """
+    model_config = ConfigDict(extra="forbid")
+
+    # Границы размера — по настройкам ACTS__TEXTBLOCKS__* (валидатор ниже),
+    # не Field-ом: env реально меняет лимит (UI-гейт → /limits → схема).
     fontSize: int = Field(
         default=14,
-        ge=8,
-        le=72,
-        description="Базовый размер шрифта"
+        description="Базовый размер шрифта (границы — по настройкам)"
     )
     alignment: Literal["left", "center", "right", "justify"] = Field(
-        default="left",
-        description="Выравнивание"
+        default="justify",
+        description="Выравнивание (дефолт — по ширине, как тело акта)"
     )
     bold: bool = Field(default=False, description="Жирный")
     italic: bool = Field(default=False, description="Курсив")
     underline: bool = Field(default=False, description="Подчеркивание")
+
+    @model_validator(mode="after")
+    def validate_font_size(self) -> "TextBlockFormattingSchema":
+        """Проверяет размер шрифта по границам из настроек ACTS__TEXTBLOCKS__*."""
+        tb = _acts_settings().textblocks
+        if not (tb.font_size_min <= self.fontSize <= tb.font_size_max):
+            raise ValueError(
+                f"Размер шрифта ({self.fontSize}) вне допустимого диапазона "
+                f"{tb.font_size_min}–{tb.font_size_max}"
+            )
+        return self
 
 
 class TextBlockSchema(BaseModel):
@@ -288,6 +399,8 @@ class TextBlockSchema(BaseModel):
         content: HTML-содержимое блока с inline-форматированием
         formatting: Базовые параметры форматирования текста
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID текстового блока")
     nodeId: str = Field(description="ID узла дерева")
     content: str = Field(default="", description="HTML-содержимое")
@@ -299,6 +412,8 @@ class TextBlockSchema(BaseModel):
 
 class ViolationDescriptionListSchema(BaseModel):
     """Схема списка описаний нарушения."""
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     items: list[str] = Field(default_factory=list)
 
@@ -310,6 +425,8 @@ class ViolationOptionalFieldSchema(BaseModel):
     Используется для причин, последствий, рекомендаций,
     ответственных лиц и др.
     """
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     content: str = ""
 
@@ -326,7 +443,10 @@ class ViolationContentItemSchema(BaseModel):
         caption: Подпись изображения (для image)
         filename: Имя файла (для image)
         order: Порядок отображения
+        width: Ширина изображения в процентах полезной ширины страницы
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID элемента")
     type: Literal["case", "image", "freeText"] = Field(description="Тип элемента")
     content: str = Field(default="", description="Текстовое содержимое")
@@ -334,12 +454,61 @@ class ViolationContentItemSchema(BaseModel):
     caption: str = Field(default="", description="Подпись изображения")
     filename: str = Field(default="", description="Имя файла")
     order: int = Field(default=0, ge=0, description="Порядок")
+    width: int = Field(
+        default=0, ge=0, le=100,
+        description="Ширина изображения, % полезной ширины страницы (0 — авто)",
+    )
+
+    @model_validator(mode="after")
+    def validate_image_url(self) -> "ViolationContentItemSchema":
+        """
+        Валидирует url картинки (4.3.M.2 + 5.2.2).
+
+        Для type='image' непустой url обязан быть data:image-URL разрешённого
+        растрового формата (png/jpeg/gif, base64) — отсекает
+        javascript:/data:text-схемы (XSS) и не-картинки. Пустая строка
+        допустима (черновик без содержимого). Лимит длины защищает БД и
+        снимки версий от многомегабайтных payload'ов.
+        """
+        if len(self.url) > VIOLATION_IMAGE_URL_MAX_LENGTH:
+            raise ValueError(
+                f"Размер изображения превышает допустимый лимит "
+                f"({VIOLATION_IMAGE_URL_MAX_LENGTH} символов data-URL). "
+                f"Уменьшите изображение."
+            )
+        if self.type == "image" and self.url:
+            mime_types = tuple(_acts_settings().images.allowed_mime_types)
+            if not _image_data_url_re(mime_types).match(self.url):
+                allowed = ", ".join(
+                    m.split("/", 1)[1] for m in mime_types if m.startswith("image/")
+                )
+                raise ValueError(
+                    "Изображение нарушения должно быть встроенным data:image-URL "
+                    f"разрешённого формата ({allowed or 'нет'}, base64)."
+                )
+        return self
 
 
 class ViolationAdditionalContentSchema(BaseModel):
     """Коллекция дополнительного контента нарушения."""
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     items: list[ViolationContentItemSchema] = Field(default_factory=list)
+
+    @field_validator("items")
+    @classmethod
+    def validate_items_count(
+        cls, v: list[ViolationContentItemSchema],
+    ) -> list[ViolationContentItemSchema]:
+        """Ограничивает число элементов доп. контента (лимит — из настроек)."""
+        max_items = _acts_settings().images.max_items_per_violation
+        if len(v) > max_items:
+            raise ValueError(
+                f"Слишком много элементов дополнительного контента: {len(v)}. "
+                f"Максимум — {max_items} элементов на нарушение."
+            )
+        return v
 
 
 class ViolationSchema(BaseModel):
@@ -358,6 +527,8 @@ class ViolationSchema(BaseModel):
         responsible: Ответственные лица
         recommendations: Рекомендации по устранению
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID нарушения")
     nodeId: str = Field(description="ID узла дерева")
     violated: str = Field(default="", description="Текст для 'Нарушено'")
@@ -408,18 +579,24 @@ class ActItemSchema(BaseModel):
         violationId: ID привязанного нарушения
         customLabel: Пользовательская метка узла
         number: Номер узла в иерархии
-        isMetricsTable: Является ли узел таблицей метрик
-        isMainMetricsTable: Является ли узел главной таблицей метрик
-        isRegularRiskTable: Является ли узел таблицей регулярных рисков
-        isOperationalRiskTable: Является ли узел таблицей операционных рисков
-        isTaxRiskTable: Является ли узел таблицей налоговых рисков
-        isOtherRiskTable: Является ли узел таблицей прочих рисков
+        kind: Подвид таблицы узла-таблицы (TABLE_KINDS); 'regular' — обычная
     """
+    # M.21: политика extra='ignore' задана ЯВНО и сознательно (не forbid):
+    # незадекларированные поля узла отбрасываются нормализацией
+    # (validate_tree_structure хранит model_dump()), а не отбиваются 422.
+    # Forbid ломал бы restore исторических снимков и серверные узлы
+    # перестройки разделов (qa-узел несёт runtime-поле parentId,
+    # которое фронтовый exportData не сериализует — известный мусор).
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     # label у корневого узла исторически мог отсутствовать (снимки версий до
     # введения метки). Поле опционально, чтобы валидатор дерева (C4) не
     # отбраковывал легитимные сохранённые снимки; id остаётся обязательным.
     label: str | None = ""
+    # Набор типов = реестр app/domains/acts/block_types.py (NODE_TYPES).
+    # Literal статичен сознательно: Literal из переменных капризен для
+    # type checker'ов. Соответствие пинит test_block_types_guard.py.
     type: Literal["item", "textblock", "violation", "table"] = "item"
     content: str | None = ""
     protected: bool | None = False
@@ -430,12 +607,8 @@ class ActItemSchema(BaseModel):
     violationId: str | None = None
     customLabel: str | None = None
     number: str | None = None
-    isMetricsTable: bool | None = False
-    isMainMetricsTable: bool | None = False
-    isRegularRiskTable: bool | None = False
-    isOperationalRiskTable: bool | None = False
-    isTaxRiskTable: bool | None = False
-    isOtherRiskTable: bool | None = False
+    # Подвид таблицы (узел — источник истины; см. TABLE_KINDS).
+    kind: TableKind = "regular"
     tb: list[str] | None = None
     auditPointId: str | None = None
 
@@ -454,6 +627,8 @@ class ActDataSchema(BaseModel):
         violations: Словарь нарушений (ключ: ID нарушения)
         saveType: Тип сохранения (manual, periodic, auto)
     """
+    model_config = ConfigDict(extra="forbid")
+
     tree: dict = Field(description="Дерево структуры акта")
     tables: dict[str, TableSchema] = Field(
         default_factory=dict,
@@ -485,17 +660,55 @@ class ActDataSchema(BaseModel):
     @classmethod
     def validate_tree_structure(cls, v: dict) -> dict:
         """
-        Валидирует структуру дерева через ActItemSchema, не меняя хранимый тип.
+        Валидирует дерево через ActItemSchema и хранит НОРМАЛИЗОВАННЫЙ результат.
 
-        C4: downstream-консьюмеры (build_audit_point_map, _build_node_map,
+        C4/M.21: downstream-консьюмеры (build_audit_point_map, _build_node_map,
         json.dumps(tree), extract_node_number, sanitize_tree_nodes, аудит-лог)
-        читают дерево как dict. Поэтому tree остаётся dict для хранения, а
-        валидатор лишь конструирует ActItemSchema.model_validate(v) для проверки
-        формы (поднимает ValueError на битой структуре, в т.ч. на узлах без
-        id/label). Так risk-флаги получают схему-описание, не ломая контракт.
+        читают дерево как dict — поэтому тип хранения остаётся dict, но это
+        model_dump() от провалидированной ActItemSchema, а не исходный сырой
+        dict. Незадекларированные поля узлов при этом отбрасываются (политика
+        extra='ignore' схемы узла) — устранена асимметрия со словарями, где
+        неизвестные поля терялись через model_dump, а в дереве персистились.
+        Битая структура (узел без id и т.п.) поднимает ValueError → HTTP 422.
         """
-        ActItemSchema.model_validate(v)
-        return v
+        return ActItemSchema.model_validate(v).model_dump()
+
+    def collect_dangling_refs(self) -> list[tuple[str | None, str, str]]:
+        """
+        Собирает висячие ссылки дерево → словари (M.13, решение «lenient»).
+
+        Каждая ссылка узла (tableId/textBlockId/violationId) должна указывать на
+        существующую запись словаря. Раньше первая висячая ссылка отбивала весь
+        PUT 422 на разборе запроса; теперь обе стороны рассогласования лечатся
+        мягко: сервис (ActContentService.save_content) вызывает этот метод,
+        снимает с узлов «висячие» поля-ссылки и предупреждает пользователя одним
+        warning'ом. Поэтому метод НЕ бросает, а ВОЗВРАЩАЕТ список нарушений.
+
+        Обратное направление (запись словаря без узла) здесь не собирается —
+        его лечит orphan-фильтр репозитория при сохранении (pbe-4).
+
+        Состав проверяемых ссылок строится из реестра LEAF_BLOCK_REFS
+        (block_types.py): новый leaf-тип без словаря в схеме упадёт здесь
+        AttributeError'ом на старте, а не потеряет ссылки молча.
+
+        Returns:
+            Список кортежей (node_id, ref_field, ref): для каждого узла, чья
+            ссылка ref_field указывает на отсутствующую запись словаря.
+        """
+        ref_checks = tuple(
+            (ref_field, getattr(self, dict_name))
+            for _block_type, (ref_field, dict_name) in LEAF_BLOCK_REFS.items()
+        )
+        dangling: list[tuple[str | None, str, str]] = []
+        stack = [self.tree] if self.tree else []
+        while stack:
+            node = stack.pop()
+            for ref_field, registry in ref_checks:
+                ref = node.get(ref_field)
+                if ref and ref not in registry:
+                    dangling.append((node.get("id"), ref_field, ref))
+            stack.extend(node.get("children") or [])
+        return dangling
 
 
 class ActSaveResponse(BaseModel):

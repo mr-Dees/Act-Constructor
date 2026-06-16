@@ -6,13 +6,13 @@
  */
 import { ChatManager } from '../../shared/chat/chat-manager.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
+import { makeResizablePanel } from '../../shared/resizable-panel.js';
 
 export class ChatPopupManager {
     /** @type {boolean} */
     static _initialized = false;
 
     static _storageKey = 'chat_popup_size';
-    static _defaultWidth = 650;
     static _minWidth = 480;
     static _maxWidthVw = 80;
     static _minHeight = 300;
@@ -31,9 +31,6 @@ export class ChatPopupManager {
             console.warn('ChatPopupManager: не найдены необходимые DOM-элементы');
             return;
         }
-
-        // Восстанавливаем сохранённые размеры
-        this._restoreSize();
 
         // Кнопка toggle
         this._btn.addEventListener('click', (e) => {
@@ -60,8 +57,20 @@ export class ChatPopupManager {
 
         // Закрытие по Escape — через EscapeStack (push в open, unsub в close).
 
-        // Corner resize (свободное изменение ширины и высоты)
-        this._setupCornerResize();
+        // Свободное изменение размера угловой ручкой (общая утилита; панель
+        // прижата слева → растёт вправо и вниз). Восстанавливает сохранённый
+        // размер и пере-клампит при ресайзе окна сама.
+        this._resizer = makeResizablePanel({
+            panel: this._panel,
+            handle: this._resizeCorner,
+            growX: 'right',
+            minWidth: this._minWidth,
+            maxWidthVw: this._maxWidthVw,
+            minHeight: this._minHeight,
+            maxHeightVh: this._maxHeightVh,
+            storageKey: this._storageKey,
+            cursor: 'nwse-resize',
+        });
 
         this._initialized = true;
         console.log('ChatPopupManager: инициализация завершена');
@@ -124,98 +133,6 @@ export class ChatPopupManager {
         } else {
             this.close();
         }
-    }
-
-    /**
-     * Настраивает свободный resize через угловую ручку (bottom-right)
-     * @private
-     */
-    static _setupCornerResize() {
-        if (!this._resizeCorner) return;
-
-        let isResizing = false;
-        let startX = 0;
-        let startY = 0;
-        let startWidth = 0;
-        let startHeight = 0;
-
-        this._resizeCorner.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            isResizing = true;
-            startX = e.clientX;
-            startY = e.clientY;
-            startWidth = this._panel.offsetWidth;
-            startHeight = this._panel.offsetHeight;
-
-            document.body.style.cursor = 'nwse-resize';
-            document.body.style.userSelect = 'none';
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-
-            requestAnimationFrame(() => {
-                const maxWidth = window.innerWidth * this._maxWidthVw / 100;
-                const maxHeight = window.innerHeight * this._maxHeightVh / 100;
-
-                const newWidth = Math.max(
-                    this._minWidth,
-                    Math.min(maxWidth, startWidth + (e.clientX - startX)),
-                );
-                const newHeight = Math.max(
-                    this._minHeight,
-                    Math.min(maxHeight, startHeight + (e.clientY - startY)),
-                );
-
-                this._panel.style.width = newWidth + 'px';
-                this._panel.style.height = newHeight + 'px';
-                this._panel.style.maxHeight = newHeight + 'px';
-            });
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (!isResizing) return;
-
-            isResizing = false;
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-
-            this._saveSize();
-        });
-    }
-
-    /**
-     * Сохраняет размеры панели в localStorage
-     * @private
-     */
-    static _saveSize() {
-        if (!this._panel) return;
-        try {
-            localStorage.setItem(this._storageKey, JSON.stringify({
-                width: this._panel.style.width,
-                height: this._panel.style.height,
-            }));
-        } catch { /* ignore */ }
-    }
-
-    /**
-     * Восстанавливает размеры панели из localStorage
-     * @private
-     */
-    static _restoreSize() {
-        try {
-            const saved = localStorage.getItem(this._storageKey);
-            if (!saved || !this._panel) return;
-
-            const { width, height } = JSON.parse(saved);
-            if (width) this._panel.style.width = width;
-            if (height) {
-                this._panel.style.height = height;
-                this._panel.style.maxHeight = height;
-            }
-        } catch { /* ignore */ }
     }
 }
 

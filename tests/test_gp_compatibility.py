@@ -165,23 +165,30 @@ class TestGreenplumSchemaCompatibility:
             "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
         )
 
-    def test_gp_act_tables_has_tax_and_other_risk_flags(self, gp_schema_files):
-        """Регрессия: GP-схема act_tables объявляет is_tax_risk_table и is_other_risk_table.
+    def test_act_tables_kind_column_and_check_both_schemas(self):
+        """act_tables в обеих схемах объявляет колонку kind и CHECK по всем подвидам.
 
-        Эти флаги обязаны быть в GP-схеме acts, иначе репозиторий, который пишет/читает
-        их через INSERT/SELECT, упадёт на старте.
+        Колонка kind обязана быть в схемах PG и GP (репозиторий пишет/читает её
+        через INSERT/SELECT), а CHECK check_table_kind_values — перечислять
+        ровно значения TABLE_KINDS (ручная синхронизация схема ↔ код).
         """
-        acts_gp = next(
-            (s for s in gp_schema_files if 'acts' in s.parent.parent.parent.name),
-            None,
-        )
-        assert acts_gp is not None, "GP-схема acts не найдена среди gp_schema_files"
+        from app.domains.acts.schemas.act_content import TABLE_KINDS
 
-        sql = acts_gp.read_text(encoding='utf-8')
-        assert 'is_tax_risk_table' in sql, \
-            f"GP-схема {acts_gp} не содержит is_tax_risk_table"
-        assert 'is_other_risk_table' in sql, \
-            f"GP-схема {acts_gp} не содержит is_other_risk_table"
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            sql = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            assert "kind VARCHAR(20) DEFAULT 'regular' NOT NULL" in sql, \
+                f"{db_type}: act_tables не содержит колонку kind"
+            check_match = re.search(
+                r"CONSTRAINT\s+check_table_kind_values\s+CHECK\s*\(kind\s+IN\s*\(([^)]+)\)\)",
+                sql,
+            )
+            assert check_match, f"{db_type}: нет CHECK check_table_kind_values"
+            values = set(re.findall(r"'([^']+)'", check_match.group(1)))
+            assert values == set(TABLE_KINDS), (
+                f"{db_type}: CHECK перечисляет {sorted(values)}, "
+                f"а TABLE_KINDS = {sorted(TABLE_KINDS)}"
+            )
 
     def test_act_tables_unique_act_id_node_id_both_schemas(self):
         """act_tables в обеих схемах объявляет UNIQUE(act_id, node_id).
@@ -419,46 +426,54 @@ class TestGreenplumSchemaCompatibility:
                 f"всё ещё в схеме"
             )
 
-    def test_chat_agent_messages_bus_gp_distribution_and_pk(self):
-        """chat_agent_messages_bus в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
-        schema_path = (
-            Path(__file__).parent.parent
-            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
-        )
-        content = schema_path.read_text(encoding="utf-8")
-        stmts = DatabaseAdapter._split_sql_statements(content)
+    def test_chat_agent_messages_bus_mirrors_external_owner_structure(self):
+        """Bus-таблица в обеих схемах зеркалит фактическую структуру владельца (агента).
 
-        create_stmt = None
-        for raw in stmts:
-            cleaned = re.sub(r'--[^\n]*', '', raw)
-            if (
-                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
-                and "{BUS_TABLE}" in cleaned
-            ):
-                create_stmt = cleaned
-                break
+        Колонки conversation_id в шине НЕТ (uid сообщения — колонка id типа
+        uuid); GP-имитация — DISTRIBUTED BY (chat_id) без PRIMARY KEY
+        (у владельца id nullable). Регрессия на возврат старой структуры,
+        ронявшей запросы «column id does not exist» на проде.
+        """
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            stmts = DatabaseAdapter._split_sql_statements(content)
 
-        assert create_stmt is not None, (
-            "GP-схема chat: CREATE TABLE chat_agent_messages_bus не найдено"
-        )
+            create_stmt = None
+            for raw in stmts:
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{BUS_TABLE}" in cleaned
+                ):
+                    create_stmt = cleaned
+                    break
 
-        # DISTRIBUTED BY (chat_id) присутствует
-        assert re.search(
-            r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
-        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE chat_agent_messages_bus"
+            assert create_stmt is not None, (
+                f"{db_type}-схема chat: CREATE TABLE chat_agent_messages_bus не найдено"
+            )
 
-        # PRIMARY KEY содержит и id, и chat_id
-        pk_match = re.search(r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE)
-        assert pk_match is not None, (
-            "PRIMARY KEY не найден в CREATE TABLE chat_agent_messages_bus"
-        )
-        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
-        assert 'chat_id' in pk_cols, (
-            f"chat_id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
-        )
-        assert 'id' in pk_cols, (
-            f"id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
-        )
+            assert "conversation_id" not in create_stmt, (
+                f"{db_type}/schema.sql: в bus-таблице не должно быть conversation_id "
+                f"(uid сообщения — колонка id; структуру задаёт владелец-агент)"
+            )
+            assert re.search(r'\bid\s+UUID\b', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка id UUID не найдена в bus-таблице"
+            )
+            assert re.search(r'\breply_to\s+UUID\b', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка reply_to UUID не найдена в bus-таблице"
+            )
+            assert re.search(
+                r'PRIMARY\s+KEY', create_stmt, re.IGNORECASE
+            ) is None, (
+                f"{db_type}/schema.sql: у bus-таблицы не должно быть PRIMARY KEY "
+                f"(у владельца id nullable)"
+            )
+
+            if db_type == "greenplum":
+                assert re.search(
+                    r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
+                ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE chat_agent_messages_bus"
 
     def test_chat_agent_messages_bus_name_is_prefix_free_placeholder(self):
         """Bus-таблица именуется плейсхолдером {BUS_TABLE} без {PREFIX}.
@@ -503,6 +518,60 @@ class TestGreenplumSchemaCompatibility:
         assert not violations, (
             f"GP-схема chat содержит конструкции, запрещённые в GP 6.x: "
             + ", ".join(violations)
+        )
+
+    def test_chat_message_feedback_present_in_both_schemas(self):
+        """chat_message_feedback есть в обеих схемах с CHECK на rating (up/down)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            assert "{PREFIX}chat_message_feedback" in content, (
+                f"{db_type}/schema.sql: таблица chat_message_feedback не найдена"
+            )
+            assert "check_chat_message_feedback_rating_values" in content, (
+                f"{db_type}/schema.sql: CHECK rating не найден"
+            )
+            for v in ("'up'", "'down'"):
+                assert v in content, f"{db_type}/schema.sql: значение {v} не найдено"
+
+    def test_chat_message_feedback_gp_distribution_and_pk(self):
+        """GP: chat_message_feedback DISTRIBUTED BY (message_id) ⊆ PK (message_id, user_id).
+
+        message_id ведущий в PK (lookup WHERE message_id=$1 по PK-индексу),
+        co-location по сообщению, идемпотентность даёт сам составной PK.
+        """
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        stmts = DatabaseAdapter._split_sql_statements(content)
+
+        create_stmt = None
+        for raw in stmts:
+            cleaned = re.sub(r'--[^\n]*', '', raw)
+            if (
+                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                and "{PREFIX}chat_message_feedback" in cleaned
+            ):
+                create_stmt = cleaned
+                break
+
+        assert create_stmt is not None, (
+            "GP-схема chat: CREATE TABLE chat_message_feedback не найдено"
+        )
+        assert re.search(
+            r'DISTRIBUTED\s+BY\s*\(\s*message_id\s*\)', create_stmt, re.IGNORECASE
+        ), "DISTRIBUTED BY (message_id) не найден в chat_message_feedback"
+
+        pk_match = re.search(
+            r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE,
+        )
+        assert pk_match is not None, "PRIMARY KEY не найден в chat_message_feedback"
+        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
+        assert pk_cols == {"message_id", "user_id"}, (
+            f"chat_message_feedback PK {sorted(pk_cols)} != "
+            f"{{message_id, user_id}}"
         )
 
 

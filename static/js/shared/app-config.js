@@ -27,6 +27,14 @@ export class AppConfig {
         { abbr: 'ББ',    name: 'Байкальский' }
     ];
 
+    /**
+     * Канонические строковые типы узлов дерева акта.
+     * Полный реестр описаний типов (idProp/dictName/defaultLabel/лимиты/
+     * domIndexPrefix) — static/js/constructor/block-types.js: он использует
+     * эти константы как ключи, отдельного дубля строк нет. Набор типов
+     * синхронизирован ВРУЧНУЮ с бэкенд-реестром app/domains/acts/block_types.py
+     * (пин — tests/js/block-types.test.mjs и tests/domains/acts/test_block_types_guard.py).
+     */
     static nodeTypes = {
         ITEM: 'item',
         TABLE: 'table',
@@ -116,6 +124,13 @@ export class AppConfig {
 
         // Сообщения беседы
         messages: (cid) => `/api/v1/chat/conversations/${cid}/messages`,
+
+        // Обратная связь по сообщению ассистента (PUT — оценить, DELETE — снять).
+        // id экранируем (defense-in-depth): id — серверные UUID, encode защищает
+        // путь при любых неожиданных символах.
+        feedback: (cid, mid) =>
+            `/api/v1/chat/conversations/${encodeURIComponent(cid)}`
+            + `/messages/${encodeURIComponent(mid)}/feedback`,
 
         // Активный forward к внешнему агенту (чтобы продолжить polling после reload)
         activeForward: (cid) =>
@@ -413,7 +428,7 @@ export class AppConfig {
 
             // Текстовые блоки
             fontSize: 14,
-            alignment: 'left',
+            alignment: 'justify',
 
             // Форматирование
             formatting: {
@@ -580,6 +595,38 @@ export class AppConfig {
     };
 
     /**
+     * Синхронный ФОЛБЭК структурных лимитов до ответа GET /acts/limits.
+     *
+     * Источник истины в рантайме — настройки ACTS__TABLES__* /
+     * ACTS__TEXTBLOCKS__* (отдаются /limits, читаются через
+     * getStructureLimits() в violation-image-validator.js). Эти числа —
+     * зеркало дефолтов настроек (= фолбэк-констант схемы
+     * app/domains/acts/schemas/act_content.py); действуют, пока ответ сервера
+     * не пришёл. Контракт фронт↔бэк закреплён стражами:
+     * tests/js/table-cells-limits.test.mjs и tests/test_act_content_roundtrip.py
+     * — при изменении дефолтов менять синхронно.
+     */
+    static limits = {
+        table: {
+            // Максимум строк grid (бэк: TableSchema.grid max_length=64)
+            maxRows: 64,
+
+            // Максимум колонок grid (бэк: validate_grid_dimensions ≤ 16)
+            maxCols: 16,
+
+            // Минимальная ширина колонки при интерактивном ресайзе, px
+            // (table-sizes.js переводит в проценты от ширины таблицы)
+            minColWidthPx: 80
+        },
+
+        textblock: {
+            // Размер шрифта (бэк: TextBlockFormattingSchema.fontSize ge=8 le=72)
+            fontSizeMin: 8,
+            fontSizeMax: 72
+        }
+    };
+
+    /**
      * Настройки таблиц
      * TODO: Добавить настройки таблиц при работе с модулем
      */
@@ -648,11 +695,9 @@ export class AppConfig {
      * Настройки локального хранилища
      */
     static localStorage = {
-        // Ключ для хранения состояния акта
-        stateKey: 'audit_workstation_state',
-
-        // Ключ для хранения временной метки последнего сохранения
-        timestampKey: 'audit_workstation_timestamp',
+        // Префикс ключа снимка-черновика акта; полный ключ — per-act:
+        // `${stateKeyPrefix}:{actId}` (снимки разных актов не затирают друг друга)
+        stateKeyPrefix: 'audit_workstation_state',
 
         // Дебаунс для автосохранения (мс) - 3 секунды для меньшей частоты
         autoSaveDebounce: 3000,

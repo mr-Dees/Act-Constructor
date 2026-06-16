@@ -56,6 +56,16 @@
     white-space: nowrap;
 }
 
+/* Индикатор позиции вставки (mousemove по контейнеру / файловый drag),
+   показывается и в пустом контейнере (violation-6) */
+.additional-content-items .insert-indicator {
+    height: var(--tree-drop-indicator-height, 3px);
+    background: var(--insert-indicator-gradient);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
 /* Подсказка для пустого контейнера */
 .additional-content-items:empty::after {
     content: 'ПКМ для добавления контента';
@@ -263,6 +273,40 @@
 
 .image-item .violation-list-input::placeholder {
     color: var(--input-placeholder);
+}
+
+/* Компактный контрол ширины картинки (Б-1.4): «Ширина: Авто/25/50/75/100%» */
+.image-width-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.image-width-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.image-width-select {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-xs);
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    transition: all var(--transition-base);
+}
+
+.image-width-select:hover {
+    border-color: var(--input-border-hover);
+}
+
+.image-width-select:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
 }
 
 /* Кнопка удаления элемента контента */

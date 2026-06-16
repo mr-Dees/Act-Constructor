@@ -5,6 +5,11 @@
 
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
+import {
+    CONTENT_TYPE_CASE,
+    CONTENT_TYPE_FREE_TEXT,
+    CONTENT_TYPE_IMAGE,
+} from './violation-content-item.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -55,17 +60,17 @@ Object.assign(ViolationManager.prototype, {
         let label = '';
         let icon = '';
 
-        if (item.type === 'case') {
+        if (item.type === CONTENT_TYPE_CASE) {
             const caseNumbers = this.calculateCaseNumbers(allItems);
             const caseNumber = caseNumbers[index];
             icon = '📋';
             label = `Кейс ${caseNumber}`;
-        } else if (item.type === 'image') {
-            const imageNumber = this.getTypeSequentialNumber(allItems, 'image', index);
+        } else if (item.type === CONTENT_TYPE_IMAGE) {
+            const imageNumber = this.getTypeSequentialNumber(allItems, CONTENT_TYPE_IMAGE, index);
             icon = '🖼️';
             label = `Изображение ${imageNumber}`;
-        } else if (item.type === 'freeText') {
-            const textNumber = this.getTypeSequentialNumber(allItems, 'freeText', index);
+        } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
+            const textNumber = this.getTypeSequentialNumber(allItems, CONTENT_TYPE_FREE_TEXT, index);
             icon = '📝';
             label = `Текст ${textNumber}`;
         }
@@ -172,7 +177,7 @@ Object.assign(ViolationManager.prototype, {
         // Перерисовываем с обновленными индексами
         this.renderContentItems(violation, container);
 
-        PreviewManager.update();
+        PreviewManager.updateBlock('violation', violation.id);
     },
 
     /**

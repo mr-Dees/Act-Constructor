@@ -35,6 +35,10 @@ class NotificationService:
         """Помечает уведомление прочитанным."""
         await self.repo.mark_read(notification_id, user_id)
 
+    async def mark_unread(self, notification_id: str, user_id: str) -> None:
+        """Возвращает уведомление в непрочитанное."""
+        await self.repo.mark_unread(notification_id, user_id)
+
     async def mark_all_read(self, user_id: str) -> None:
         """Помечает все видимые уведомления пользователя прочитанными."""
         await self.repo.mark_all_read(user_id)

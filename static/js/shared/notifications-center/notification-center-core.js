@@ -149,6 +149,14 @@ export function mergeFeed(liveItems, persistedItems) {
         title: item.title || '',
         body: item.body || '',
         onClick: item.onClick,
+        // Состояние/действия для живых элементов опциональны: их предоставляет
+        // источник, поддерживающий клиентское прочтение/удаление (например,
+        // сводка актов на лендинге). Источники без них (замечания внутри акта)
+        // остаются «вечно горящими» без доступных действий.
+        is_read: item.is_read === true,
+        onMarkRead: item.onMarkRead,
+        onMarkUnread: item.onMarkUnread,
+        onDelete: item.onDelete,
       });
     }
   }
@@ -192,6 +200,26 @@ export function countPersistedUnread(persistedItems) {
 }
 
 /**
+ * Считает число «активных» (непрочитанных) живых элементов.
+ *
+ * Живой элемент без явного состояния (is_read) считается непрочитанным — это
+ * «вечно горящие» замечания внутри акта. Источники с клиентским состоянием
+ * (сводка актов) выставляют is_read=true прочитанным, и те выпадают из счётчика
+ * бейджа (но остаются в списке приглушёнными).
+ *
+ * @param {Array<{is_read?: boolean}>} liveItems
+ * @returns {number}
+ */
+export function countUnreadLive(liveItems) {
+  if (!Array.isArray(liveItems)) return 0;
+  let n = 0;
+  for (const item of liveItems) {
+    if (item && item.is_read !== true) n += 1;
+  }
+  return n;
+}
+
+/**
  * Резолвит интервал поллинга персистентных уведомлений (мс) из настройки в
  * секундах (приходит с бэкенда через GET /config).
  *
@@ -221,6 +249,7 @@ if (typeof window !== 'undefined') {
     formatBadgeCount,
     mergeFeed,
     countPersistedUnread,
+    countUnreadLive,
     resolvePollIntervalMs,
   };
 }

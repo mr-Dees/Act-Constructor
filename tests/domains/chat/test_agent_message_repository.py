@@ -1,11 +1,14 @@
 """Тесты репозитория chat_agent_messages_bus (bus-таблица канала к внешнему агенту).
 
-Покрывают: insert_question, get_by_uid, get_questions (пустой и непустой
-списки), set_status. Стратегия: mock_conn + autouse-патч get_adapter —
-идентична test_message_repository.py.
+Покрывают: insert_question, get_by_uid, set_status, count_pending_before,
+count_active_for_user.
+Стратегия: mock_conn + autouse-патч get_adapter — идентична
+test_message_repository.py.
 """
 
 import json
+import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,7 +59,6 @@ async def test_insert_question_returns_parsed_row(mock_conn):
         "id": "msg-1",
         "chat_id": "chat-1",
         "user_id": "user1",
-        "conversation_id": "conv-1",
         "role": "user",
         "content": "Привет",
         "media": None,
@@ -69,7 +71,6 @@ async def test_insert_question_returns_parsed_row(mock_conn):
         id="msg-1",
         chat_id="chat-1",
         user_id="user1",
-        conversation_id="conv-1",
         content="Привет",
         metadata={"source": "aw"},
     )
@@ -81,16 +82,20 @@ async def test_insert_question_returns_parsed_row(mock_conn):
     assert "'user'" in sql
     assert "'pending'" in sql
     assert "RETURNING *" in sql
+    # Колонки conversation_id в шине больше нет (структура владельца-агента)
+    assert "conversation_id" not in sql
+    # Таблица чужая, DEFAULT'ы не гарантированы — таймстемпы передаются явно
+    assert "created_at" in sql
+    assert "updated_at" in sql
 
     # Позиционные параметры
-    assert params[0] == "msg-1"       # id
+    assert params[0] == "msg-1"       # id (uid сообщения)
     assert params[1] == "chat-1"      # chat_id
     assert params[2] == "user1"       # user_id
-    assert params[3] == "conv-1"      # conversation_id
-    assert params[4] == "Привет"      # content
+    assert params[3] == "Привет"      # content
 
     # metadata сериализована в JSON-строку
-    assert json.loads(params[6]) == {"source": "aw"}
+    assert json.loads(params[5]) == {"source": "aw"}
 
     # JSONB-поля раскодированы в _parse_row
     assert result["metadata"] == {"source": "aw"}
@@ -99,12 +104,11 @@ async def test_insert_question_returns_parsed_row(mock_conn):
 
 
 async def test_insert_question_media_serialized(mock_conn):
-    """media передаётся как JSON-строка в параметре $6."""
+    """media передаётся как JSON-строка в параметре $5."""
     mock_conn.fetchrow.return_value = {
         "id": "msg-2",
         "chat_id": "chat-1",
         "user_id": "user1",
-        "conversation_id": "conv-2",
         "role": "user",
         "content": "файл",
         "media": '[{"type": "file", "url": "x"}]',
@@ -118,40 +122,38 @@ async def test_insert_question_media_serialized(mock_conn):
         id="msg-2",
         chat_id="chat-1",
         user_id="user1",
-        conversation_id="conv-2",
         content="файл",
         media=media,
     )
     _, *params = mock_conn.fetchrow.call_args.args
-    # media — пятый параметр (0-based: 5)
-    assert json.loads(params[5]) == media
+    # media — пятый параметр (0-based: 4)
+    assert json.loads(params[4]) == media
 
 
 async def test_insert_question_no_media_passes_none(mock_conn):
     """Если media не передан, в параметр идёт None."""
     mock_conn.fetchrow.return_value = {
         "id": "m", "chat_id": "c", "user_id": "u",
-        "conversation_id": "cv", "role": "user", "content": "x",
+        "role": "user", "content": "x",
         "media": None, "metadata": "{}", "buttons": None, "status": "pending",
     }
     repo = AgentMessageRepository(mock_conn)
     await repo.insert_question(
-        id="m", chat_id="c", user_id="u", conversation_id="cv", content="x",
+        id="m", chat_id="c", user_id="u", content="x",
     )
     _, *params = mock_conn.fetchrow.call_args.args
-    assert params[5] is None  # media
+    assert params[4] is None  # media
 
 
 # ── get_by_uid ───────────────────────────────────────────────────────────
 
 
 async def test_get_by_uid_found(mock_conn):
-    """get_by_uid возвращает запись по conversation_id."""
+    """get_by_uid возвращает запись по id (uid сообщения)."""
     mock_conn.fetchrow.return_value = {
         "id": "msg-1",
         "chat_id": "chat-1",
         "user_id": "user1",
-        "conversation_id": "conv-1",
         "role": "user",
         "content": "hi",
         "media": None,
@@ -160,12 +162,12 @@ async def test_get_by_uid_found(mock_conn):
         "status": "pending",
     }
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_by_uid("conv-1")
+    result = await repo.get_by_uid("msg-1")
 
-    sql, conv_id = mock_conn.fetchrow.call_args.args
+    sql, uid = mock_conn.fetchrow.call_args.args
     assert "SELECT" in sql
-    assert "WHERE conversation_id = $1" in sql
-    assert conv_id == "conv-1"
+    assert "WHERE id = $1" in sql
+    assert uid == "msg-1"
 
     assert result["id"] == "msg-1"
     assert result["metadata"] == {"k": "v"}  # JSONB раскодирован
@@ -175,84 +177,152 @@ async def test_get_by_uid_not_found(mock_conn):
     """get_by_uid возвращает None если строка не найдена."""
     mock_conn.fetchrow.return_value = None
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_by_uid("no-such-conv")
+    result = await repo.get_by_uid("no-such-uid")
     assert result is None
 
 
-# ── get_questions ────────────────────────────────────────────────────────
+async def test_parse_row_normalizes_uuid_fields(mock_conn):
+    """id/reply_to типа uuid (как у владельца таблицы) нормализуются в str.
 
-
-async def test_get_questions_empty_list_no_db_call(mock_conn):
-    """Пустой uids → [] без обращения к БД."""
+    На проде колонки id/reply_to — PG UUID; asyncpg отдаёт их объектами
+    uuid.UUID. Остальной код (agent_ref, block_id, get_by_uid(reply_to))
+    работает со строками — _parse_row обязан конвертировать.
+    """
+    row_id = uuid.uuid4()
+    reply_to = uuid.uuid4()
+    mock_conn.fetchrow.return_value = {
+        "id": row_id,
+        "chat_id": "chat-1",
+        "user_id": "user1",
+        "role": "user",
+        "content": "hi",
+        "media": None,
+        "metadata": "{}",
+        "buttons": None,
+        "reply_to": reply_to,
+        "status": "complete",
+    }
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_questions([])
-    assert result == []
-    mock_conn.fetch.assert_not_called()
+    result = await repo.get_by_uid(str(row_id))
+
+    assert result["id"] == str(row_id)
+    assert isinstance(result["id"], str)
+    assert result["reply_to"] == str(reply_to)
+    assert isinstance(result["reply_to"], str)
 
 
-async def test_get_questions_returns_parsed_rows(mock_conn):
-    """Непустой uids → SELECT ANY($1::varchar[]), результат раскодирован."""
-    rows = [
-        {
-            "id": "msg-1", "chat_id": "c1", "user_id": "u1",
-            "conversation_id": "cv1", "role": "user", "content": "a",
-            "media": None, "metadata": '{"x": 1}', "buttons": None,
-            "status": "pending",
-        },
-        {
-            "id": "msg-2", "chat_id": "c1", "user_id": "u1",
-            "conversation_id": "cv2", "role": "user", "content": "b",
-            "media": '[1, 2]', "metadata": "{}", "buttons": None,
-            "status": "in_progress",
-        },
-    ]
-    mock_conn.fetch.return_value = rows
+# ── get_answer_for_question ──────────────────────────────────────────────
+
+
+async def test_get_answer_for_question_reverse_lookup(mock_conn):
+    """Ответ ищется обратным lookup'ом: reply_to стоит НА ОТВЕТЕ агента.
+
+    Протокол владельца шины: агент вставляет строку-ответ (role='assistant')
+    с reply_to = id вопроса. Регрессия «вечной печати»: поиск по reply_to
+    вопроса не находил ответ.
+    """
+    mock_conn.fetchrow.return_value = {
+        "id": "a-uid",
+        "chat_id": "c1",
+        "user_id": None,
+        "role": "assistant",
+        "content": "Ответ",
+        "media": None,
+        "metadata": "{}",
+        "buttons": None,
+        "reply_to": "q-uid",
+        "status": "completed",
+    }
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.get_questions(["cv1", "cv2"])
+    result = await repo.get_answer_for_question("q-uid")
 
-    sql, uids = mock_conn.fetch.call_args.args
-    assert "ANY($1::varchar[])" in sql
-    assert uids == ["cv1", "cv2"]
+    sql, q_uid = mock_conn.fetchrow.call_args.args
+    assert "WHERE reply_to = $1" in sql
+    assert "role = 'assistant'" in sql
+    assert "ORDER BY created_at DESC" in sql
+    assert "LIMIT 1" in sql
+    assert q_uid == "q-uid"
+    assert result["id"] == "a-uid"
 
-    assert len(result) == 2
-    assert result[0]["metadata"] == {"x": 1}  # JSONB раскодирован
-    assert result[1]["media"] == [1, 2]        # JSONB раскодирован
+
+async def test_get_answer_for_question_not_found(mock_conn):
+    """Нет строки-ответа → None."""
+    mock_conn.fetchrow.return_value = None
+    repo = AgentMessageRepository(mock_conn)
+    assert await repo.get_answer_for_question("q-uid") is None
 
 
 # ── set_status ───────────────────────────────────────────────────────────
 
 
 async def test_set_status_executes_update(mock_conn):
-    """set_status делает UPDATE status + updated_at по conversation_id."""
+    """set_status делает UPDATE status + updated_at по id (uid сообщения)."""
     repo = AgentMessageRepository(mock_conn)
-    await repo.set_status(conversation_id="conv-1", status="in_progress")
+    await repo.set_status(uid="msg-1", status="in_progress")
 
-    sql, status, conv_id = mock_conn.execute.call_args.args
+    sql, status, uid = mock_conn.execute.call_args.args
     assert "UPDATE" in sql
     assert "chat_agent_messages_bus" in sql
     assert "status = $1" in sql
     assert "updated_at = CURRENT_TIMESTAMP" in sql
-    assert "WHERE conversation_id = $2" in sql
+    assert "WHERE id = $2" in sql
     assert status == "in_progress"
-    assert conv_id == "conv-1"
+    assert uid == "msg-1"
+
+
+# ── count_pending_before ─────────────────────────────────────────────────
+
+
+async def test_count_pending_before_filters_role_status_and_time(mock_conn):
+    """count_pending_before считает глобальную очередь pending-вопросов до отметки времени."""
+    repo = AgentMessageRepository(mock_conn)
+    mock_conn.fetchval.return_value = 3
+    ts = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    n = await repo.count_pending_before(ts)
+    assert n == 3
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "role = 'user'" in sql and "status = 'pending'" in sql and "created_at < $1" in sql
 
 
 # ── count_active_for_user ────────────────────────────────────────────────
 
 
-async def test_count_active_for_user_returns_count(mock_conn):
-    """count_active_for_user делает SELECT COUNT по user_id, role='user' и статусам pending/in_progress."""
-    mock_conn.fetchval.return_value = 2
+async def test_count_active_for_user_two_phase_cutoffs(mock_conn):
+    """count_active_for_user принимает раздельные отсечки для pending и processing."""
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.count_active_for_user("user1")
+    mock_conn.fetchval.return_value = 1
+    now = datetime.now(timezone.utc)
+    n = await repo.count_active_for_user(
+        "77123", pending_created_after=now, processing_updated_after=now,
+    )
+    assert n == 1
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "status = 'pending' AND created_at > $2" in sql
+    assert "status IN ('processing', 'in_progress') AND updated_at > $3" in sql
 
-    sql, user_id = mock_conn.fetchval.call_args.args
+
+async def test_count_active_for_user_returns_count(mock_conn):
+    """count_active_for_user делает SELECT COUNT по user_id, role='user' и активным статусам.
+
+    'processing' — словарь владельца шины (агент claim'ит вопрос этим статусом);
+    без него вопросы в работе у агента не считались бы активными.
+    """
+    mock_conn.fetchval.return_value = 2
+    now = datetime.now(timezone.utc)
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.count_active_for_user(
+        "user1",
+        pending_created_after=now,
+        processing_updated_after=now,
+    )
+
+    sql, user_id, *_ = mock_conn.fetchval.call_args.args
     assert "SELECT COUNT(*)" in sql
     assert "chat_agent_messages_bus" in sql
     assert "user_id = $1" in sql
     assert "role = 'user'" in sql
     assert "'pending'" in sql
-    assert "'in_progress'" in sql
+    assert "'processing'" in sql
     assert user_id == "user1"
     assert result == 2
 
@@ -260,6 +330,30 @@ async def test_count_active_for_user_returns_count(mock_conn):
 async def test_count_active_for_user_returns_zero_on_none(mock_conn):
     """count_active_for_user возвращает 0 если fetchval вернул None."""
     mock_conn.fetchval.return_value = None
+    now = datetime.now(timezone.utc)
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.count_active_for_user("user-empty")
+    result = await repo.count_active_for_user(
+        "user-empty",
+        pending_created_after=now,
+        processing_updated_after=now,
+    )
     assert result == 0
+
+
+async def test_count_active_for_user_passes_both_cutoffs(mock_conn):
+    """Обе отсечки передаются в запрос как $2 и $3 соответственно."""
+    mock_conn.fetchval.return_value = 1
+    pending_cutoff = datetime(2026, 6, 10, 10, 0, tzinfo=timezone.utc)
+    processing_cutoff = datetime(2026, 6, 10, 11, 0, tzinfo=timezone.utc)
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.count_active_for_user(
+        "user1",
+        pending_created_after=pending_cutoff,
+        processing_updated_after=processing_cutoff,
+    )
+
+    sql, user_id, p_after, pr_after = mock_conn.fetchval.call_args.args
+    assert user_id == "user1"
+    assert p_after == pending_cutoff
+    assert pr_after == processing_cutoff
+    assert result == 1

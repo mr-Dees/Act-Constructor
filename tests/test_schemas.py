@@ -12,11 +12,15 @@ from app.domains.acts.schemas.act_metadata import (
     AuditTeamMember,
 )
 from app.domains.acts.schemas.act_content import (
+    VIOLATION_CONTENT_ITEMS_MAX,
+    VIOLATION_IMAGE_URL_MAX_LENGTH,
     ActDataSchema,
     TableCellSchema,
     TableSchema,
     TextBlockFormattingSchema,
     TextBlockSchema,
+    ViolationAdditionalContentSchema,
+    ViolationContentItemSchema,
 )
 from app.domains.acts.schemas.act_invoice import InvoiceSave, MetricItem
 
@@ -289,23 +293,108 @@ class TestTableSchema:
         )
         assert t.grid == []
 
-    def test_special_table_flags(self):
-        # Одного флага подвида достаточно; два одновременно запрещены (A3).
+    def test_special_table_kind(self):
+        # Подвид таблицы — единое поле kind (взаимоисключение по построению).
         t = TableSchema(
             id="table_1711270400456_3x2m8p1",
             nodeId="node_1711270400123_7a4k9b2",
-            isMetricsTable=True,
+            kind="metrics",
         )
-        assert t.isMetricsTable is True
-        assert t.isRegularRiskTable is False
+        assert t.kind == "metrics"
 
-    def test_mutually_exclusive_type_flags(self):
-        # Два флага подвида одновременно — взаимоисключение (A3) → ValidationError.
-        with pytest.raises(ValidationError, match="несколько типов"):
+    def test_unknown_table_kind_rejected(self):
+        # Неизвестный подвид таблицы → ValidationError (422).
+        with pytest.raises(ValidationError):
             TableSchema(
                 id="table_1711270400456_3x2m8p1",
                 nodeId="node_1711270400123_7a4k9b2",
-                isMetricsTable=True, isRegularRiskTable=True,
+                kind="superRisk",
+            )
+
+
+# ── ViolationContentItemSchema: валидация url картинок (4.3.M.2 + 5.2.2) ──
+
+
+class TestViolationContentItemUrl:
+    """url элемента image: только data:image-URL разрешённых форматов."""
+
+    def test_valid_data_image_png_passes(self):
+        item = ViolationContentItemSchema(
+            id="i1", type="image",
+            url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+        )
+        assert item.url.startswith("data:image/png")
+
+    def test_valid_data_image_jpeg_jpg_gif_pass(self):
+        for mime in ("jpeg", "jpg", "gif"):
+            item = ViolationContentItemSchema(
+                id="i1", type="image", url=f"data:image/{mime};base64,AAAA",
+            )
+            assert item.url
+
+    def test_webp_rejected(self):
+        # webp исключён из whitelist: python-docx не встраивает его в DOCX,
+        # картинка молча расходилась бы между превью и экспортом.
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="data:image/webp;base64,AAAA",
+            )
+
+    def test_empty_url_allowed_for_image(self):
+        # Картинка без содержимого (черновик) — допустима.
+        item = ViolationContentItemSchema(id="i1", type="image", url="")
+        assert item.url == ""
+
+    def test_javascript_url_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="javascript:alert(1)",
+            )
+
+    def test_data_text_html_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image",
+                url="data:text/html,<script>alert(1)</script>",
+            )
+
+    def test_data_image_svg_rejected(self):
+        # SVG может содержать скрипты — не входит в whitelist форматов.
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="data:image/svg+xml;base64,AAAA",
+            )
+
+    def test_oversized_url_rejected(self):
+        too_long = "data:image/png;base64," + "A" * VIOLATION_IMAGE_URL_MAX_LENGTH
+        with pytest.raises(ValidationError, match="превышает"):
+            ViolationContentItemSchema(id="i1", type="image", url=too_long)
+
+    def test_non_image_types_do_not_require_image_url(self):
+        # Для case/freeText url не проверяется на data:image-префикс.
+        item = ViolationContentItemSchema(id="i1", type="case", content="текст")
+        assert item.url == ""
+
+
+class TestViolationAdditionalContentItemsLimit:
+    """Число items дополнительного контента ограничено."""
+
+    def _items(self, n: int) -> list[ViolationContentItemSchema]:
+        return [
+            ViolationContentItemSchema(id=f"i{i}", type="case", content="x")
+            for i in range(n)
+        ]
+
+    def test_items_at_limit_pass(self):
+        ac = ViolationAdditionalContentSchema(
+            enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX),
+        )
+        assert len(ac.items) == VIOLATION_CONTENT_ITEMS_MAX
+
+    def test_items_over_limit_rejected(self):
+        with pytest.raises(ValidationError, match="лемент"):
+            ViolationAdditionalContentSchema(
+                enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX + 1),
             )
 
 
@@ -317,7 +406,7 @@ class TestTextBlockFormatting:
     def test_default_values(self):
         f = TextBlockFormattingSchema()
         assert f.fontSize == 14
-        assert f.alignment == "left"
+        assert f.alignment == "justify"
 
     def test_font_size_too_small(self):
         with pytest.raises(ValidationError):
@@ -366,6 +455,215 @@ class TestActDataSchema:
         assert d.violations == {}
         assert d.invoiceNodeIds == []
         assert d.changelog == []
+
+
+# ── M.20: явная политика extra='forbid' для схем словарей ──
+
+
+class TestExtraForbidPolicy:
+    """Неизвестные поля в схемах словарей отклоняются (раньше молча терялись)."""
+
+    _TABLE_KW = dict(
+        id="t1", nodeId="n1",
+        grid=[[TableCellSchema(content="A")]], colWidths=[100],
+    )
+
+    def test_unknown_field_in_table_rejected(self):
+        with pytest.raises(ValidationError, match="unknown_field"):
+            TableSchema(**self._TABLE_KW, unknown_field="x")
+
+    def test_unknown_field_in_cell_rejected(self):
+        with pytest.raises(ValidationError, match="surprise"):
+            TableCellSchema(content="A", surprise=True)
+
+    def test_unknown_field_in_textblock_rejected(self):
+        with pytest.raises(ValidationError, match="junk"):
+            TextBlockSchema(id="tb1", nodeId="n1", junk=1)
+
+    def test_unknown_field_in_formatting_rejected(self):
+        with pytest.raises(ValidationError, match="lineHeight"):
+            TextBlockFormattingSchema(lineHeight=1.5)
+
+    def test_unknown_field_in_violation_item_rejected(self):
+        with pytest.raises(ValidationError, match="position"):
+            ViolationContentItemSchema(id="i1", type="case", position=3)
+
+    def test_unknown_top_level_field_rejected(self):
+        with pytest.raises(ValidationError, match="metadata"):
+            ActDataSchema(
+                tree=dict(TestActDataSchema._VALID_TREE),
+                metadata={"km_number": "КМ-01-0000001"},
+            )
+
+    def test_known_table_fields_round_trip(self):
+        """Round-trip: все объявленные поля переживают validate → dump → validate."""
+        t = TableSchema(
+            id="t1", nodeId="n1",
+            grid=[[TableCellSchema(
+                content="A", isHeader=True, colSpan=1, rowSpan=1,
+                isSpanned=False, spanOrigin=None, originRow=0, originCol=0,
+            )]],
+            colWidths=[100],
+            protected=True, deletable=False, kind="metrics",
+        )
+        dumped = t.model_dump()
+        restored = TableSchema.model_validate(dumped)
+        assert restored.model_dump() == dumped
+
+
+# ── M.21: дерево хранится нормализованным через ActItemSchema ──
+
+
+class TestTreeNormalization:
+    """tree сохраняется как model_dump() от ActItemSchema, а не сырой dict."""
+
+    def test_unknown_node_field_dropped_on_normalization(self):
+        """Незадекларированное поле узла (например parentId) не персистится."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Таблица", "type": "table",
+                 "tableId": "t1", "parentId": "root", "children": []},
+            ],
+        }
+        d = ActDataSchema(tree=tree, tables={
+            "t1": TableSchema(id="t1", nodeId="n1"),
+        })
+        child = d.tree["children"][0]
+        assert "parentId" not in child
+        assert child["tableId"] == "t1"
+
+    def test_known_node_fields_preserved(self):
+        """Все поля, которые шлёт фронтовый exportData, переживают нормализацию."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {
+                    "id": "n1", "label": "5.1 Пункт", "type": "item",
+                    "content": "текст", "protected": True, "deletable": False,
+                    "customLabel": "Своя метка", "number": "5.1",
+                    "tb": ["ВВБ", "СЗБ"], "auditPointId": "AP-1",
+                    "kind": "metrics",
+                    "children": [],
+                },
+            ],
+        }
+        d = ActDataSchema(tree=tree)
+        child = d.tree["children"][0]
+        assert child["id"] == "n1"
+        assert child["label"] == "5.1 Пункт"
+        assert child["type"] == "item"
+        assert child["content"] == "текст"
+        assert child["protected"] is True
+        assert child["deletable"] is False
+        assert child["customLabel"] == "Своя метка"
+        assert child["number"] == "5.1"
+        assert child["tb"] == ["ВВБ", "СЗБ"]
+        assert child["auditPointId"] == "AP-1"
+        assert child["kind"] == "metrics"
+        assert child["children"] == []
+
+    def test_tree_is_normalized_dict_not_raw_reference(self):
+        """Хранимое дерево — новый нормализованный dict, не исходная ссылка."""
+        raw = {"id": "root", "label": "Акт", "children": [], "garbage": 1}
+        d = ActDataSchema(tree=raw)
+        assert d.tree is not raw
+        assert "garbage" not in d.tree
+        # Исходный dict не мутирован
+        assert "garbage" in raw
+
+
+# ── M.13: кросс-валидатор дерево ↔ словари ──
+
+
+class TestTreeDictCrossValidation:
+    """Висячая ссылка дерево → словари НЕ отбивает PUT 422 (решение «lenient»).
+
+    Разбор запроса больше не бросает: collect_dangling_refs ВОЗВРАЩАЕТ висячие
+    ссылки, а сервис (ActContentService.save_content) их вычищает и
+    предупреждает пользователя одним warning'ом. Обе стороны рассогласования
+    (висячая ссылка узла и запись словаря без узла) лечатся мягко.
+    """
+
+    @staticmethod
+    def _tree_with_ref(ref_field: str, ref_value: str, node_type: str) -> dict:
+        return {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Узел", "type": node_type,
+                 ref_field: ref_value, "children": []},
+            ],
+        }
+
+    def test_dangling_table_ref_collected_not_raised(self):
+        """Висячая ссылка на таблицу не роняет разбор, попадает в список."""
+        d = ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+        assert d.collect_dangling_refs() == [("n1", "tableId", "t_ghost")]
+
+    def test_dangling_textblock_ref_collected_not_raised(self):
+        d = ActDataSchema(
+            tree=self._tree_with_ref("textBlockId", "tb_ghost", "textblock"),
+        )
+        assert d.collect_dangling_refs() == [("n1", "textBlockId", "tb_ghost")]
+
+    def test_dangling_violation_ref_collected_not_raised(self):
+        d = ActDataSchema(
+            tree=self._tree_with_ref("violationId", "v_ghost", "violation"),
+        )
+        assert d.collect_dangling_refs() == [("n1", "violationId", "v_ghost")]
+
+    def test_collect_returns_node_id_field_and_ref(self):
+        """Кортеж висячей ссылки несёт id узла, поле-ссылку и значение."""
+        d = ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+        node_id, ref_field, ref = d.collect_dangling_refs()[0]
+        assert node_id == "n1"
+        assert ref_field == "tableId"
+        assert ref == "t_ghost"
+
+    def test_valid_refs_have_no_dangling(self):
+        d = ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "n1", "label": "Таблица", "type": "table",
+                     "tableId": "t1", "children": []},
+                    {"id": "n2", "label": "ТБ", "type": "textblock",
+                     "textBlockId": "tb1", "children": []},
+                ],
+            },
+            tables={"t1": TableSchema(id="t1", nodeId="n1")},
+            textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="n2")},
+        )
+        assert d.tree["children"][0]["tableId"] == "t1"
+        assert d.collect_dangling_refs() == []
+
+    def test_orphan_dict_entry_allowed(self):
+        """Обратное направление — запись словаря без узла — НЕ ошибка.
+
+        Такие записи отбрасывает orphan-фильтр репозитория при сохранении
+        (pbe-4); отклонять весь PUT из-за них нельзя. Висячих ссылок дерева
+        здесь нет — collect_dangling_refs пуст.
+        """
+        d = ActDataSchema(
+            tree={"id": "root", "label": "Акт", "children": []},
+            tables={"t_orphan": TableSchema(id="t_orphan", nodeId="ghost")},
+        )
+        assert "t_orphan" in d.tables
+        assert d.collect_dangling_refs() == []
+
+    def test_dangling_ref_in_nested_node_collected(self):
+        """Обход рекурсивен: висячая ссылка вложенного узла тоже собирается."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "s1", "label": "Раздел", "type": "item", "children": [
+                    {"id": "n9", "label": "Нарушение", "type": "violation",
+                     "violationId": "v_missing", "children": []},
+                ]},
+            ],
+        }
+        d = ActDataSchema(tree=tree)
+        assert ("n9", "violationId", "v_missing") in d.collect_dangling_refs()
 
 
 # ── MetricItem ──
@@ -431,3 +729,68 @@ class TestInvoiceSave:
                      ["КС", "ФР", "ОР", "РР", "МКР"]],
         ))
         assert len(inv.metrics) == 5
+
+
+# == Динамические лимиты из настроек (#3, #15, #13) ==
+
+
+class TestDynamicLimitsFromSettings:
+    """Схема читает лимиты из реестра настроек (единый источник, config/env)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_registry(self):
+        from app.core import settings_registry
+        settings_registry.reset()
+        yield
+        settings_registry.reset()
+
+    @staticmethod
+    def _register(acts_settings):
+        from app.core import settings_registry
+        from app.domains.acts import DOMAIN_NAME
+        settings_registry._registry[DOMAIN_NAME] = acts_settings
+
+    def test_items_count_limit_from_settings(self):
+        """#3: лимит элементов нарушения берётся из ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION."""
+        from app.domains.acts.settings import ActsSettings, ImagesSettings
+        self._register(ActsSettings(images=ImagesSettings(max_items_per_violation=2)))
+        items = [
+            ViolationContentItemSchema(id=str(i), type="freeText", content="x")
+            for i in range(3)
+        ]
+        with pytest.raises(ValidationError):
+            ViolationAdditionalContentSchema(enabled=True, items=items)
+        # 2 элемента проходят
+        ViolationAdditionalContentSchema(enabled=True, items=items[:2])
+
+    def test_image_mime_whitelist_from_settings(self):
+        """#15: добавленный в настройки MIME принимается схемой url."""
+        from app.domains.acts.settings import ActsSettings, ImagesSettings
+        self._register(ActsSettings(
+            images=ImagesSettings(allowed_mime_types=["image/webp", "image/png"])
+        ))
+        # webp теперь валиден
+        ViolationContentItemSchema(id="1", type="image", url="data:image/webp;base64,AAAA")
+        # gif больше не в whitelist -> отвергается
+        with pytest.raises(ValidationError):
+            ViolationContentItemSchema(id="2", type="image", url="data:image/gif;base64,AAAA")
+
+    def test_table_rows_limit_from_settings(self):
+        """#13: потолок строк grid берётся из ACTS__TABLES__MAX_ROWS."""
+        from app.domains.acts.settings import ActsSettings, TablesSettings
+        self._register(ActsSettings(tables=TablesSettings(max_rows=2)))
+        cell = lambda: TableCellSchema(content="x")
+        grid3 = [[cell()], [cell()], [cell()]]
+        with pytest.raises(ValidationError):
+            TableSchema(id="t", nodeId="n", grid=grid3)
+        TableSchema(id="t", nodeId="n", grid=grid3[:2])
+
+    def test_font_size_bounds_from_settings(self):
+        """#13: границы шрифта берутся из ACTS__TEXTBLOCKS__*."""
+        from app.domains.acts.settings import ActsSettings, TextblocksSettings
+        self._register(ActsSettings(textblocks=TextblocksSettings(font_size_min=10, font_size_max=20)))
+        with pytest.raises(ValidationError):
+            TextBlockFormattingSchema(fontSize=8)
+        with pytest.raises(ValidationError):
+            TextBlockFormattingSchema(fontSize=22)
+        TextBlockFormattingSchema(fontSize=14)

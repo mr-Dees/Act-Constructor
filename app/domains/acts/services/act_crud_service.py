@@ -19,6 +19,7 @@ from app.domains.acts.exceptions import (
 )
 from app.domains.acts.utils import KMUtils, ActDirectivesValidator
 from app.domains.acts.schemas.act_metadata import (
+    ActAttentionItem,
     ActCreate,
     ActListItem,
     ActResponse,
@@ -247,6 +248,16 @@ class ActCrudService:
             username, len(acts), total, limit, offset,
         )
         return acts, total
+
+    async def get_attention_summary(self, username: str) -> list[ActAttentionItem]:
+        """Сводка «мои акты, требующие внимания» для колокольчика лендинга.
+
+        Серверный пересчёт по ВСЕМ актам пользователя (не по загруженной
+        странице): акты с незакрытыми требованиями или структурной валидацией
+        не 'ok'. Read-only, без пагинации — фронт получает уже отфильтрованный
+        список и не сканирует сотни актов на клиенте.
+        """
+        return await self._crud.get_user_acts_needing_attention(username)
 
     async def get_act(self, act_id: int, username: str) -> ActResponse:
         """Получает полную информацию об акте."""
@@ -779,12 +790,7 @@ class ActCrudService:
                 is_protected=table["protected"],
                 is_deletable=table["deletable"],
                 table_label=table.get("label"),
-                is_metrics_table=table.get("isMetricsTable", False),
-                is_main_metrics_table=table.get("isMainMetricsTable", False),
-                is_regular_risk_table=table.get("isRegularRiskTable", False),
-                is_operational_risk_table=table.get("isOperationalRiskTable", False),
-                is_tax_risk_table=table.get("isTaxRiskTable", False),
-                is_other_risk_table=table.get("isOtherRiskTable", False),
+                kind=table.get("kind", "regular"),
             )
 
         logger.info(
