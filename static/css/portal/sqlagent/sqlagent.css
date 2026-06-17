@@ -1,0 +1,71 @@
+/*
+ * Страница SQL-агента: обёртка встроенного iframe и баннер «недоступен».
+ *
+ * Когда процесс SQL-агента не отвечает на своём порту, сервер отдаёт баннер
+ * вместо iframe — чтобы пользователь видел аккуратное сообщение в стиле AW,
+ * а не браузерную заглушку «не удаётся установить соединение».
+ */
+
+/* Обёртка iframe — тянется на всю свободную высоту main-области */
+.sqlagent-embed {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.sqlagent-embed iframe {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+}
+
+/* Баннер «недоступен» — карточка по образцу страниц ошибок AW */
+.sqlagent-unavailable {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl);
+}
+
+.sqlagent-unavailable-card {
+    width: 100%;
+    max-width: 32rem;
+    padding: var(--spacing-4xl);
+    text-align: center;
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+}
+
+.sqlagent-unavailable-icon {
+    color: var(--text-tertiary);
+    margin-bottom: var(--spacing-xl);
+}
+
+.sqlagent-unavailable-title {
+    margin-bottom: var(--spacing-lg);
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    color: var(--text-primary);
+}
+
+.sqlagent-unavailable-message {
+    margin-bottom: var(--spacing-2xl);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-relaxed);
+    color: var(--text-secondary);
+}
+
+.sqlagent-unavailable-message code {
+    padding: 0.125rem 0.375rem;
+    font-family: monospace;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}

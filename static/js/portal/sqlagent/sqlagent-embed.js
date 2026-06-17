@@ -7,6 +7,12 @@
  */
 export const SqlAgentEmbed = {
     init() {
+        // Кнопка «Обновить» на баннере «недоступен» (CSP запрещает inline-onclick).
+        const retry = document.getElementById('sqlagentRetry');
+        if (retry) {
+            retry.addEventListener('click', () => window.location.reload());
+        }
+
         const frame = document.getElementById('sqlagentFrame');
         if (!frame) return;
 
