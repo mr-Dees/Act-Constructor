@@ -1,0 +1,33 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}SQL-агент{% endblock %}
+
+{% block content %}
+<!-- Родной UI SQLAgent встроен через iframe на отдельный процесс.
+     Обёртка тянется на всю свободную высоту main-области (flex-колонка). -->
+<div class="sqlagent-embed" style="display:flex; flex-direction:column; flex:1 1 auto; min-height:0;">
+    <iframe id="sqlagentFrame"
+            src="{{ sqlagent_src }}"
+            title="SQL-агент"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups"
+            style="flex:1 1 auto; width:100%; border:0; min-height:0;"></iframe>
+</div>
+{% endblock %}
+
+{% block init_script %}
+<script type="module" nonce="{{ request.state.csp_nonce }}">
+    import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
+    import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
+    import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
+    import { SqlAgentEmbed } from '{{ url_for('static', path='js/portal/sqlagent/sqlagent-embed.js') | versioned }}';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+        if (isAuthorized) {
+            PortalSidebar.init();
+            LandingSettingsManager.init();
+            SqlAgentEmbed.init();
+        }
+    });
+</script>
+{% endblock %}
