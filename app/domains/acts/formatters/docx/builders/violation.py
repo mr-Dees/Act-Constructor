@@ -55,8 +55,14 @@ def _data_url_re() -> re.Pattern:
 
 def build_violation(doc: Document, violation: ViolationSchema) -> None:
     """Рендерит нарушение в документ (без заголовка и нумерации)."""
-    _labeled_paragraph(doc, "Нарушено:", violation.violated)
-    _labeled_paragraph(doc, "Установлено:", violation.established)
+    _labeled_paragraph(
+        doc, "Нарушено:", violation.violated,
+        italic=True, size_pt=Sizes.violation_pt,
+    )
+    _labeled_paragraph(
+        doc, "Установлено:", violation.established,
+        italic=True, size_pt=Sizes.violation_pt,
+    )
 
     if violation.descriptionList.enabled:
         for item in violation.descriptionList.items:
@@ -64,7 +70,8 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
             bullet.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             run = bullet.add_run(item)
             run.font.name = Fonts.main
-            run.font.size = Pt(Sizes.body_pt)
+            run.font.size = Pt(Sizes.violation_pt)
+            run.italic = True
 
     # additionalContent (case / image / freeText). Нумерация кейсов сбрасывается
     # после не-кейса — зеркало markdown/text_formatter._add_additional_content.
@@ -74,14 +81,18 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
             if item.type == "case":
                 if item.content:
                     _labeled_paragraph(
-                        doc, f"Кейс {case_number}:", item.content, italic=True,
+                        doc, f"Кейс {case_number}:", item.content,
+                        italic=True, size_pt=Sizes.violation_pt,
                     )
                     case_number += 1
             elif item.type == "image":
                 _add_image(doc, item)
                 case_number = 1
             elif item.type == "freeText":
-                _labeled_paragraph(doc, "", item.content)
+                _labeled_paragraph(
+                    doc, "", item.content,
+                    italic=True, size_pt=Sizes.violation_pt,
+                )
                 case_number = 1
 
     for label, field in [
@@ -119,14 +130,17 @@ def _add_image(doc: Document, item: ViolationContentItemSchema) -> None:
             embedded = True
 
     if not embedded:
-        _labeled_paragraph(doc, "", f"Изображение: {item.filename}")
+        _labeled_paragraph(
+            doc, "", f"Изображение: {item.filename}",
+            italic=True, size_pt=Sizes.violation_pt,
+        )
 
     if item.caption:
         cap_para = doc.add_paragraph()
         cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         cap_run = cap_para.add_run(item.caption)
         cap_run.font.name = Fonts.main
-        cap_run.font.size = Pt(Sizes.body_pt)
+        cap_run.font.size = Pt(Sizes.violation_pt)
         cap_run.italic = True
 
 
@@ -172,8 +186,12 @@ def _labeled_paragraph(
     body: str,
     *,
     italic: bool = False,
+    size_pt: int = Sizes.body_pt,
 ) -> None:
-    """Параграф «Label_underlined body_plain»."""
+    """Параграф «Label_underlined body_plain».
+
+    italic ставится и на метку, и на тело; size_pt задаёт размер обоих run'ов.
+    """
     if not body and not label:
         return
     para = doc.add_paragraph()
@@ -181,12 +199,12 @@ def _labeled_paragraph(
     if label:
         label_run = para.add_run(label + " ")
         label_run.font.name = Fonts.main
-        label_run.font.size = Pt(Sizes.body_pt)
+        label_run.font.size = Pt(size_pt)
         label_run.underline = True
         if italic:
             label_run.italic = True
     body_run = para.add_run(body)
     body_run.font.name = Fonts.main
-    body_run.font.size = Pt(Sizes.body_pt)
-    if italic and not label:
+    body_run.font.size = Pt(size_pt)
+    if italic:
         body_run.italic = True
