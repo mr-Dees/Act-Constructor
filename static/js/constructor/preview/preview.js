@@ -9,6 +9,7 @@ import { decideBlockPatch } from './preview-block-routing.js';
 import { PreviewTableRenderer } from './preview-table-renderer.js';
 import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
+import { PreviewCoverRenderer } from './preview-cover-renderer.js';
 import { AppState, _unwrap } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
@@ -341,14 +342,23 @@ export class PreviewManager {
     }
 
     /**
-     * Рендерит заголовок документа
+     * Рендерит шапку акта (cover-блок) вместо слова «АКТ».
+     *
+     * Управляется тумблером настроек showActHeader (по умолчанию true). Настройку
+     * читаем защищённо: SettingsMenuManager может ещё не подхватить опцию (её
+     * добавляет другой модуль) — отсутствие трактуем как «включено».
+     *   - настройка включена + есть window.actMetadata → рендерим шапку;
+     *   - метаданных нет → мягкая деградация, ничего не выводим (не падаем);
+     *   - настройка выключена → не выводим ничего (ни шапки, ни «АКТ»).
      * @private
-     * @param {HTMLElement} container - Контейнер для заголовка
+     * @param {HTMLElement} container - Контейнер для шапки
      */
     static _renderTitle(container) {
-        const title = document.createElement('h1');
-        title.textContent = 'АКТ';
-        container.appendChild(title);
+        const showHeader = window.SettingsMenuManager?.getSettings?.().showActHeader ?? true;
+        if (!showHeader) return;
+
+        const cover = PreviewCoverRenderer.create(window.actMetadata);
+        if (cover) container.appendChild(cover);
     }
 
     /**
