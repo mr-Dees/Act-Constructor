@@ -6,7 +6,6 @@
  * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подписи-ярлыки
  * остаются превью-стилем (решение Д.3 — паритет данных, не букв подписей).
  */
-import { SafeHTML } from '../../shared/sanitize.js';
 import { getImageLimits } from '../violation/violation-image-validator.js';
 import {
     CONTENT_TYPE_CASE,
@@ -22,20 +21,25 @@ const SHEET_HEIGHT_MM = 297;
  * Семантика нумерации кейсов и сброса счётчиков — как в
  * docx/builders/violation.py и MD/TXT-форматтерах.
  *
+ * Флаг `small` помечает поля, которые в Word рендерятся 9pt-курсивом
+ * (Нарушено/Установлено/descriptionList/additionalContent — см. styles.Sizes.
+ * violation_pt). Поля «Причины/Последствия/Ответственный/Рекомендации» — обычный
+ * текст листа (12pt, без курсива), поэтому `small: false`.
+ *
  * @param {Object} violation - Данные нарушения
- * @returns {Array<Object>} Строки: {type:'line', label, text} |
- *          {type:'list', label, items} | {type:'image', item}
+ * @returns {Array<Object>} Строки: {type:'line', label, text, small} |
+ *          {type:'list', label, items, small} | {type:'image', item}
  */
 export function collectViolationLines(violation) {
     const lines = [];
 
-    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '—' });
-    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '—' });
+    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '—', small: true });
+    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '—', small: true });
 
     if (violation.descriptionList?.enabled) {
         const items = (violation.descriptionList.items || []).filter(item => item && item.trim());
         if (items.length > 0) {
-            lines.push({ type: 'list', label: 'В том числе', items });
+            lines.push({ type: 'list', label: 'В том числе', items, small: true });
         }
     }
 
@@ -45,7 +49,7 @@ export function collectViolationLines(violation) {
         for (const item of violation.additionalContent.items || []) {
             if (item.type === CONTENT_TYPE_CASE) {
                 if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content });
+                    lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content, small: true });
                     caseNumber++;
                 }
             } else if (item.type === CONTENT_TYPE_IMAGE) {
@@ -53,7 +57,7 @@ export function collectViolationLines(violation) {
                 caseNumber = 1;
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
                 if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content });
+                    lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content, small: true });
                     textNumber++;
                 }
                 caseNumber = 1;
@@ -70,7 +74,7 @@ export function collectViolationLines(violation) {
     for (const [key, label] of optionalFields) {
         const field = violation[key];
         if (field?.enabled && field?.content) {
-            lines.push({ type: 'line', label, text: field.content });
+            lines.push({ type: 'line', label, text: field.content, small: false });
         }
     }
 
@@ -105,9 +109,9 @@ export class PreviewViolationRenderer {
 
         for (const line of collectViolationLines(violation)) {
             if (line.type === 'line') {
-                this._addLine(container, line.label, line.text);
+                this._addLine(container, line.label, line.text, line.small);
             } else if (line.type === 'list') {
-                this._addList(container, line.label, line.items);
+                this._addList(container, line.label, line.items, line.small);
             } else if (line.type === 'image') {
                 this._addImage(container, line.item);
             }
@@ -117,14 +121,22 @@ export class PreviewViolationRenderer {
     }
 
     /**
-     * Добавляет строку «Метка: полный текст»
+     * Добавляет абзац «Метка_подчёркнута полный текст» (паритет с DOCX:
+     * label-run подчёркнут, body-run обычный). `small` → 9pt-курсив-группа.
      * @private
      */
-    static _addLine(container, label, text) {
+    static _addLine(container, label, text, small) {
         const line = document.createElement('div');
-        line.className = 'preview-violation-line';
-        // label статичен; text — пользовательское поле нарушения, escape перед склейкой.
-        line.innerHTML = `${label}: ${SafeHTML.escapeHtml(text)}`;
+        line.className = small ? 'preview-violation-line preview-violation-line--small'
+                               : 'preview-violation-line';
+        if (label) {
+            const labelEl = document.createElement('span');
+            labelEl.className = 'preview-violation-label';
+            labelEl.textContent = `${label}: `;
+            line.appendChild(labelEl);
+        }
+        // text — пользовательское поле нарушения; вставляем как текст-ноду (без HTML).
+        line.appendChild(document.createTextNode(text));
         container.appendChild(line);
     }
 
@@ -132,14 +144,19 @@ export class PreviewViolationRenderer {
      * Добавляет полный список описаний (паритет с буллетами DOCX)
      * @private
      */
-    static _addList(container, label, items) {
+    static _addList(container, label, items, small) {
         const line = document.createElement('div');
-        line.className = 'preview-violation-line';
-        line.textContent = `${label}:`;
+        line.className = small ? 'preview-violation-line preview-violation-line--small'
+                               : 'preview-violation-line';
+        const labelEl = document.createElement('span');
+        labelEl.className = 'preview-violation-label';
+        labelEl.textContent = `${label}:`;
+        line.appendChild(labelEl);
         container.appendChild(line);
 
         const list = document.createElement('ul');
-        list.className = 'preview-violation-desclist';
+        list.className = small ? 'preview-violation-desclist preview-violation-desclist--small'
+                               : 'preview-violation-desclist';
         for (const item of items) {
             const li = document.createElement('li');
             li.textContent = item;
@@ -160,7 +177,7 @@ export class PreviewViolationRenderer {
         if (!item.url) {
             // Пустой url (черновик) → плейсхолдер, как в DOCX/MD/TXT.
             const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line';
+            placeholder.className = 'preview-violation-line preview-violation-line--small';
             placeholder.textContent = `Изображение: ${item.filename || ''}`;
             wrap.appendChild(placeholder);
             container.appendChild(wrap);
@@ -182,7 +199,7 @@ export class PreviewViolationRenderer {
         }
         img.onerror = () => {
             const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line';
+            placeholder.className = 'preview-violation-line preview-violation-line--small';
             placeholder.textContent = `Изображение: ${item.filename || ''}`;
             wrap.replaceChildren(placeholder);
         };
