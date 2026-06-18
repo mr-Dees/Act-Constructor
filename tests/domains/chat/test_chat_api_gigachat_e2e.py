@@ -89,7 +89,6 @@ async def test_gigachat_orchestrator_executes_tool_round():
         api_base="http://liveaccess/v1/gc",
         api_key=SecretStr("t"),
         model="GigaChat-3-Ultra",
-        streaming_enabled=True,  # будет проигнорирован для gigachat
         max_tool_rounds=2,
     )
 

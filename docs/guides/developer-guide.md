@@ -2888,7 +2888,6 @@ CHAT__PROFILE=gigachat
 CHAT__API_BASE=http://liveaccess/v1/gc              # БЕЗ /chat/completions
 CHAT__API_KEY=${JPY_API_TOKEN}                      # внутренний токен из окружения JupyterHub
 CHAT__MODEL=GigaChat-3-Ultra
-CHAT__STREAMING_ENABLED=false                       # proxy не поддерживает SSE (422 EventException)
 ```
 
 GigaChat-proxy частично OpenAI-совместим. Различия (`tools[]`↔`functions[]`, `tool_calls[]`↔singular `function_call`, dict-args↔JSON-args, отсутствие streaming) изолированы в `app/domains/chat/services/gigachat_adapter.py`. Ограничение: 1 function_call за раунд (оркестратор и так работает по одному tool за итерацию). Подробности и матрица «симптом → причина → решение» — §7.1a.
@@ -2898,7 +2897,6 @@ GigaChat-proxy частично OpenAI-совместим. Различия (`to
 **Типичные ошибки:**
 
 - `CHAT__API_BASE` с хвостом `/chat/completions` → 404 (SDK добавляет путь сам).
-- Незакомментированный `CHAT__STREAMING_ENABLED=true` для `gigachat` → молча игнорируется адаптером, в логи уходит одно warning на процесс.
 - Пустые `API_BASE`/`API_KEY`/`MODEL` → чат уходит в режим заглушки (`/api/v1/chat/health` вернёт `ok: false`).
 - `${JPY_API_TOKEN}` подставился пустым → переменной нет в окружении процесса (а не в `.env`-файле): проверь `echo $JPY_API_TOKEN` в той же сессии, откуда стартует AW.
 
@@ -3036,9 +3034,6 @@ def test_chat_settings_defaults():
 | `CHAT__MODEL` | str | `gpt-4o` | Модель |
 | `CHAT__TEMPERATURE` | float | `0.1` | Температура (0-2) |
 | `CHAT__MAX_TOOL_ROUNDS` | int | `5` | Макс. раундов tool-calling |
-| `CHAT__STREAMING_ENABLED` | bool | `True` | Legacy-флаг; клиентского стриминга нет (POST + polling), `run_agent_loop` делает non-streaming LLM-вызов |
-| `CHAT__DELTA_CHUNK_FLUSH_BYTES` | int | `65536` | Legacy: порог буфера delta-блока (байт) при внутренней буферизации LLM-чанков |
-| `CHAT__DELTA_BLOCK_MAX_BYTES` | int | `5242880` | Legacy: общий лимит на один блок (5 МБ); при превышении блок усекается маркером |
 | `CHAT__REQUEST_TIMEOUT` | int | `60` | Timeout запроса к LLM (сек) |
 | `CHAT__TOOL_EXECUTION_TIMEOUT` | int | `30` | Timeout инструмента (сек) |
 | `CHAT__SMALLTALK_MODE` | str | `local` | `local` — отвечает локальный LLM; `forward` — пробрасывать всё агенту |

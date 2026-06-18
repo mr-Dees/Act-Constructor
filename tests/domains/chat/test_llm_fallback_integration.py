@@ -59,7 +59,6 @@ def _settings_with_fallback(
         fallback_model="fallback-model",
         circuit_breaker_failure_threshold=failure_threshold,
         circuit_breaker_recovery_timeout_sec=30,
-        streaming_enabled=True,
         max_tool_rounds=2,
         tool_execution_timeout=5,
         retry=_no_retry(),

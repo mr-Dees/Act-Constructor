@@ -38,7 +38,6 @@ def settings():
         api_key="test-key",
         max_tool_rounds=3,
         tool_execution_timeout=5,
-        streaming_enabled=True,
     )
 
 
@@ -1146,7 +1145,7 @@ class TestFallbackResponse:
 
 @pytest.mark.asyncio
 async def test_orchestrator_disables_streaming_for_gigachat_profile():
-    """Профиль gigachat принудительно non-streaming даже при streaming_enabled=True."""
+    """Профиль gigachat: оркестратор не вызывает LLM со stream=True (non-streaming)."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from pydantic import SecretStr
@@ -1159,7 +1158,6 @@ async def test_orchestrator_disables_streaming_for_gigachat_profile():
         api_base="http://liveaccess/v1/gc",
         api_key=SecretStr("t"),
         model="GigaChat-3-Ultra",
-        streaming_enabled=True,  # включён в настройках
     )
     msg_service = MagicMock()
     msg_service.load_history_for_llm = AsyncMock(return_value=[])
