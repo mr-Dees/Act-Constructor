@@ -37,6 +37,7 @@ function makeStubElement() {
 globalThis.window = globalThis;
 globalThis.document = {
   createElement: () => makeStubElement(),
+  createTextNode: (text) => ({ nodeType: 3, textContent: String(text) }),
   addEventListener() {},
   removeEventListener() {},
   querySelector: () => null,

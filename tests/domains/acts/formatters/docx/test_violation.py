@@ -1,7 +1,7 @@
 """Тесты builder'а нарушений."""
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Emu, Twips
+from docx.shared import Emu, Pt, Twips
 
 from app.domains.acts.formatters.docx.builders.violation import (
     _USABLE_WIDTH_TWIPS,
@@ -9,6 +9,7 @@ from app.domains.acts.formatters.docx.builders.violation import (
     _scale_picture,
     build_violation,
 )
+from app.domains.acts.formatters.docx.styles import Sizes
 from app.domains.acts.schemas.act_content import (
     ViolationAdditionalContentSchema,
     ViolationContentItemSchema,
@@ -55,6 +56,54 @@ def test_violation_renders_required_fields(doc):
     assert "Текст нарушения" in text
     assert "Установлено:" in text
     assert "Текст установлено" in text
+
+
+def _runs_for_label(doc, label):
+    """Метка + следующий за ней body-run в одном абзаце."""
+    for p in doc.paragraphs:
+        runs = p.runs
+        for i, r in enumerate(runs):
+            if r.text.strip() == label:
+                return runs[i], runs[i + 1] if i + 1 < len(runs) else None
+    return None, None
+
+
+def test_violated_established_are_9pt_italic(doc):
+    """«Нарушено:»/«Установлено:» — 9pt курсивом, метка подчёркнута."""
+    build_violation(doc, _v())
+    for label in ("Нарушено:", "Установлено:"):
+        label_run, body_run = _runs_for_label(doc, label)
+        assert label_run is not None and body_run is not None
+        assert label_run.font.size == Pt(Sizes.violation_pt)
+        assert label_run.italic is True
+        assert label_run.underline is True
+        assert body_run.font.size == Pt(Sizes.violation_pt)
+        assert body_run.italic is True
+
+
+def test_description_list_bullets_9pt_italic(doc):
+    """Bullets из descriptionList — 9pt курсивом."""
+    violation = _v(descriptionList={"enabled": True, "items": ["Пункт-A", "Пункт-B"]})
+    build_violation(doc, violation)
+    bullet_runs = [
+        r for p in doc.paragraphs for r in p.runs
+        if r.text.strip() in {"Пункт-A", "Пункт-B"}
+    ]
+    assert len(bullet_runs) == 2
+    assert all(r.font.size == Pt(Sizes.violation_pt) for r in bullet_runs)
+    assert all(r.italic for r in bullet_runs)
+
+
+def test_reasons_block_stays_12pt_non_italic(doc):
+    """Причины/Последствия/Ответственный/Рекомендации — 12pt без курсива."""
+    build_violation(doc, _v())
+    for label in ("Причины:", "Последствия:", "Ответственный:", "Рекомендации:"):
+        label_run, body_run = _runs_for_label(doc, label)
+        assert label_run is not None and body_run is not None
+        assert label_run.font.size == Pt(Sizes.body_pt)
+        assert not label_run.italic
+        assert body_run.font.size == Pt(Sizes.body_pt)
+        assert not body_run.italic
 
 
 def test_violation_has_no_header_paragraph(doc):
@@ -129,7 +178,9 @@ def test_image_caption_italic_centered_below(doc):
     build_violation(doc, _v_with_items(_img_item(caption="Скриншот экрана")))
     cap_para = next(p for p in doc.paragraphs if "Скриншот экрана" in p.text)
     assert cap_para.alignment == WD_ALIGN_PARAGRAPH.CENTER
-    assert all(r.italic for r in cap_para.runs if r.text.strip())
+    cap_runs = [r for r in cap_para.runs if r.text.strip()]
+    assert all(r.italic for r in cap_runs)
+    assert all(r.font.size == Pt(Sizes.violation_pt) for r in cap_runs)
 
 
 def test_broken_base64_renders_placeholder(doc):
@@ -242,6 +293,43 @@ def test_case_numbering_resets_after_non_case_item(doc):
         if r.text.strip().startswith("Кейс")
     ]
     assert labels == ["Кейс 1: ", "Кейс 1: "]
+
+
+def test_case_runs_are_9pt_italic(doc):
+    """Кейсы — 9pt курсивом (метка и тело), метка подчёркнута."""
+    build_violation(doc, _v_with_items(_case("Содержимое кейса")))
+    label_run, body_run = _runs_for_label(doc, "Кейс 1:")
+    assert label_run is not None and body_run is not None
+    assert label_run.font.size == Pt(Sizes.violation_pt)
+    assert label_run.italic is True
+    assert label_run.underline is True
+    assert body_run.font.size == Pt(Sizes.violation_pt)
+    assert body_run.italic is True
+
+
+def test_free_text_run_is_9pt_italic(doc):
+    """freeText — 9pt курсивом (без метки)."""
+    item = ViolationContentItemSchema(
+        id="ft1", type="freeText", content="Свободный текст",
+    )
+    build_violation(doc, _v_with_items(item))
+    run = next(
+        r for p in doc.paragraphs for r in p.runs
+        if r.text.strip() == "Свободный текст"
+    )
+    assert run.font.size == Pt(Sizes.violation_pt)
+    assert run.italic is True
+
+
+def test_image_placeholder_is_9pt_italic(doc):
+    """Текстовый плейсхолдер «Изображение: …» — 9pt курсивом."""
+    build_violation(doc, _v_with_items(_img_item(url="")))
+    run = next(
+        r for p in doc.paragraphs for r in p.runs
+        if r.text.strip().startswith("Изображение:")
+    )
+    assert run.font.size == Pt(Sizes.violation_pt)
+    assert run.italic is True
 
 
 def test_empty_case_not_rendered_and_not_numbered(doc):

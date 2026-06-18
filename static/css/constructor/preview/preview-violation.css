@@ -1,60 +1,66 @@
 /*
- * Предпросмотр нарушения
- * Стили для отображения нарушения в области предпросмотра документа
+ * Предпросмотр нарушения (паритет с Word-экспортом)
+ *
+ * Нарушение рендерится как последовательность обычных абзацев документа
+ * (метка + текст), БЕЗ «блочной» плашки — точно как в DOCX-билдере
+ * (app/domains/acts/formatters/docx/builders/violation.py):
+ *   - поля Нарушено/Установлено/descriptionList/additionalContent — 9pt курсив,
+ *     выравнивание по ширине (justify), метки подчёркнуты;
+ *   - поля Причины/Последствия/Ответственный/Рекомендации — обычный текст листа
+ *     (12pt, без курсива), justify, метки подчёркнуты.
+ *
+ * Размер 9pt задаётся в pt напрямую — той же единицей, что и таблицы листа
+ * (preview-page.css: .preview-table → 9pt). База листа .preview-sheet — 12pt,
+ * Word-эталон: тело 12pt → нарушения 9pt (Sizes.violation_pt в styles.py).
  */
 
-/* Контейнер нарушения в предпросмотре */
+/* Контейнер нарушения — нейтральная обёртка абзацев, без плашки. */
 .preview-violation {
-    margin: var(--spacing) 0;
-    padding: var(--spacing);
-    font-size: var(--font-size-sm);
-    line-height: var(--line-height-relaxed);
-    color: var(--text-primary);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-sm);
-    border-left: var(--border-width-violation) solid var(--primary);
+    color: inherit;
 }
 
-/* Первое нарушение без верхнего отступа */
-.preview-violation:first-child {
-    margin-top: 0;
-}
-
-/* Последнее нарушение без нижнего отступа */
-.preview-violation:last-child {
-    margin-bottom: 0;
-}
-
-/* Заголовок нарушения */
-.preview-violation-title {
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
-    margin-bottom: var(--spacing-xs);
-    font-size: var(--font-size-base);
-}
-
-/* Строка информации о нарушении.
-   Полные тексты (паритет с DOCX): переносы строк textarea сохраняются. */
+/* Абзац «Метка: текст». Justify + сохранение переносов textarea. */
 .preview-violation-line {
-    margin: var(--spacing-xs) 0;
-    color: var(--text-primary);
-    display: flex;
-    gap: var(--spacing-xs);
+    margin: 0 0 var(--spacing-xs) 0;
+    text-align: justify;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-/* Полный список описаний (descriptionList) — паритет с буллетами DOCX */
+/* Поля нарушения 9pt-курсивом (Нарушено/Установлено/описание/доп.контент). */
+.preview-violation-line--small {
+    font-size: 9pt;
+    font-style: italic;
+}
+
+/* Метка поля — подчёркнута inline (label-run underline в DOCX). */
+.preview-violation-label {
+    text-decoration: underline;
+}
+
+/* Маркированный список описаний (descriptionList) — паритет с List Bullet DOCX. */
 .preview-violation-desclist {
-    margin: var(--spacing-xs) 0;
-    margin-left: var(--spacing-xl);
+    margin: 0 0 var(--spacing-xs) 0;
+    padding-left: var(--spacing-xl);
+    list-style: disc;
+    text-align: justify;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.preview-violation-desclist li {
+    margin: 0;
+}
+
+/* Пункты списка из «малой» группы — те же 9pt курсивом. */
+.preview-violation-desclist--small {
+    font-size: 9pt;
+    font-style: italic;
 }
 
 /* Картинка дополнительного контента: по центру, не шире контентной области,
    высота ограничена долей листа (Б-1.6, значение приходит inline-стилем
-   из preview-violation-renderer по preview_max_height_percent) */
+   из preview-violation-renderer по preview_max_height_percent). */
 .preview-violation-image-wrap {
     margin: var(--spacing-xs) 0;
     text-align: center;
@@ -64,105 +70,10 @@
     max-width: 100%;
 }
 
-/* Подпись картинки: курсив, по центру (как в DOCX, Б-1.5) */
+/* Подпись картинки: 9pt курсив по центру (как в DOCX, Б-1.5). */
 .preview-violation-caption {
-    margin: var(--spacing-xs) 0;
+    margin: 0 0 var(--spacing-xs) 0;
     text-align: center;
     font-style: italic;
-    color: var(--text-primary);
-}
-
-/* Метка поля */
-.preview-violation-label {
-    color: var(--text-secondary);
-    font-weight: var(--font-weight-medium);
-    min-width: var(--preview-violation-label-width);
-    flex-shrink: 0;
-}
-
-/* Выделенный текст в строке */
-.preview-violation-line strong {
-    color: var(--text-primary);
-    font-weight: var(--font-weight-semibold);
-}
-
-/* Обычный текст в строке */
-.preview-violation-line span {
-    color: var(--text-secondary);
-    flex: 1;
-}
-
-/* Важное нарушение */
-.preview-violation.important {
-    border-left-color: var(--warning);
-    background: var(--warning-subtle);
-}
-
-/* Критическое нарушение */
-.preview-violation.critical {
-    border-left-color: var(--error);
-    background: var(--error-subtle);
-}
-
-/* Описание нарушения */
-.preview-violation-description {
-    margin-top: var(--spacing-sm);
-    padding-top: var(--spacing-sm);
-    border-top: var(--border-width-thin) solid var(--border-light);
-    color: var(--text-secondary);
-    font-size: var(--font-size-xs);
-    line-height: var(--line-height-normal);
-}
-
-/* Вложенный список в нарушении */
-.preview-violation ul,
-.preview-violation ol {
-    margin: var(--spacing-xs) 0;
-    margin-left: var(--spacing-xl);
-}
-
-.preview-violation li {
-    margin-bottom: var(--spacing-xs);
-}
-
-/* Дополнительные материалы нарушения */
-.preview-violation-attachments {
-    margin-top: var(--spacing-sm);
-    padding: var(--spacing-sm);
-    background: var(--bg-primary);
-    border-radius: var(--radius-xs);
-    font-size: var(--font-size-xs);
-}
-
-.preview-violation-attachments-title {
-    font-weight: var(--font-weight-medium);
-    color: var(--text-secondary);
-    margin-bottom: var(--spacing-xs);
-}
-
-.preview-violation-attachment-item {
-    color: var(--text-link);
-    text-decoration: underline;
-    cursor: pointer;
-    display: block;
-    margin: var(--spacing-xs) 0;
-}
-
-.preview-violation-attachment-item:hover {
-    color: var(--text-link-hover);
-}
-
-/* Номер нарушения */
-.preview-violation-number {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--preview-violation-number-size);
-    height: var(--preview-violation-number-size);
-    background: var(--primary);
-    color: var(--text-on-primary);
-    border-radius: var(--radius-full);
-    font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-bold);
-    margin-right: var(--spacing-xs);
+    font-size: 9pt;
 }

@@ -31,6 +31,7 @@ class Sizes:
     """
     body_pt = 12
     label_pt = 12
+    violation_pt = 9  # поля нарушения (Нарушено/Установлено/описание/доп.контент) — 9pt курсивом
     table_data_pt = 9
     table_header_pt = 9
     footnote_pt = 9  # расшифровка сноски — 9pt, как таблицы
