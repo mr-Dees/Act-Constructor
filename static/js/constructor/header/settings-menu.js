@@ -14,7 +14,8 @@ export class SettingsMenuManager {
         theme: 'light',
         downloadPrompt: true,
         autoSave: true,
-        autoSavePeriod: 3
+        autoSavePeriod: 3,
+        showActHeader: true
     };
 
     /** Общий ключ localStorage для баз знаний (синхронизация с порталом) */
@@ -45,6 +46,7 @@ export class SettingsMenuManager {
         const autoSaveToggle = document.getElementById('autoSaveToggle');
         const autoSavePeriodContainer = document.getElementById('autoSavePeriodContainer');
         const autoSavePeriodInput = document.getElementById('autoSavePeriodInput');
+        const showActHeaderToggle = document.getElementById('showActHeaderToggle');
 
         // Показ/скрытие меню при клике на кнопку
         btn?.addEventListener('click', e => {
@@ -76,6 +78,13 @@ export class SettingsMenuManager {
             document.documentElement.classList.toggle('theme-dark', isDark);
             this._state.theme = isDark ? 'dark' : 'light';
             this._saveSettings();
+        });
+
+        // Обработчик переключения отображения шапки акта
+        showActHeaderToggle?.addEventListener('change', () => {
+            this._state.showActHeader = showActHeaderToggle.checked;
+            this._saveSettings();
+            if (window.PreviewManager?.update) window.PreviewManager.update();
         });
 
         // Обработчик настройки предложения загрузки файлов
@@ -112,6 +121,7 @@ export class SettingsMenuManager {
         autoSaveToggle.checked = this._state.autoSave;
         autoSavePeriodInput.value = this._state.autoSavePeriod;
         autoSavePeriodContainer.style.display = this._state.autoSave ? '' : 'none';
+        if (showActHeaderToggle) showActHeaderToggle.checked = this._state.showActHeader;
 
         // Базы знаний AI-ассистента (загружаем ключи из DOM, общий localStorage с порталом)
         this._loadKbKeysFromDOM();
