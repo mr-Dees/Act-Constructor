@@ -46,7 +46,6 @@ def _gigachat_settings(**overrides) -> ChatDomainSettings:
         model="gc-model",
         max_tool_rounds=5,
         tool_execution_timeout=5,
-        streaming_enabled=False,
         temperature=0.0,
     )
     base.update(overrides)

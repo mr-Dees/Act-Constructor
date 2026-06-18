@@ -1,0 +1,50 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}SQL-агент{% endblock %}
+
+{% block content %}
+{% if sqlagent_available %}
+<!-- Родной UI SQLAgent встроен через iframe на отдельный процесс. -->
+<div class="sqlagent-embed">
+    <iframe id="sqlagentFrame"
+            src="{{ sqlagent_src }}"
+            title="SQL-агент"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-modals"></iframe>
+</div>
+{% else %}
+<!-- Процесс SQL-агента не отвечает на своём порту — аккуратный баннер вместо
+     браузерной заглушки «не удаётся установить соединение». -->
+<div class="sqlagent-unavailable">
+    <div class="sqlagent-unavailable-card">
+        <svg class="sqlagent-unavailable-icon" width="56" height="56" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 7c0-1.66 3.58-3 8-3s8 1.34 8 3-3.58 3-8 3-8-1.34-8-3zm0 0v5c0 1.66 3.58 3 8 3s8-1.34 8-3V7M4 12v5c0 1.66 3.58 3 8 3s8-1.34 8-3v-5"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1 class="sqlagent-unavailable-title">SQL-агент сейчас недоступен</h1>
+        <p class="sqlagent-unavailable-message">
+            Сервис не запущен или перезапускается. Запустите процесс SQL-агента
+            на порту <code>{{ sqlagent_port }}</code> и обновите страницу.
+        </p>
+        <button type="button" id="sqlagentRetry" class="btn btn-primary">Обновить</button>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block init_script %}
+<script type="module" nonce="{{ request.state.csp_nonce }}">
+    import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
+    import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
+    import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
+    import { SqlAgentEmbed } from '{{ url_for('static', path='js/portal/sqlagent/sqlagent-embed.js') | versioned }}';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+        if (isAuthorized) {
+            PortalSidebar.init();
+            LandingSettingsManager.init();
+            SqlAgentEmbed.init();
+        }
+    });
+</script>
+{% endblock %}

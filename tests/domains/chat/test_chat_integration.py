@@ -46,7 +46,6 @@ def test_chat_settings_load():
     s = ChatDomainSettings()
     assert s.model == "gpt-4o"
     assert s.max_file_size == 10 * 1024 * 1024
-    assert s.streaming_enabled is True
 
 
 # -------------------------------------------------------------------------

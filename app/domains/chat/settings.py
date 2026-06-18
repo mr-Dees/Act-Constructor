@@ -64,10 +64,13 @@ class ChatDomainSettings(BaseModel):
     # LLM
     model: str = "gpt-4o"
     api_base: str = ""
+    # Можно не хранить сам секрет в .env, а сослаться на переменную окружения:
+    # CHAT__API_KEY=${JPY_API_TOKEN}. .env читается через python-dotenv (интерполяция
+    # ${VAR} включена по умолчанию) → значение подставляется из окружения процесса.
+    # Касается и fallback_api_key. Детали — developer-guide §9.4.1.
     api_key: SecretStr = SecretStr("")
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tool_rounds: int = Field(default=5, gt=0)
-    streaming_enabled: bool = True
     request_timeout: int = Field(default=60, gt=0)
 
     # Fallback-провайдер на случай сбоя primary (circuit breaker).
@@ -176,13 +179,6 @@ class ChatDomainSettings(BaseModel):
     # Максимум одновременных активных запросов к агенту на одного
     # пользователя. При превышении submit бросает ChatLimitError → HTTP 422.
     max_parallel_streams_per_user: int = Field(default=3, ge=1, le=20)
-
-    # Лимиты размера текстовых блоков (защита от self-DoS при гигантских
-    # ответах LLM, особенно reasoning). delta_chunk_flush_bytes — порог
-    # накопления буфера; delta_block_max_bytes — общий лимит на блок,
-    # при превышении блок усекается маркером.
-    delta_chunk_flush_bytes: int = Field(default=65536, ge=1024)
-    delta_block_max_bytes: int = Field(default=5242880, ge=65536)
 
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)

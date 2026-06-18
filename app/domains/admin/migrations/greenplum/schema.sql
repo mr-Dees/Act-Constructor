@@ -35,6 +35,7 @@ FROM (
     UNION ALL SELECT 'ЦК финансовый результат', 'ck_fin_res', 'Доступ к ЦК Фин.Рез.'
     UNION ALL SELECT 'ЦК клиентский опыт', 'ck_client_exp', 'Доступ к ЦК Клиентский опыт'
     UNION ALL SELECT 'Чат-ассистент', 'chat', 'Доступ к AI-чату'
+    UNION ALL SELECT 'SQL-агент', 'sqlagent', 'Доступ к SQL-агенту'
 ) AS s
 WHERE NOT EXISTS (
     SELECT 1 FROM {SCHEMA}.{PREFIX}roles r WHERE r.name = s.name
