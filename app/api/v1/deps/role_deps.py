@@ -22,7 +22,7 @@ logger = logging.getLogger("audit_workstation.api.deps.roles")
 _roles_cache: TTLCache = TTLCache(maxsize=256, ttl=5)
 
 # Роли, автоматически назначаемые пользователю при первом обращении.
-DEFAULT_ROLE_NAMES: tuple[str, ...] = ("Цифровой акт", "Чат-ассистент")
+DEFAULT_ROLE_NAMES: tuple[str, ...] = ("Цифровой акт", "Чат-ассистент", "SQL-агент")
 
 
 async def get_user_roles(username: str = Depends(get_username)) -> list[dict]:
