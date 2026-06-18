@@ -64,6 +64,10 @@ class ChatDomainSettings(BaseModel):
     # LLM
     model: str = "gpt-4o"
     api_base: str = ""
+    # Можно не хранить сам секрет в .env, а сослаться на переменную окружения:
+    # CHAT__API_KEY=${JPY_API_TOKEN}. .env читается через python-dotenv (интерполяция
+    # ${VAR} включена по умолчанию) → значение подставляется из окружения процесса.
+    # Касается и fallback_api_key. Детали — developer-guide §9.4.1.
     api_key: SecretStr = SecretStr("")
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tool_rounds: int = Field(default=5, gt=0)
