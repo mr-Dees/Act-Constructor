@@ -419,6 +419,11 @@ Object.assign(AppState, {
             }
         }
 
+        // Нельзя переносить нарушения в поддерево пункта Process Mining.
+        if (this._isUnderProcessMining(newParent.id) && this._subtreeHasViolations(draggedNode)) {
+            return ValidationCore.failure('В пункте «Process Mining» нельзя размещать нарушения');
+        }
+
         // Запоминаем предка 5.X до перемещения (для пересчёта сводных таблиц)
         const oldAncestor5x = this._findFirstLevelAncestorUnder5(draggedNode.id);
 
@@ -989,6 +994,16 @@ Object.assign(AppState, {
         this._indexNodeAdded(node, root);
         this.generateNumbering();
         return ValidationCore.success();
+    },
+
+    /**
+     * Есть ли в поддереве узел-нарушение.
+     * @param {Object} node
+     * @returns {boolean}
+     */
+    _subtreeHasViolations(node) {
+        if (node.type === AppConfig.nodeTypes.VIOLATION) return true;
+        return (node.children || []).some(c => this._subtreeHasViolations(c));
     },
 
     /**

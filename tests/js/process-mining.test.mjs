@@ -85,3 +85,22 @@ test('перенос пункта на 0 уровень запрещён', async
     // Узел остался под разделом 5
     assert.equal(AppState.findParentNode(child.id).id, '5');
 });
+
+test('нельзя добавить нарушение под пунктом Process Mining', () => {
+    AppState.initializeTree(true);
+    AppState.addProcessMiningSection();
+    const res = AppState.addViolationToNode('6');
+    assert.equal(res.valid, false);
+});
+
+test('нельзя перенести нарушение под пункт Process Mining', async () => {
+    AppState.initializeTree(true);
+    AppState.addProcessMiningSection();
+    // нарушение под разделом 4
+    assert.ok(AppState.addNode('4', 'Контейнер', true).valid);
+    const cont = AppState.findNodeById('4').children.at(-1);
+    assert.ok(AppState.addViolationToNode(cont.id).valid);
+    const vio = AppState.findNodeById(cont.id).children.at(-1);
+    const res = await AppState.moveNode(vio.id, '6', 'child');
+    assert.equal(res.valid, false);
+});
