@@ -85,6 +85,15 @@ export function isRiskTable(node) {
 }
 
 /**
+ * Сводная (metrics) таблица: закреплённая, но не риск (metrics / mainMetrics).
+ * @param {Object} node
+ * @returns {boolean}
+ */
+export function isMetricsTable(node) {
+    return isPinnedTable(node) && !isRiskTable(node);
+}
+
+/**
  * Реконсайлер подвида таблицы (kind) при загрузке акта.
  *
  * Синхронизирует kind node↔table: узел — источник истины; если подвид задан

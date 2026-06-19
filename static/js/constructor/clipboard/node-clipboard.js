@@ -30,7 +30,7 @@ import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { getBlockType, isLeafBlockType } from '../block-types.js';
-import { isPinnedTable } from '../table/table-kind.js';
+import { isPinnedTable, isRiskTable, isMetricsTable } from '../table/table-kind.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { formatMb } from '../../shared/format-units.js';
@@ -223,12 +223,15 @@ export const NodeClipboard = {
         const rawNode = AppState._findNodeRaw?.(nodeId);
         if (!rawNode) return false;
 
-        if (rawNode.protected) {
-            Notifications.error('Защищённые разделы нельзя копировать');
+        // Сводные (metrics) таблицы копировать нельзя — они авто-деривируются.
+        if (isMetricsTable(rawNode)) {
+            Notifications.error('Сводные таблицы (метрики) копировать нельзя');
             return false;
         }
-        if (isPinnedTable(rawNode)) {
-            Notifications.error('Закреплённые таблицы (метрики/риски) нельзя копировать');
+        // Защищённые узлы нельзя копировать; исключение — таблицы рисков
+        // (protected, но допускают копирование как корень выделения).
+        if (rawNode.protected && !isRiskTable(rawNode)) {
+            Notifications.error('Защищённые разделы нельзя копировать');
             return false;
         }
 
@@ -537,7 +540,7 @@ export const NodeClipboard = {
      */
     refreshMenuState(node) {
         if (this._copyMenuItem?.classList) {
-            const cannotCopy = !node || node.protected || isPinnedTable(node);
+            const cannotCopy = !node || isMetricsTable(node) || (node.protected && !isRiskTable(node));
             this._copyMenuItem.classList.toggle('disabled', !!cannotCopy);
         }
         if (this._pasteMenuItem?.classList) {
