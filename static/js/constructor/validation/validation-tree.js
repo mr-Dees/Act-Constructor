@@ -39,12 +39,17 @@ export const ValidationTree = {
 
     /**
      * Проверяет возможность добавления соседнего узла.
-     * Узлы 0 уровня обрабатываются в меню (пункт Process Mining), здесь без
-     * спец-логики.
+     * На 0 уровне (родитель — root) штатно добавляется только пункт Process
+     * Mining (через AppState.addProcessMiningSection из меню). Прямое добавление
+     * обычного соседа на верхний уровень запрещено и здесь, на уровне состояния.
      * @param {string} nodeId
      * @returns {Object}
      */
     canAddSibling(nodeId) {
+        const parent = AppState.findParentNode(nodeId);
+        if (parent?.id === 'root') {
+            return ValidationCore.failure(AppConfig.tree.validation.cannotAddFirstLevelSibling);
+        }
         return ValidationCore.success();
     },
 

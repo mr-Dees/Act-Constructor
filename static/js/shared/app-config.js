@@ -405,6 +405,7 @@ export class AppConfig {
         validation: {
             maxDepthExceeded: (depth) => `Достигнута максимальная вложенность (${depth} уровней: ${'.'.repeat(depth - 1)}*)`,
             cannotMoveToFirstLevel: 'Нельзя переносить пункты на верхний уровень',
+            cannotAddFirstLevelSibling: 'На верхнем уровне можно добавить только пункт Process Mining',
             cannotMoveToSelf: 'Нельзя переместить узел в самого себя',
             cannotMoveProtected: 'Нельзя перемещать защищенный элемент',
             cannotMoveToDescendant: 'Нельзя переместить узел внутрь своего потомка',

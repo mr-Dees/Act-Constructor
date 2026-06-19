@@ -5,6 +5,7 @@ import { AppState } from '../../static/js/constructor/state/state-core.js';
 import '../../static/js/constructor/state/state-tree.js';
 import '../../static/js/constructor/state/state-content.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
+import { ChangelogTracker } from '../../static/js/constructor/changelog-tracker.js';
 
 beforeEach(() => {
     AppState.treeData = null;
@@ -112,4 +113,33 @@ test('addProcessMiningSection не создаёт дубликат id при н�
     const res = AppState.addProcessMiningSection();
     assert.equal(res.valid, false);
     assert.equal(AppState.treeData.children.filter(c => c.id === '6').length, 1);
+});
+
+test('сериализация сохраняет special и titleLocked пункта Process Mining', () => {
+    AppState.initializeTree(true);
+    AppState.addProcessMiningSection();
+
+    const exported = AppState.exportData();
+    const pmSerialized = exported.tree.children.find(c => c.id === '6');
+    assert.ok(pmSerialized, 'пункт Process Mining отсутствует в сериализации');
+    // Без этих полей после reload терялись бы блокировка нарушений/рисков
+    // (_isUnderProcessMining) и фиксация заголовка.
+    assert.equal(pmSerialized.special, 'process_mining');
+    assert.equal(pmSerialized.titleLocked, true);
+});
+
+test('addProcessMiningSection пишет запись add_node в changelog', () => {
+    AppState.initializeTree(true);
+    const calls = [];
+    const orig = ChangelogTracker.record;
+    ChangelogTracker.record = (...a) => calls.push(a);
+    try {
+        AppState.addProcessMiningSection();
+    } finally {
+        ChangelogTracker.record = orig;
+    }
+    assert.ok(
+        calls.some(([op, id]) => op === 'add_node' && id === '6'),
+        'нет записи add_node для пункта Process Mining',
+    );
 });

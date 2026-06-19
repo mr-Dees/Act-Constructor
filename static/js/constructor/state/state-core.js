@@ -616,6 +616,12 @@ export const AppState = {
         if (node.tb?.length) serialized.tb = node.tb;
         if (node.auditPointId) serialized.auditPointId = node.auditPointId;
 
+        // Спец-флаги опционального пункта Process Mining. Без сериализации после
+        // reload терялись бы: special → _isUnderProcessMining переставал блокировать
+        // нарушения/риски под пунктом; titleLocked → фиксация заголовка.
+        if (node.special) serialized.special = node.special;
+        if (node.titleLocked) serialized.titleLocked = node.titleLocked;
+
         // Подвид таблицы (источник истины — узел). Без него после reload
         // спецтаблицы деградируют до обычных (закрепление/каскад/защита).
         // 'regular' = отсутствие подвида — не сериализуется.

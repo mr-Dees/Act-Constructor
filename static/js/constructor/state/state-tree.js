@@ -11,7 +11,7 @@ import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { UndoDeleteManager } from './undo-delete.js';
 import { AppState, _unwrap } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { KIND_METRICS, getTableKind, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
@@ -659,28 +659,39 @@ Object.assign(AppState, {
         }
         // Вторая таблица того же типа на одном узле запрещена.
         const hasSameKind = (target.children || []).some(
-            c => c.type === AppConfig.nodeTypes.TABLE && c.kind === riskKind
+            c => c.type === AppConfig.nodeTypes.TABLE && getTableKind(c) === riskKind
         );
         if (hasSameKind) {
             return ValidationCore.failure('На одном пункте может быть только одна таблица риска этого типа');
         }
         // Согласованность уровней: все риски §5 — либо на пунктах, либо на подпунктах.
+        const {hasPoint, hasSubpoint} = this._collectSection5RiskLevels();
+        if ((hasSubpoint && targetIsPoint) || (hasPoint && targetIsSubpoint)) {
+            return ValidationCore.failure('Нельзя: таблицы рисков окажутся на разных уровнях раздела 5');
+        }
+        return ValidationCore.success();
+    },
+
+    /**
+     * Считывает уровни таблиц рисков, уже размещённых в разделе 5 (read-only).
+     * Возвращает, есть ли риски на уровне пунктов (5.X) и/или подпунктов (5.X.Y+).
+     * Единый источник для проверок размещения рисков при вставке.
+     * @returns {{hasPoint: boolean, hasSubpoint: boolean}}
+     */
+    _collectSection5RiskLevels() {
         const node5 = this.findNodeById('5');
-        let existingPoint = false, existingSubpoint = false;
+        let hasPoint = false, hasSubpoint = false;
         const walk = (node) => {
             if ((!node.type || node.type === AppConfig.nodeTypes.ITEM) && /^5\.\d+/.test(node.number || '')) {
                 if ((node.children || []).some(c => this._isRiskTable(c))) {
-                    if ((node.number.split('.').length - 1) === 1) existingPoint = true;
-                    else existingSubpoint = true;
+                    if ((node.number.split('.').length - 1) === 1) hasPoint = true;
+                    else hasSubpoint = true;
                 }
             }
             (node.children || []).forEach(walk);
         };
         if (node5) (node5.children || []).forEach(walk);
-        if ((existingSubpoint && targetIsPoint) || (existingPoint && targetIsSubpoint)) {
-            return ValidationCore.failure('Нельзя: таблицы рисков окажутся на разных уровнях раздела 5');
-        }
-        return ValidationCore.success();
+        return {hasPoint, hasSubpoint};
     },
 
     _checkSection5RiskConstraints(draggedNode, newParent) {
@@ -1040,6 +1051,11 @@ Object.assign(AppState, {
         root.children.push(node);
         this._indexNodeAdded(node, root);
         this.generateNumbering();
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_node', node.id, node.label, {parentId: 'root'});
+        }
+
         return ValidationCore.success();
     },
 

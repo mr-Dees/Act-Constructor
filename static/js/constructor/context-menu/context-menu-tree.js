@@ -92,6 +92,12 @@ export class TreeContextMenu {
             addChildItem.classList.toggle('disabled', !!isAddChildBlocked);
         }
 
+        // Под пунктом Process Mining нельзя добавлять нарушения (паритет с addViolationToNode).
+        const addViolationItem = this.menu.querySelector('[data-action="add-violation"]');
+        if (addViolationItem) {
+            addViolationItem.classList.toggle('disabled', !!AppState._isUnderProcessMining(nodeId));
+        }
+
         // На 0 уровне «Добавить соседний пункт» превращается в «Добавить пункт: Process Mining».
         const siblingItem = this.menu.querySelector('[data-action="add-sibling"]');
         if (siblingItem) {
@@ -103,7 +109,10 @@ export class TreeContextMenu {
                 siblingItem.classList.toggle('disabled', pmExists);
             } else {
                 siblingItem.innerHTML = '<span aria-hidden="true">➕</span> Добавить соседний пункт';
-                siblingItem.classList.remove('disabled');
+                // На уровне подпунктов 5.X.X соседний пункт запрещён, если в §5 есть
+                // риски на уровне пунктов (паритет с handleAddSibling).
+                const blocked = node.number?.match(/^5\.\d+\./) && this._hasRiskTablesAtLevel5x();
+                siblingItem.classList.toggle('disabled', !!blocked);
             }
         }
 

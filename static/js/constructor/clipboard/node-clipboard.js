@@ -199,12 +199,6 @@ export function checkImageLimits(existingBytes, pastedBytes, maxTotalBytes) {
     return { ok: true, reason: '' };
 }
 
-/** Есть ли в поддереве узел-нарушение. @param {Object} node @returns {boolean} */
-function _subtreeHasViolations(node) {
-    if (node.type === AppConfig.nodeTypes.VIOLATION) return true;
-    return (node.children || []).some(c => _subtreeHasViolations(c));
-}
-
 /**
  * Ошибка переполнения квоты localStorage. Браузеры кидают её по-разному:
  * code 22 (большинство), code 1014 (Firefox), либо по имени исключения.
@@ -370,8 +364,18 @@ export const NodeClipboard = {
         }
 
         // Нарушения нельзя помещать в поддерево пункта Process Mining.
-        if (AppState._isUnderProcessMining(targetNodeId) && _subtreeHasViolations(regenerated.node)) {
+        if (AppState._isUnderProcessMining(targetNodeId) && AppState._subtreeHasViolations(regenerated.node)) {
             Notifications.error('В пункте «Process Mining» нельзя размещать нарушения');
+            return false;
+        }
+
+        // §5: к пункту 5.X нельзя добавлять подпункты, если в разделе 5 есть таблицы
+        // рисков на уровне пунктов (паритет с «Добавить подпункт» в контекстном меню).
+        const pastedIsItem = !regenerated.node.type || regenerated.node.type === AppConfig.nodeTypes.ITEM;
+        if (targetUnder5 && pastedIsItem
+                && /^5\.\d+$/.test(target.number || '')
+                && AppState._collectSection5RiskLevels().hasPoint) {
+            Notifications.error('Нельзя добавлять подпункты: в разделе 5 есть таблицы рисков на уровне пунктов');
             return false;
         }
 
@@ -415,8 +419,12 @@ export const NodeClipboard = {
             for (const [id, entry] of Object.entries(entries)) dict[id] = entry;
         }
 
-        const appendIndex = target.children ? target.children.length : 0;
-        const result = AppState.insertNodeAt(targetNodeId, regenerated.node, appendIndex);
+        // Закреплённый корень (таблица рисков) встаёт в pinned-зону (вверху, как
+        // при создании через меню), обычный узел — в конец children.
+        const insertIndex = isPinnedTable(regenerated.node)
+            ? AppState._getFirstNonPinnedIndex(target)
+            : (target.children ? target.children.length : 0);
+        const result = AppState.insertNodeAt(targetNodeId, regenerated.node, insertIndex);
         if (!result.valid) {
             // Откат перенесённых записей словарей — узел не вставился.
             for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
@@ -428,11 +436,29 @@ export const NodeClipboard = {
             return false;
         }
 
-        AppState.generateNumbering();
-
-        // Регенерация сводных таблиц после вставки рисков в §5.
+        // Регенерация сводных таблиц после вставки рисков в §5. Каскад сам
+        // перенумеровывает дерево; в остальных случаях нумеруем здесь.
         if (targetUnder5 && pastedHasRisks) {
-            MetricsRiskCoordinator.onSubtreeMoved(regenerated.node, null);
+            const reconciled = MetricsRiskCoordinator.onSubtreeMoved(regenerated.node, null);
+            if (!reconciled) {
+                // Каскад метрик упал и откатил §5, но снимок снят уже после вставки,
+                // поэтому вставленный узел остаётся. Убираем узел и записи словарей —
+                // вставка остаётся атомарной (без сирот и неконсистентного §5).
+                if (target.children) {
+                    target.children = target.children.filter(c => c.id !== regenerated.node.id);
+                }
+                for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
+                    const dict = AppState[dictName];
+                    if (!dict) continue;
+                    for (const id of Object.keys(entries)) delete dict[id];
+                }
+                AppState._rebuildNodeIndex?.();
+                AppState.generateNumbering();
+                this._renderAfterPaste(targetNodeId);
+                return false; // ошибку уже показал координатор
+            }
+        } else {
+            AppState.generateNumbering();
         }
 
         if (filtered.skippedPinned) {

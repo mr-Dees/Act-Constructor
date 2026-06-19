@@ -697,3 +697,73 @@ test('paste: второй риск того же типа на один пунк
     assert.equal(NodeClipboard.pasteInto(p.id), false);
     assert.equal(AppState.findNodeById(p.id).children.length, before);
 });
+
+test('paste: одиночная таблица рисков встаёт в pinned-зону (вверху), а не в конец', () => {
+    AppState.initializeTree(true);
+    // 5.1 — источник копирования риск-таблицы (риск на уровне пункта)
+    AppState.addNode('5', 'Источник', true);
+    const src = AppState.findNodeById('5').children.at(-1);
+    assert.ok(AppState._createRegularRiskTable(src.id).valid);
+    MetricsRiskCoordinator.onRiskTableAdded(src.id);
+    AppState.generateNumbering();
+    const risk = AppState.findNodeById(src.id).children.find(c => c.kind && c.kind.endsWith('Risk'));
+    assert.ok(NodeClipboard.copyNode(risk.id));
+
+    // 5.2 — цель с уже существующим текстблоком (не-pinned контент)
+    AppState.addNode('5', 'Цель', true);
+    const dest = AppState.findNodeById('5').children.at(-1);
+    assert.ok(AppState.addTextBlockToNode(dest.id).valid);
+    AppState.generateNumbering();
+
+    assert.equal(NodeClipboard.pasteInto(dest.id), true);
+    const kids = AppState.findNodeById(dest.id).children;
+    const riskIdx = kids.findIndex(c => c.kind && c.kind.endsWith('Risk'));
+    const textIdx = kids.findIndex(c => c.type === 'textblock');
+    assert.ok(riskIdx !== -1 && textIdx !== -1, 'и риск, и текстблок присутствуют');
+    assert.ok(riskIdx < textIdx, 'таблица рисков должна быть выше текстблока (pinned-инвариант)');
+});
+
+test('paste: обычный подпункт в пункт 5.X при рисках на уровне пунктов — отклоняется', () => {
+    AppState.initializeTree(true);
+    // 5.1 с риском на уровне пункта
+    AppState.addNode('5', 'Пункт1', true);
+    const p1 = AppState.findNodeById('5').children.at(-1);
+    assert.ok(AppState._createRegularRiskTable(p1.id).valid);
+    MetricsRiskCoordinator.onRiskTableAdded(p1.id);
+    AppState.generateNumbering();
+
+    // Копируем обычный (без рисков) пункт из раздела 4
+    const plain = addItem('4', 'Обычный');
+    AppState.generateNumbering();
+    assert.ok(NodeClipboard.copyNode(plain.id));
+
+    // Вставка обычного подпункта в 5.X запрещена (паритет с «Добавить подпункт»)
+    const before = AppState.findNodeById(p1.id).children.length;
+    assert.equal(NodeClipboard.pasteInto(p1.id), false);
+    assert.equal(AppState.findNodeById(p1.id).children.length, before, 'подпункт не добавлен');
+    assert.equal(notified.error.filter(m => /подпункт/i.test(m)).length, 1);
+});
+
+test('paste: провал регенерации сводных таблиц откатывает вставку целиком', () => {
+    const p = makeRiskUnder5();
+    const risk = AppState.findNodeById(p.id).children.find(c => c.kind);
+    assert.ok(NodeClipboard.copyNode(risk.id));
+    AppState.addNode('5', 'Цель', true);
+    const dest = AppState.findNodeById('5').children.at(-1);
+    AppState.generateNumbering();
+
+    const tablesBefore = Object.keys(AppState.tables).length;
+    const destChildrenBefore = AppState.findNodeById(dest.id).children.length;
+
+    // Симулируем провал каскада метрик (вернул false → вставка должна откатиться).
+    const orig = MetricsRiskCoordinator.onSubtreeMoved;
+    MetricsRiskCoordinator.onSubtreeMoved = () => false;
+    try {
+        assert.equal(NodeClipboard.pasteInto(dest.id), false, 'вставка возвращает false при провале каскада');
+    } finally {
+        MetricsRiskCoordinator.onSubtreeMoved = orig;
+    }
+
+    assert.equal(AppState.findNodeById(dest.id).children.length, destChildrenBefore, 'вставленный узел откатан');
+    assert.equal(Object.keys(AppState.tables).length, tablesBefore, 'записи словаря таблиц откатаны');
+});
