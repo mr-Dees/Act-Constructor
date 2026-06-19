@@ -38,6 +38,7 @@ import {
     estimateActImageBytes,
     getImageLimits,
 } from '../violation/violation-image-validator.js';
+import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
 
 /** Версия формата буфера. Несовпадение → буфер игнорируется. */
 export const CLIPBOARD_FORMAT_VERSION = 1;
@@ -198,6 +199,12 @@ export function checkImageLimits(existingBytes, pastedBytes, maxTotalBytes) {
     return { ok: true, reason: '' };
 }
 
+/** Есть ли в поддереве узел-нарушение. @param {Object} node @returns {boolean} */
+function _subtreeHasViolations(node) {
+    if (node.type === AppConfig.nodeTypes.VIOLATION) return true;
+    return (node.children || []).some(c => _subtreeHasViolations(c));
+}
+
 /**
  * Ошибка переполнения квоты localStorage. Браузеры кидают её по-разному:
  * code 22 (большинство), code 1014 (Firefox), либо по имени исключения.
@@ -334,16 +341,15 @@ export const NodeClipboard = {
         const target = AppState.findNodeById(targetNodeId);
         if (!target) return false;
 
-        // Нельзя вставлять внутрь листовых блоков (таблица/текстблок/нарушение).
         if (target.type && target.type !== AppConfig.nodeTypes.ITEM) {
             Notifications.error('Нельзя вставлять внутрь этого элемента');
             return false;
         }
 
-        // КП-3: pinned-дети пропускаются (корень буфера уже проверен при копировании).
-        const filtered = filterPinnedFromSubtree(payload.node);
+        // Внутри §5 риск-таблицы сохраняются; вне §5 — отбрасываются (как раньше).
+        const targetUnder5 = targetNodeId === '5' || TreeUtils.isUnderSection5(target);
+        const filtered = filterPinnedFromSubtree(payload.node, { keepRisk: targetUnder5 });
 
-        // КП-2: регенерация id и remap ссылок + перенос записей словарей.
         const regenerated = regenerateIds(
             { node: filtered.node, dicts: payload.dicts },
             {
@@ -352,17 +358,37 @@ export const NodeClipboard = {
             }
         );
 
-        // КП-4: сброс invoice-привязок во всём вставляемом поддереве.
         resetInvoices(regenerated.node);
 
-        // КП-6: штатная валидация глубины/возможности добавить ребёнка.
+        // Корень буфера — таблица рисков: допускается только в пункт раздела 5 (5.X+).
+        if (isRiskTable(regenerated.node)) {
+            if (!/^5\.\d+/.test(target.number || '')) {
+                Notifications.error('Таблицу рисков можно вставлять только в пункты раздела 5');
+                return false;
+            }
+        }
+
+        // Нарушения нельзя помещать в поддерево пункта Process Mining.
+        if (AppState._isUnderProcessMining(targetNodeId) && _subtreeHasViolations(regenerated.node)) {
+            Notifications.error('В пункте «Process Mining» нельзя размещать нарушения');
+            return false;
+        }
+
+        // §5-правила согласованности рисков — те же, что при перемещении.
+        const pastedHasRisks = AppState._findRiskTablesInSubtree(regenerated.node).length > 0;
+        if (targetUnder5 && pastedHasRisks) {
+            const riskCheck = AppState._checkSection5RiskConstraints(regenerated.node, target);
+            if (!riskCheck.valid) {
+                Notifications.error(riskCheck.message || 'Нельзя вставить сюда');
+                return false;
+            }
+        }
+
         const validation = ValidationTree.canAddChild(targetNodeId);
         if (!validation.valid) {
             Notifications.error(validation.message || 'Нельзя вставить сюда');
             return false;
         }
-        // Дополнительно: суммарная глубина вставляемого поддерева не должна
-        // превысить maxDepth (canAddChild проверяет только сам узел-корень).
         const targetDepth = TreeUtils.getNodeDepth(targetNodeId);
         const subtreeDepth = TreeUtils.getSubtreeDepth(regenerated.node);
         if (targetDepth + 1 + subtreeDepth > AppConfig.tree.maxDepth) {
@@ -372,7 +398,7 @@ export const NodeClipboard = {
             return false;
         }
 
-        // КП-5: лимит суммарного размера картинок целевого акта.
+        // КП-5: лимит картинок (без изменений)
         const limits = getImageLimits();
         const existingBytes = estimateActImageBytes(_unwrap(AppState.violations) || {});
         const pastedBytes = estimateActImageBytes(regenerated.dicts.violations || {});
@@ -382,22 +408,15 @@ export const NodeClipboard = {
             return false;
         }
 
-        // Переносим записи словарей в целевой акт (новые id — коллизий нет).
         for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
             const dict = AppState[dictName];
             if (!dict) continue;
-            for (const [id, entry] of Object.entries(entries)) {
-                dict[id] = entry;
-            }
+            for (const [id, entry] of Object.entries(entries)) dict[id] = entry;
         }
 
-        // КП-6: вставка через официальный мутатор. Позиция — конец children;
-        // insertNodeAt сам clamp'ит индекс по pinned-инварианту (_getFirstNonPinnedIndex)
-        // и длине, поэтому узел встаёт после pinned-таблиц.
         const appendIndex = target.children ? target.children.length : 0;
         const result = AppState.insertNodeAt(targetNodeId, regenerated.node, appendIndex);
         if (!result.valid) {
-            // Откат перенесённых записей словарей — узел не вставился.
             for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
                 const dict = AppState[dictName];
                 if (!dict) continue;
@@ -409,8 +428,13 @@ export const NodeClipboard = {
 
         AppState.generateNumbering();
 
+        // Регенерация сводных таблиц после вставки рисков в §5.
+        if (targetUnder5 && pastedHasRisks) {
+            MetricsRiskCoordinator.onSubtreeMoved(regenerated.node, null);
+        }
+
         if (filtered.skippedPinned) {
-            Notifications.warning('Закреплённые таблицы (метрики/риски) при вставке пропущены');
+            Notifications.warning('Закреплённые таблицы при вставке пропущены');
         } else {
             Notifications.success('Вставлено');
         }
