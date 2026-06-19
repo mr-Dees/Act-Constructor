@@ -15,20 +15,24 @@ from dotenv import load_dotenv
 load_dotenv()
 
 raw_user = os.environ.get("JUPYTERHUB_USER", "")
-username = raw_user.split("_")[0]
-realm = raw_user.split("_", 1)[1].replace("-", ".").upper() if "_" in raw_user else "OMEGA.SBRF.RU"
-principal = f"{username}@{realm}"
+principal = f"{raw_user}@DF.SBRF.RU"
 
 
 def has_valid_ticket():
-    """Проверяет наличие действующего (не истёкшего) Kerberos билета.
+    """Проверяет, что в кеше есть действующий билет ИМЕННО для нужного принципала.
 
-    Использует klist -s, который возвращает код 0 только при наличии
-    валидного билета. Простая проверка realm в выводе klist не работает,
-    потому что klist показывает и истёкшие билеты.
+    Две независимые проверки, обе обязательны:
+    1. `klist -s` → код 0 только при валидном (не истёкшем) TGT. klist без -s
+       показывает и истёкшие билеты, поэтому одной проверки вывода мало.
+    2. Ожидаемый principal присутствует в выводе `klist`. Без этого старый
+       билет на другой realm (напр. OMEGA.SBRF.RU) проходит проверку №1,
+       и приложение стартует с неправильным билетом: внешне «билет есть»,
+       а доступа к Greenplum нет.
     """
-    r = subprocess.run(["/usr/bin/klist", "-s"], capture_output=True)
-    return r.returncode == 0
+    if subprocess.run(["/usr/bin/klist", "-s"], capture_output=True).returncode != 0:
+        return False
+    r = subprocess.run(["/usr/bin/klist"], capture_output=True, text=True)
+    return principal in r.stdout
 
 
 def kinit(password: bytes):
