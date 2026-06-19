@@ -74,17 +74,26 @@ export function serializeSubtree(rawNode, rawDicts, sourceActId = null) {
  * нельзя копировать как корень выделения). Применяется к детям рекурсивно.
  *
  * @param {Object} node - Узел (будет скопирован)
+ * @param {{keepRisk?: boolean}} opts - Опции: keepRisk=true сохраняет risk-таблицы,
+ *        отбрасывает только metrics (для paste в §5); по умолчанию отбрасываются все pinned.
  * @returns {{node: Object, skippedPinned: boolean}}
  */
-export function filterPinnedFromSubtree(node) {
+export function filterPinnedFromSubtree(node, { keepRisk = false } = {}) {
     let skippedPinned = false;
+
+    const drop = (child) => {
+        if (!isPinnedTable(child)) return false;
+        // keepRisk: риск-таблицы остаются, отбрасываем только metrics.
+        if (keepRisk && isRiskTable(child)) return false;
+        return true;
+    };
 
     const clone = (n) => {
         const copy = { ...n };
         if (Array.isArray(n.children)) {
             copy.children = [];
             for (const child of n.children) {
-                if (isPinnedTable(child)) {
+                if (drop(child)) {
                     skippedPinned = true;
                     continue;
                 }

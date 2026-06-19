@@ -42,6 +42,7 @@ import { CONTENT_TYPE_IMAGE } from '../../static/js/constructor/violation/violat
 import { TreeUtils } from '../../static/js/constructor/tree/tree-utils.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
 import { Notifications } from '../../static/js/shared/notifications.js';
+import { isRiskTable as kindIsRisk } from '../../static/js/constructor/table/table-kind.js';
 
 // ── In-memory localStorage поверх no-op stub'а ─────────────────────────────────
 const _store = new Map();
@@ -194,6 +195,31 @@ test('filterPinnedFromSubtree: без pinned skippedPinned=false', () => {
     const node = { id: 'p', type: 'item', children: [{ id: 'tbl', type: 'table', children: [] }] };
     const { skippedPinned } = filterPinnedFromSubtree(node);
     assert.equal(skippedPinned, false);
+});
+
+test('filterPinnedFromSubtree: keepRisk сохраняет риски, отбрасывает metrics', () => {
+    const subtree = {
+        id: 'p', type: 'item', children: [
+            { id: 'm', type: 'table', kind: 'metrics', children: [] },
+            { id: 'r', type: 'table', kind: 'regularRisk', children: [] },
+            { id: 'c', type: 'item', children: [] },
+        ],
+    };
+    const out = filterPinnedFromSubtree(subtree, { keepRisk: true });
+    const ids = out.node.children.map(c => c.id);
+    assert.deepEqual(ids.sort(), ['c', 'r']);
+    assert.equal(out.skippedPinned, true); // metrics отброшен
+});
+
+test('filterPinnedFromSubtree: без опций отбрасывает все pinned (как раньше)', () => {
+    const subtree = {
+        id: 'p', type: 'item', children: [
+            { id: 'r', type: 'table', kind: 'taxRisk', children: [] },
+            { id: 'c', type: 'item', children: [] },
+        ],
+    };
+    const out = filterPinnedFromSubtree(subtree);
+    assert.deepEqual(out.node.children.map(c => c.id), ['c']);
 });
 
 // ── Чистое ядро: resetInvoices (КП-4) ──────────────────────────────────────────
