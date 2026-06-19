@@ -30,7 +30,7 @@ import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { getBlockType, isLeafBlockType } from '../block-types.js';
-import { isPinnedTable } from '../table/table-kind.js';
+import { isPinnedTable, isRiskTable, isMetricsTable, getTableKind } from '../table/table-kind.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { formatMb } from '../../shared/format-units.js';
@@ -38,6 +38,7 @@ import {
     estimateActImageBytes,
     getImageLimits,
 } from '../violation/violation-image-validator.js';
+import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
 
 /** Версия формата буфера. Несовпадение → буфер игнорируется. */
 export const CLIPBOARD_FORMAT_VERSION = 1;
@@ -74,17 +75,26 @@ export function serializeSubtree(rawNode, rawDicts, sourceActId = null) {
  * нельзя копировать как корень выделения). Применяется к детям рекурсивно.
  *
  * @param {Object} node - Узел (будет скопирован)
+ * @param {{keepRisk?: boolean}} opts - Опции: keepRisk=true сохраняет risk-таблицы,
+ *        отбрасывает только metrics (для paste в §5); по умолчанию отбрасываются все pinned.
  * @returns {{node: Object, skippedPinned: boolean}}
  */
-export function filterPinnedFromSubtree(node) {
+export function filterPinnedFromSubtree(node, { keepRisk = false } = {}) {
     let skippedPinned = false;
+
+    const drop = (child) => {
+        if (!isPinnedTable(child)) return false;
+        // keepRisk: риск-таблицы остаются, отбрасываем только metrics.
+        if (keepRisk && isRiskTable(child)) return false;
+        return true;
+    };
 
     const clone = (n) => {
         const copy = { ...n };
         if (Array.isArray(n.children)) {
             copy.children = [];
             for (const child of n.children) {
-                if (isPinnedTable(child)) {
+                if (drop(child)) {
                     skippedPinned = true;
                     continue;
                 }
@@ -223,12 +233,15 @@ export const NodeClipboard = {
         const rawNode = AppState._findNodeRaw?.(nodeId);
         if (!rawNode) return false;
 
-        if (rawNode.protected) {
-            Notifications.error('Защищённые разделы нельзя копировать');
+        // Сводные (metrics) таблицы копировать нельзя — они авто-деривируются.
+        if (isMetricsTable(rawNode)) {
+            Notifications.error('Сводные таблицы (метрики) копировать нельзя');
             return false;
         }
-        if (isPinnedTable(rawNode)) {
-            Notifications.error('Закреплённые таблицы (метрики/риски) нельзя копировать');
+        // Защищённые узлы нельзя копировать; исключение — таблицы рисков
+        // (protected, но допускают копирование как корень выделения).
+        if (rawNode.protected && !isRiskTable(rawNode)) {
+            Notifications.error('Защищённые разделы нельзя копировать');
             return false;
         }
 
@@ -322,16 +335,15 @@ export const NodeClipboard = {
         const target = AppState.findNodeById(targetNodeId);
         if (!target) return false;
 
-        // Нельзя вставлять внутрь листовых блоков (таблица/текстблок/нарушение).
         if (target.type && target.type !== AppConfig.nodeTypes.ITEM) {
             Notifications.error('Нельзя вставлять внутрь этого элемента');
             return false;
         }
 
-        // КП-3: pinned-дети пропускаются (корень буфера уже проверен при копировании).
-        const filtered = filterPinnedFromSubtree(payload.node);
+        // Внутри §5 риск-таблицы сохраняются; вне §5 — отбрасываются (как раньше).
+        const targetUnder5 = targetNodeId === '5' || TreeUtils.isUnderSection5(target);
+        const filtered = filterPinnedFromSubtree(payload.node, { keepRisk: targetUnder5 });
 
-        // КП-2: регенерация id и remap ссылок + перенос записей словарей.
         const regenerated = regenerateIds(
             { node: filtered.node, dicts: payload.dicts },
             {
@@ -340,17 +352,48 @@ export const NodeClipboard = {
             }
         );
 
-        // КП-4: сброс invoice-привязок во всём вставляемом поддереве.
         resetInvoices(regenerated.node);
 
-        // КП-6: штатная валидация глубины/возможности добавить ребёнка.
+        // Корень буфера — таблица рисков: полная проверка размещения.
+        if (isRiskTable(regenerated.node)) {
+            const placement = AppState._checkRiskTablePastePlacement(target, getTableKind(regenerated.node));
+            if (!placement.valid) {
+                Notifications.error(placement.message);
+                return false;
+            }
+        }
+
+        // Нарушения нельзя помещать в поддерево пункта Process Mining.
+        if (AppState._isUnderProcessMining(targetNodeId) && AppState._subtreeHasViolations(regenerated.node)) {
+            Notifications.error('В пункте «Process Mining» нельзя размещать нарушения');
+            return false;
+        }
+
+        // §5: к пункту 5.X нельзя добавлять подпункты, если в разделе 5 есть таблицы
+        // рисков на уровне пунктов (паритет с «Добавить подпункт» в контекстном меню).
+        const pastedIsItem = !regenerated.node.type || regenerated.node.type === AppConfig.nodeTypes.ITEM;
+        if (targetUnder5 && pastedIsItem
+                && /^5\.\d+$/.test(target.number || '')
+                && AppState._collectSection5RiskLevels().hasPoint) {
+            Notifications.error('Нельзя добавлять подпункты: в разделе 5 есть таблицы рисков на уровне пунктов');
+            return false;
+        }
+
+        // §5-правила согласованности рисков — те же, что при перемещении.
+        const pastedHasRisks = AppState._findRiskTablesInSubtree(regenerated.node).length > 0;
+        if (targetUnder5 && pastedHasRisks) {
+            const riskCheck = AppState._checkSection5RiskConstraints(regenerated.node, target);
+            if (!riskCheck.valid) {
+                Notifications.error(riskCheck.message || 'Нельзя вставить сюда');
+                return false;
+            }
+        }
+
         const validation = ValidationTree.canAddChild(targetNodeId);
         if (!validation.valid) {
             Notifications.error(validation.message || 'Нельзя вставить сюда');
             return false;
         }
-        // Дополнительно: суммарная глубина вставляемого поддерева не должна
-        // превысить maxDepth (canAddChild проверяет только сам узел-корень).
         const targetDepth = TreeUtils.getNodeDepth(targetNodeId);
         const subtreeDepth = TreeUtils.getSubtreeDepth(regenerated.node);
         if (targetDepth + 1 + subtreeDepth > AppConfig.tree.maxDepth) {
@@ -370,20 +413,18 @@ export const NodeClipboard = {
             return false;
         }
 
-        // Переносим записи словарей в целевой акт (новые id — коллизий нет).
         for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
             const dict = AppState[dictName];
             if (!dict) continue;
-            for (const [id, entry] of Object.entries(entries)) {
-                dict[id] = entry;
-            }
+            for (const [id, entry] of Object.entries(entries)) dict[id] = entry;
         }
 
-        // КП-6: вставка через официальный мутатор. Позиция — конец children;
-        // insertNodeAt сам clamp'ит индекс по pinned-инварианту (_getFirstNonPinnedIndex)
-        // и длине, поэтому узел встаёт после pinned-таблиц.
-        const appendIndex = target.children ? target.children.length : 0;
-        const result = AppState.insertNodeAt(targetNodeId, regenerated.node, appendIndex);
+        // Закреплённый корень (таблица рисков) встаёт в pinned-зону (вверху, как
+        // при создании через меню), обычный узел — в конец children.
+        const insertIndex = isPinnedTable(regenerated.node)
+            ? AppState._getFirstNonPinnedIndex(target)
+            : (target.children ? target.children.length : 0);
+        const result = AppState.insertNodeAt(targetNodeId, regenerated.node, insertIndex);
         if (!result.valid) {
             // Откат перенесённых записей словарей — узел не вставился.
             for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
@@ -395,10 +436,33 @@ export const NodeClipboard = {
             return false;
         }
 
-        AppState.generateNumbering();
+        // Регенерация сводных таблиц после вставки рисков в §5. Каскад сам
+        // перенумеровывает дерево; в остальных случаях нумеруем здесь.
+        if (targetUnder5 && pastedHasRisks) {
+            const reconciled = MetricsRiskCoordinator.onSubtreeMoved(regenerated.node, null);
+            if (!reconciled) {
+                // Каскад метрик упал и откатил §5, но снимок снят уже после вставки,
+                // поэтому вставленный узел остаётся. Убираем узел и записи словарей —
+                // вставка остаётся атомарной (без сирот и неконсистентного §5).
+                if (target.children) {
+                    target.children = target.children.filter(c => c.id !== regenerated.node.id);
+                }
+                for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
+                    const dict = AppState[dictName];
+                    if (!dict) continue;
+                    for (const id of Object.keys(entries)) delete dict[id];
+                }
+                AppState._rebuildNodeIndex?.();
+                AppState.generateNumbering();
+                this._renderAfterPaste(targetNodeId);
+                return false; // ошибку уже показал координатор
+            }
+        } else {
+            AppState.generateNumbering();
+        }
 
         if (filtered.skippedPinned) {
-            Notifications.warning('Закреплённые таблицы (метрики/риски) при вставке пропущены');
+            Notifications.warning('Закреплённые таблицы при вставке пропущены');
         } else {
             Notifications.success('Вставлено');
         }
@@ -537,7 +601,7 @@ export const NodeClipboard = {
      */
     refreshMenuState(node) {
         if (this._copyMenuItem?.classList) {
-            const cannotCopy = !node || node.protected || isPinnedTable(node);
+            const cannotCopy = !node || isMetricsTable(node) || (node.protected && !isRiskTable(node));
             this._copyMenuItem.classList.toggle('disabled', !!cannotCopy);
         }
         if (this._pasteMenuItem?.classList) {

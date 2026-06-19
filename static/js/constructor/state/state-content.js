@@ -109,6 +109,10 @@ Object.assign(AppState, {
         const guard = ValidationCore.requireWrite('cannotAddContent');
         if (guard) return guard;
 
+        if (this._isUnderProcessMining(nodeId)) {
+            return ValidationCore.failure('В пункте «Process Mining» нельзя добавлять нарушения');
+        }
+
         const node = this.findNodeById(nodeId);
 
         const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.VIOLATION);

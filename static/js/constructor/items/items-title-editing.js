@@ -17,6 +17,7 @@ export class ItemsTitleEditing {
      */
     static startEditingItemTitle(titleElement, node) {
         if (titleElement.classList.contains('editing')) return;
+        if (node.titleLocked) return; // Заголовок зафиксирован (Process Mining)
 
         const originalLabel = node.label;
 
@@ -183,6 +184,7 @@ export class ItemsTitleEditing {
      * @param {TreeManager} treeManager - Экземпляр менеджера дерева
      */
     static startEditingTreeNode(labelElement, node, treeManager) {
+        if (node.titleLocked) return; // Заголовок зафиксирован (Process Mining)
         const item = labelElement.closest('.tree-item');
         if (item.classList.contains('editing')) return;
 

@@ -77,9 +77,30 @@ export const AppState = {
         return {
             id,
             label,
-            // Раздел 6 — опциональный: пользователь может его удалить
-            protected: id !== '6',
-            deletable: id === '6',
+            protected: true,
+            deletable: false,
+            children: [],
+            content: ''
+        };
+    },
+
+    /**
+     * Создаёт опциональный защищённый пункт «Process Mining».
+     * protected: нельзя перетаскивать/переименовывать; deletable: можно удалить;
+     * titleLocked: заголовок зафиксирован.
+     * @private
+     * @returns {Object} Узел пункта Process Mining
+     */
+    _createProcessMiningSection() {
+        const cfg = AppConfig.tree.processMiningSection;
+        return {
+            id: cfg.id,
+            label: cfg.label,
+            special: cfg.special,
+            protected: true,
+            deletable: true,
+            titleLocked: true,
+            type: AppConfig.nodeTypes.ITEM,
             children: [],
             content: ''
         };
@@ -594,6 +615,12 @@ export const AppState = {
         if (node.number) serialized.number = node.number;
         if (node.tb?.length) serialized.tb = node.tb;
         if (node.auditPointId) serialized.auditPointId = node.auditPointId;
+
+        // Спец-флаги опционального пункта Process Mining. Без сериализации после
+        // reload терялись бы: special → _isUnderProcessMining переставал блокировать
+        // нарушения/риски под пунктом; titleLocked → фиксация заголовка.
+        if (node.special) serialized.special = node.special;
+        if (node.titleLocked) serialized.titleLocked = node.titleLocked;
 
         // Подвид таблицы (источник истины — узел). Без него после reload
         // спецтаблицы деградируют до обычных (закрепление/каскад/защита).

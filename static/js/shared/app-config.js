@@ -326,7 +326,6 @@ export class AppConfig {
     static tree = {
         // Ограничения структуры
         maxDepth: 4,
-        maxCustomFirstLevelSections: 1,
 
         // Стандартные разделы
         defaultSections: [
@@ -334,9 +333,16 @@ export class AppConfig {
             {id: '2', label: 'Оценка качества проверенного процесса / сценария процесса / потока работ'},
             {id: '3', label: 'Примененные технологии'},
             {id: '4', label: 'Основные выводы'},
-            {id: '5', label: 'Результаты проверки'},
-            {id: '6', label: 'Оценка процесса по результатам исследования методом Process Mining'}
+            {id: '5', label: 'Результаты проверки'}
         ],
+
+        // Опциональный пункт «Process Mining» (добавляется по требованию,
+        // по умолчанию в дереве отсутствует). Название фиксировано.
+        processMiningSection: {
+            id: '6',
+            special: 'process_mining',
+            label: 'Оценка процесса по результатам исследования методом Process Mining'
+        },
 
         // Префиксы для автогенерации названий
         labels: {
@@ -398,8 +404,8 @@ export class AppConfig {
         // Сообщения валидации
         validation: {
             maxDepthExceeded: (depth) => `Достигнута максимальная вложенность (${depth} уровней: ${'.'.repeat(depth - 1)}*)`,
-            maxCustomSections: (max) => `Можно добавить только ${max} дополнительный пункт первого уровня (пункт 7)`,
-            firstLevelOnlyAtEnd: 'Новый пункт первого уровня можно добавить только в конец списка',
+            cannotMoveToFirstLevel: 'Нельзя переносить пункты на верхний уровень',
+            cannotAddFirstLevelSibling: 'На верхнем уровне можно добавить только пункт Process Mining',
             cannotMoveToSelf: 'Нельзя переместить узел в самого себя',
             cannotMoveProtected: 'Нельзя перемещать защищенный элемент',
             cannotMoveToDescendant: 'Нельзя переместить узел внутрь своего потомка',

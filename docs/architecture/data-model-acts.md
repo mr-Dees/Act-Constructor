@@ -336,7 +336,7 @@ isPinnedTable(node) {
 | Запрет drop'а в собственного потомка                                                              | `handleDragOver` через `TreeUtils.isDescendant` (`tree-drag-drop.js:169-172`) |
 | Запрет drop'а `'before'` на pinned-узле; `'after'` блокируется, если следом ещё одна pinned       | `_calculateDropPosition` (`tree-drag-drop.js:226-240`)            |
 | Превышение `AppConfig.tree.maxDepth` (= 4) запрещено                                              | `_checkDepthConstraints` (`state-tree.js:506-522`)                |
-| На первом уровне (`root.children`) разрешён максимум один дополнительный пункт за разделом 5     | `_checkFirstLevelConstraints` (`state-tree.js:551-581`)           |
+| Перенос узла на первый уровень (`root.children`) запрещён (пункт «Process Mining» добавляется только через меню) | `_checkFirstLevelConstraints` (`state-tree.js:621-628`)           |
 | В разделе 5: risk-таблицы должны быть на одном уровне глубины                                    | `_checkSection5RiskConstraints` (`state-tree.js:596-662`)         |
 | В разделе 5: нельзя создавать подпункты `5.X.X+`, если risk-таблицы стоят на уровне пунктов     | то же                                                              |
 | Перемещение metrics-таблицы за пределы раздела 5: требуется подтверждение пользователя (диалог) и она удаляется | `_checkMetricsTableDeletion` (`state-tree.js:455-477`)            |

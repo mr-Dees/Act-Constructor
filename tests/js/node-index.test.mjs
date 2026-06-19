@@ -103,9 +103,9 @@ test('замена treeData целиком перестраивает индек
 test('addNode (child и sibling) поддерживает индекс', () => {
     AppState.initializeTree(true);
 
-    assert.ok(AppState.addNode('6', 'Дочерний', true).valid);
-    const child = AppState.findNodeById('6').children.at(-1);
-    assert.equal(AppState.findParentNode(child.id).id, '6');
+    assert.ok(AppState.addNode('4', 'Дочерний', true).valid);
+    const child = AppState.findNodeById('4').children.at(-1);
+    assert.equal(AppState.findParentNode(child.id).id, '4');
 
     assert.ok(AppState.addNode(child.id, 'Соседний', false).valid);
     assertIndexConsistent('addNode');
@@ -114,8 +114,8 @@ test('addNode (child и sibling) поддерживает индекс', () => {
 
 test('deleteNode удаляет поддерево из индекса (включая контент-узлы)', () => {
     AppState.initializeTree(true);
-    AppState.addNode('6', 'Родитель', true);
-    const parent = AppState.findNodeById('6').children.at(-1);
+    AppState.addNode('4', 'Родитель', true);
+    const parent = AppState.findNodeById('4').children.at(-1);
     AppState.addNode(parent.id, 'Ребёнок', true);
     const child = parent.children.at(-1);
     AppState.addTableToNode(child.id);
@@ -134,10 +134,10 @@ test('deleteNode удаляет поддерево из индекса (вклю
 
 test('moveNode обновляет родителя в индексе', async () => {
     AppState.initializeTree(true);
-    AppState.addNode('6', 'А', true);
-    const a = AppState.findNodeById('6').children.at(-1);
-    AppState.addNode('6', 'Б', true);
-    const b = AppState.findNodeById('6').children.at(-1);
+    AppState.addNode('4', 'А', true);
+    const a = AppState.findNodeById('4').children.at(-1);
+    AppState.addNode('4', 'Б', true);
+    const b = AppState.findNodeById('4').children.at(-1);
     AppState.addNode(a.id, 'А-ребёнок', true);
     const aChild = a.children.at(-1);
 
@@ -153,8 +153,8 @@ test('moveNode обновляет родителя в индексе', async () 
 
 test('создание таблицы/текстблока/нарушения индексируется', () => {
     AppState.initializeTree(true);
-    AppState.addNode('6', 'Контейнер', true);
-    const node = AppState.findNodeById('6').children.at(-1);
+    AppState.addNode('4', 'Контейнер', true);
+    const node = AppState.findNodeById('4').children.at(-1);
 
     assert.ok(AppState.addTableToNode(node.id).valid);
     assert.ok(AppState.addTextBlockToNode(node.id).valid);

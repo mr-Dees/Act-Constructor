@@ -11,7 +11,7 @@ import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { UndoDeleteManager } from './undo-delete.js';
 import { AppState, _unwrap } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { KIND_METRICS, getTableKind, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics, buildMetricsTableLabel, isAutoMetricsTableLabel } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
@@ -419,6 +419,11 @@ Object.assign(AppState, {
             }
         }
 
+        // Нельзя переносить нарушения в поддерево пункта Process Mining.
+        if (this._isUnderProcessMining(newParent.id) && this._subtreeHasViolations(draggedNode)) {
+            return ValidationCore.failure('В пункте «Process Mining» нельзя размещать нарушения');
+        }
+
         // Запоминаем предка 5.X до перемещения (для пересчёта сводных таблиц)
         const oldAncestor5x = this._findFirstLevelAncestorUnder5(draggedNode.id);
 
@@ -609,45 +614,16 @@ Object.assign(AppState, {
     },
 
     /**
-     * Проверяет ограничения для первого уровня
-     * @private
-     * @param {Object} draggedNode - Перемещаемый узел
-     * @param {Object} draggedParent - Текущий родитель
-     * @param {Object} targetNode - Целевой узел
-     * @param {string} targetNodeId - ID целевого узла
-     * @param {string} position - Позиция
-     * @returns {Object} Результат проверки
+     * Запрещает перемещение любого узла на 0 уровень (в children root).
+     * Разделы 0 уровня защищены и не перетаскиваются; единственный добавляемый
+     * пункт 0 уровня — Process Mining (через меню).
      */
     _checkFirstLevelConstraints(draggedNode, draggedParent, targetNode, targetNodeId, position) {
-        // Проверяем только при перемещении before/after
         if (position === 'child') return ValidationCore.success();
-
         const targetParent = this.findParentNode(targetNodeId);
-        if (!targetParent || targetParent.id !== 'root') return ValidationCore.success();
-
-        // Если узел уже на первом уровне, разрешаем перемещение
-        if (draggedParent.id === 'root') return ValidationCore.success();
-
-        // Проверяем, есть ли уже кастомный пункт 7
-        // (Number вместо parseInt: '7.1' не должен считаться пунктом 7)
-        const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.number ? Number(child.number) : null;
-            return num === 7;
-        });
-
-        if (hasCustomFirstLevel) {
-            return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (7)');
+        if (targetParent?.id === 'root') {
+            return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToFirstLevel);
         }
-
-        // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
-        const targetNumber = targetNode.number ? Number(targetNode.number) : null;
-        if (!targetNumber) return ValidationCore.success();
-
-        if ((position === 'before' && targetNumber !== 7) ||
-            (position === 'after' && targetNumber !== 6)) {
-            return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
-        }
-
         return ValidationCore.success();
     },
 
@@ -664,6 +640,60 @@ Object.assign(AppState, {
      * @param {Object} newParent - Новый родитель после перемещения
      * @returns {Object} Результат проверки
      */
+    /**
+     * Проверка размещения ОДИНОЧНОЙ таблицы рисков при copy/paste.
+     * Move-путь работает только с ITEM-поддеревьями, поэтому
+     * _checkSection5RiskConstraints пропускает узел-таблицу. Здесь — те же
+     * правила, что при создании риска через меню: согласованность уровней
+     * (пункты 5.X ↔ подпункты 5.X.Y) и запрет второй таблицы того же типа на узле.
+     * @param {Object} target - Узел-цель (риск вставляется как его ребёнок)
+     * @param {string} riskKind - kind вставляемой риск-таблицы
+     * @returns {Object} ValidationCore результат
+     */
+    _checkRiskTablePastePlacement(target, riskKind) {
+        const num = target.number || '';
+        const targetIsPoint = /^5\.\d+$/.test(num);
+        const targetIsSubpoint = /^5\.\d+\.\d+/.test(num);
+        if (!targetIsPoint && !targetIsSubpoint) {
+            return ValidationCore.failure('Таблицу рисков можно вставлять только в пункты раздела 5');
+        }
+        // Вторая таблица того же типа на одном узле запрещена.
+        const hasSameKind = (target.children || []).some(
+            c => c.type === AppConfig.nodeTypes.TABLE && getTableKind(c) === riskKind
+        );
+        if (hasSameKind) {
+            return ValidationCore.failure('На одном пункте может быть только одна таблица риска этого типа');
+        }
+        // Согласованность уровней: все риски §5 — либо на пунктах, либо на подпунктах.
+        const {hasPoint, hasSubpoint} = this._collectSection5RiskLevels();
+        if ((hasSubpoint && targetIsPoint) || (hasPoint && targetIsSubpoint)) {
+            return ValidationCore.failure('Нельзя: таблицы рисков окажутся на разных уровнях раздела 5');
+        }
+        return ValidationCore.success();
+    },
+
+    /**
+     * Считывает уровни таблиц рисков, уже размещённых в разделе 5 (read-only).
+     * Возвращает, есть ли риски на уровне пунктов (5.X) и/или подпунктов (5.X.Y+).
+     * Единый источник для проверок размещения рисков при вставке.
+     * @returns {{hasPoint: boolean, hasSubpoint: boolean}}
+     */
+    _collectSection5RiskLevels() {
+        const node5 = this.findNodeById('5');
+        let hasPoint = false, hasSubpoint = false;
+        const walk = (node) => {
+            if ((!node.type || node.type === AppConfig.nodeTypes.ITEM) && /^5\.\d+/.test(node.number || '')) {
+                if ((node.children || []).some(c => this._isRiskTable(c))) {
+                    if ((node.number.split('.').length - 1) === 1) hasPoint = true;
+                    else hasSubpoint = true;
+                }
+            }
+            (node.children || []).forEach(walk);
+        };
+        if (node5) (node5.children || []).forEach(walk);
+        return {hasPoint, hasSubpoint};
+    },
+
     _checkSection5RiskConstraints(draggedNode, newParent) {
         if (draggedNode.type && draggedNode.type !== AppConfig.nodeTypes.ITEM) return ValidationCore.success();
 
@@ -993,5 +1023,63 @@ Object.assign(AppState, {
                 this._clearInvoiceRecursive(child);
             }
         }
+    },
+
+    /**
+     * Добавляет опциональный пункт «Process Mining» последним на 0 уровне.
+     * Создаёт и вставляет новый узел; по умолчанию §6 в дереве отсутствует.
+     * Идемпотентность: повторный вызов запрещён (проверяется по special).
+     * @returns {Object} Результат валидации
+     */
+    addProcessMiningSection() {
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
+
+        const root = this.treeData;
+        if (!root?.children) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+        if (root.children.some(c => c.special === 'process_mining')) {
+            return ValidationCore.failure('Пункт «Process Mining» уже добавлен');
+        }
+        // Защита от дубликата id на старых актах, где раздел '6' ещё в дереве.
+        if (root.children.some(c => c.id === AppConfig.tree.processMiningSection.id)) {
+            return ValidationCore.failure('Пункт «Process Mining» уже добавлен');
+        }
+
+        const node = this._createProcessMiningSection();
+        root.children.push(node);
+        this._indexNodeAdded(node, root);
+        this.generateNumbering();
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_node', node.id, node.label, {parentId: 'root'});
+        }
+
+        return ValidationCore.success();
+    },
+
+    /**
+     * Есть ли в поддереве узел-нарушение.
+     * @param {Object} node
+     * @returns {boolean}
+     */
+    _subtreeHasViolations(node) {
+        if (node.type === AppConfig.nodeTypes.VIOLATION) return true;
+        return (node.children || []).some(c => this._subtreeHasViolations(c));
+    },
+
+    /**
+     * Находится ли узел в поддереве пункта «Process Mining» (включая сам пункт).
+     * @param {string} nodeId
+     * @returns {boolean}
+     */
+    _isUnderProcessMining(nodeId) {
+        let cur = this.findNodeById(nodeId);
+        while (cur) {
+            if (cur.special === 'process_mining') return true;
+            cur = this.findParentNode(cur.id);
+        }
+        return false;
     }
 });
