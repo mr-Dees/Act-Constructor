@@ -4,8 +4,8 @@
  * Инварианты:
  *  - canAddChild по неизвестному родителю — отказ (раньше getNodeDepth давал -1,
  *    что проходило проверку maxDepth и давало ложный success);
- *  - детект «дополнительного пункта 7» парсит номер строго: '7.1' — НЕ пункт 7
- *    (parseInt('7.1') === 7 ложно срабатывал на номерах с точкой).
+ *  - _checkFirstLevelConstraints запрещает before/after на 0 уровне;
+ *  - canAddSibling больше не ограничивает 0 уровень.
  */
 import './_browser-stub.mjs';
 import { test, beforeEach } from 'node:test';
@@ -43,46 +43,18 @@ test('canAddChild: существующий родитель в пределах
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// tree-3: номер с точкой не считается пунктом 7
+// tree-3: новый контракт — перенос на 0 уровень запрещён; sibling без ограничений
 // ──────────────────────────────────────────────────────────────────────────
 
-test('canAddSibling: номер "7.1" у соседа НЕ детектится как пункт 7', () => {
-    // Повреждённое/нестандартное состояние: на первом уровне узел с номером '7.1'.
-    // parseInt('7.1') === 7 ложно блокировал добавление «лимит пункта 7 исчерпан».
-    AppState.treeData.children.push(
-        { id: 'x71', label: 'Аномальный', number: '7.1', type: 'item', children: [] }
-    );
-    AppState._rebuildNodeIndex();
-
-    const result = ValidationTree.canAddSibling('x71');
-    assert.equal(result.valid, true, 'номер с точкой не должен считаться пунктом 7');
+test('_checkFirstLevelConstraints запрещает before/after на 0 уровне', () => {
+    AppState.initializeTree(true);
+    const dragged = AppState.findNodeById('5'); // любой узел; функция чистая по позиции
+    const draggedParent = AppState.treeData;
+    const res = AppState._checkFirstLevelConstraints(dragged, draggedParent, AppState.findNodeById('4'), '4', 'after');
+    assert.equal(res.valid, false);
 });
 
-test('canAddSibling: настоящий пункт 7 на первом уровне блокирует добавление', () => {
-    AppState.treeData.children.push(
-        { id: 'x7', label: 'Пункт 7', number: '7', type: 'item', children: [] }
-    );
-    AppState._rebuildNodeIndex();
-
-    const result = ValidationTree.canAddSibling('x7');
-    assert.equal(result.valid, false, 'второй кастомный пункт первого уровня запрещён');
-});
-
-test('_checkFirstLevelConstraints: сосед с номером "7.1" не блокирует перемещение после пункта 6', () => {
-    // Повреждённый номер '7.1' на первом уровне: parseInt('7.1') === 7 ложно
-    // включал «на первом уровне уже есть пункт 7» и блокировал перемещение.
-    AppState.treeData.children.push(
-        { id: 'x71', label: 'Аномальный', number: '7.1', type: 'item', children: [] }
-    );
-    const dragged = { id: 'd1', label: 'Перемещаемый', type: 'item', children: [] };
-    AppState.treeData.children[0].children.push(dragged);
-    AppState._rebuildNodeIndex();
-
-    const draggedParent = AppState.findNodeById('1');
-    const targetNode = AppState.findNodeById('6');
-
-    const result = AppState._checkFirstLevelConstraints(
-        dragged, draggedParent, targetNode, '6', 'after'
-    );
-    assert.equal(result.valid, true, "'7.1' не пункт 7 — перемещение после пункта 6 разрешено");
+test('canAddSibling больше не ограничивает 0 уровень', () => {
+    AppState.initializeTree(true);
+    assert.equal(ValidationTree.canAddSibling('5').valid, true);
 });

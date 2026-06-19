@@ -72,3 +72,16 @@ test('пункт 0 уровня определяется как ребёнок r
     AppState.addProcessMiningSection();
     assert.equal(AppState.findParentNode('6').id, 'root');
 });
+
+test('перенос пункта на 0 уровень запрещён', async () => {
+    AppState.initializeTree(true);
+    // 5.1 — обычный подпункт
+    assert.ok(AppState.addNode('5', 'Подпункт', true).valid);
+    const child = AppState.findNodeById('5').children.at(-1);
+    // Пытаемся вынести его на 0 уровень (after раздела 5)
+    const res = await AppState.moveNode(child.id, '5', 'after');
+    assert.equal(res.valid, false);
+    assert.match(res.message, /верхний уровень/i);
+    // Узел остался под разделом 5
+    assert.equal(AppState.findParentNode(child.id).id, '5');
+});

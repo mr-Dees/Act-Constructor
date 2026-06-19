@@ -38,49 +38,13 @@ export const ValidationTree = {
     },
 
     /**
-     * Проверяет возможность добавления соседнего узла
-     * @param {string} nodeId - ID узла для добавления рядом
-     * @returns {Object} Результат с полями valid, message, isWarning
+     * Проверяет возможность добавления соседнего узла.
+     * Узлы 0 уровня обрабатываются в меню (пункт Process Mining), здесь без
+     * спец-логики.
+     * @param {string} nodeId
+     * @returns {Object}
      */
     canAddSibling(nodeId) {
-        const parent = AppState.findParentNode(nodeId);
-
-        if (parent?.id === 'root') {
-            return this._validateFirstLevelSiblingAddition(parent, nodeId);
-        }
-
-        return ValidationCore.success();
-    },
-
-    /**
-     * Валидирует добавление sibling на первом уровне
-     * @private
-     * @param {Object} parent - Родительский узел (root)
-     * @param {string} nodeId - ID узла-соседа
-     * @returns {Object} Результат валидации
-     */
-    _validateFirstLevelSiblingAddition(parent, nodeId) {
-        const hasCustomFirstLevel = parent.children.some(child => {
-            // Number вместо parseInt: '7.1' не должен считаться пунктом 7
-            const num = child.number ? Number(child.number) : null;
-            return num === 7;
-        });
-
-        if (hasCustomFirstLevel) {
-            return ValidationCore.failure(
-                AppConfig.tree.validation.maxCustomSections(
-                    AppConfig.tree.maxCustomFirstLevelSections
-                )
-            );
-        }
-
-        const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
-        if (nodeIndex !== parent.children.length - 1) {
-            return ValidationCore.failure(
-                AppConfig.tree.validation.firstLevelOnlyAtEnd
-            );
-        }
-
         return ValidationCore.success();
     },
 

@@ -609,45 +609,16 @@ Object.assign(AppState, {
     },
 
     /**
-     * Проверяет ограничения для первого уровня
-     * @private
-     * @param {Object} draggedNode - Перемещаемый узел
-     * @param {Object} draggedParent - Текущий родитель
-     * @param {Object} targetNode - Целевой узел
-     * @param {string} targetNodeId - ID целевого узла
-     * @param {string} position - Позиция
-     * @returns {Object} Результат проверки
+     * Запрещает перемещение любого узла на 0 уровень (в children root).
+     * Разделы 0 уровня защищены и не перетаскиваются; единственный добавляемый
+     * пункт 0 уровня — Process Mining (через меню).
      */
     _checkFirstLevelConstraints(draggedNode, draggedParent, targetNode, targetNodeId, position) {
-        // Проверяем только при перемещении before/after
         if (position === 'child') return ValidationCore.success();
-
         const targetParent = this.findParentNode(targetNodeId);
-        if (!targetParent || targetParent.id !== 'root') return ValidationCore.success();
-
-        // Если узел уже на первом уровне, разрешаем перемещение
-        if (draggedParent.id === 'root') return ValidationCore.success();
-
-        // Проверяем, есть ли уже кастомный пункт 7
-        // (Number вместо parseInt: '7.1' не должен считаться пунктом 7)
-        const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.number ? Number(child.number) : null;
-            return num === 7;
-        });
-
-        if (hasCustomFirstLevel) {
-            return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (7)');
+        if (targetParent?.id === 'root') {
+            return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToFirstLevel);
         }
-
-        // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
-        const targetNumber = targetNode.number ? Number(targetNode.number) : null;
-        if (!targetNumber) return ValidationCore.success();
-
-        if ((position === 'before' && targetNumber !== 7) ||
-            (position === 'after' && targetNumber !== 6)) {
-            return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
-        }
-
         return ValidationCore.success();
     },
 

@@ -326,7 +326,6 @@ export class AppConfig {
     static tree = {
         // Ограничения структуры
         maxDepth: 4,
-        maxCustomFirstLevelSections: 1,
 
         // Стандартные разделы
         defaultSections: [
@@ -405,8 +404,7 @@ export class AppConfig {
         // Сообщения валидации
         validation: {
             maxDepthExceeded: (depth) => `Достигнута максимальная вложенность (${depth} уровней: ${'.'.repeat(depth - 1)}*)`,
-            maxCustomSections: (max) => `Можно добавить только ${max} дополнительный пункт первого уровня (пункт 7)`,
-            firstLevelOnlyAtEnd: 'Новый пункт первого уровня можно добавить только в конец списка',
+            cannotMoveToFirstLevel: 'Нельзя переносить пункты на верхний уровень',
             cannotMoveToSelf: 'Нельзя переместить узел в самого себя',
             cannotMoveProtected: 'Нельзя перемещать защищенный элемент',
             cannotMoveToDescendant: 'Нельзя переместить узел внутрь своего потомка',
