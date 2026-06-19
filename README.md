@@ -14,7 +14,7 @@
 
 ```bash
 git clone <repository-url>
-cd "Act Constructor"
+cd "audit-workstation"
 python -m venv .venv
 source .venv/bin/activate   # Linux/Mac
 # .venv\Scripts\activate    # Windows

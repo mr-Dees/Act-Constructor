@@ -385,13 +385,13 @@
    SELECT service_name, pid, host, started_at,
           now() - started_at AS age
    FROM {SCHEMA}.{PREFIX}app_singleton_lock
-   WHERE service_name = 'act_constructor';
+   WHERE service_name = 'audit_workstation';
    ```
 
 3. Если запись «зависла» (`age > 60 sec`) и реального процесса нет — можно дождаться авто-перезаписи (повторный старт через минуту пройдёт) либо ускорить очисткой вручную:
    ```sql
    DELETE FROM {SCHEMA}.{PREFIX}app_singleton_lock
-   WHERE service_name = 'act_constructor';
+   WHERE service_name = 'audit_workstation';
    ```
 
 4. Если процесс действительно жив — найти его и остановить (`kill <pid>`); при корректном SIGTERM lifespan сам удалит строку.

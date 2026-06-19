@@ -109,9 +109,9 @@ class TestAcquireSingletonLock:
         # $1 = service_name
         assert args[1] == "custom_svc"
 
-    async def test_default_service_name_is_act_constructor(self):
-        """Дефолтное имя сервиса — act_constructor."""
-        assert SERVICE_NAME == "act_constructor"
+    async def test_default_service_name_is_audit_workstation(self):
+        """Дефолтное имя сервиса — audit_workstation."""
+        assert SERVICE_NAME == "audit_workstation"
 
 
 class TestReleaseSingletonLock:

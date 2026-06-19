@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright-конфиг для Act Constructor E2E.
+ * Playwright-конфиг для Audit Workstation E2E.
  *
  * Сервер uvicorn поднимается в global-setup и останавливается в global-teardown
  * (не через `webServer:` — нужен контроль над env/seed-данными).

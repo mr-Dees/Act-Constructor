@@ -67,7 +67,7 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
 
 ```sql
 DELETE FROM {SCHEMA}.{PREFIX}app_singleton_lock
-WHERE service_name = 'act_constructor';
+WHERE service_name = 'audit_workstation';
 ```
 
 ---

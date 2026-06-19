@@ -28,7 +28,7 @@ DEFAULT_STALE_TTL_SEC = 60
 
 # Имя сервиса в таблице. Если когда-нибудь понадобится изолировать инстансы
 # (например, dev/prod на одном кластере), значение можно вынести в settings.
-SERVICE_NAME = "act_constructor"
+SERVICE_NAME = "audit_workstation"
 
 
 class SingletonLockBusyError(RuntimeError):
