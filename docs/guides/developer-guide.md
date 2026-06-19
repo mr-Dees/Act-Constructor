@@ -410,6 +410,8 @@ DatabaseAdapter (абстрактный)
 
 > **`public_api`** — флаг `DomainDescriptor`. По умолчанию `register_domains()` вешает на роутеры домена `require_domain_access(<домен>)`. Для кросс-доменного «общего» API, доступного всем авторизованным ролям (центр уведомлений), выставь `public_api=True` — гейт не вешается, остаётся только `get_username`.
 
+> **`POST /api/v1/notifications/internal`** — service-to-service эндпоинт для встроенных sidecar-агентов (например, SQLAgent) в том же per-user контейнере. В отличие от admin-only `POST ""`, доступен любому авторизованному пользователю, но **форсит** `source="sqlagent"` и адресата = текущий пользователь (`recipient_user_id`), `link` по умолчанию `/sqlagent`. Источник/адресата подделать нельзя; защищён изоляцией контейнера (как iframe-режим, см. `docs/guides/agent-integration-iframe.md`). Используется обратным каналом уведомлений о завершении/ошибке выгрузки SQLAgent.
+
 ### 2.5 Middleware stack
 
 В `create_app()` подключаются шесть middleware. В Starlette порядок выполнения обратный порядку регистрации: последний `add_middleware` обрабатывает запрос первым.

@@ -40,6 +40,20 @@ class NotificationCreate(BaseModel):
     element_ref: str | None = Field(default=None, max_length=200)
 
 
+class InternalNotificationCreate(BaseModel):
+    """Тело внутреннего (service-to-service) запроса на уведомление.
+
+    Для вызовов из sidecar-процессов в том же per-user контейнере (SQLAgent).
+    ``source`` / ``recipient_user_id`` / ``created_by`` в теле НЕ принимаются —
+    их форсит эндпоинт (адресат = текущий пользователь, источник фиксирован).
+    """
+
+    severity: Literal["info", "success", "warning", "error"] = "info"
+    title: str = Field(max_length=300)
+    body: str | None = None
+    link: str | None = Field(default=None, max_length=1000)
+
+
 class UnreadCount(BaseModel):
     """Сводка непрочитанных уведомлений (GET /api/v1/notifications/unread-count).
 

@@ -16,6 +16,7 @@ from app.domains.notifications.deps import (
     get_notifications_settings,
 )
 from app.domains.notifications.schemas import (
+    InternalNotificationCreate,
     NotificationCreate,
     NotificationOut,
     NotificationsConfigResponse,
@@ -29,6 +30,10 @@ from app.domains.notifications.settings import NotificationsSettings
 logger = logging.getLogger("audit_workstation.domains.notifications.api")
 
 router = APIRouter()
+
+# Источник и дефолтная ссылка уведомлений от встроенного SQL-агента (sidecar).
+_SQLAGENT_SOURCE = "sqlagent"
+_SQLAGENT_DEFAULT_LINK = "/sqlagent"
 
 
 @router.get("", response_model=list[NotificationOut], summary="Список уведомлений")
@@ -121,6 +126,32 @@ async def dismiss(
     """Скрывает уведомление для текущего пользователя."""
     await service.dismiss(notification_id, username)
     return {"ok": True}
+
+
+@router.post("/internal", summary="Создать уведомление из sidecar-процесса")
+async def create_internal_notification(
+    payload: InternalNotificationCreate,
+    username: str = Depends(get_username),
+    service: NotificationService = Depends(get_notification_service),
+):
+    """Создаёт уведомление от встроенного агента в том же контейнере.
+
+    В отличие от ``POST ""`` (admin-only), доступен любому авторизованному
+    пользователю, но жёстко адресует уведомление ему самому
+    (``recipient_user_id = username``) и фиксирует ``source``. Безопасно:
+    эндпоинт достижим только изнутри per-user контейнера (граница изоляции),
+    адресата и источник подделать нельзя.
+    """
+    notification_id = await service.push(
+        source=_SQLAGENT_SOURCE,
+        title=payload.title,
+        severity=payload.severity,
+        body=payload.body,
+        link=payload.link or _SQLAGENT_DEFAULT_LINK,
+        recipient_user_id=username,
+        created_by=_SQLAGENT_SOURCE,
+    )
+    return {"id": notification_id}
 
 
 @router.post(

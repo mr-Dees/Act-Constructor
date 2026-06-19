@@ -397,3 +397,73 @@ def test_public_api_skips_domain_gate():
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"count": 3, "severity": "info"}
+
+
+# ── POST /notifications/internal (sidecar service-to-service) ─────────────────
+
+
+def test_internal_push_forces_recipient_source_and_default_link():
+    """POST /internal форсит source=sqlagent, адресата=текущий пользователь, link=/sqlagent."""
+    svc = _make_service()
+    svc.push.return_value = "nid-123"
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications/internal",
+            json={
+                "severity": "success",
+                "title": "Выгрузка завершилась",
+                "body": "CSV, 100 строк",
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"id": "nid-123"}
+    kw = svc.push.await_args.kwargs
+    assert kw["source"] == "sqlagent"
+    assert kw["recipient_user_id"] == USERNAME
+    assert kw["severity"] == "success"
+    assert kw["link"] == "/sqlagent"
+    assert kw["created_by"] == "sqlagent"
+
+
+def test_internal_push_keeps_explicit_link():
+    """Явный link сохраняется (не перетирается дефолтом /sqlagent)."""
+    svc = _make_service()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications/internal",
+            json={"severity": "error", "title": "Ошибка выгрузки", "link": "/sqlagent?j=1"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert svc.push.await_args.kwargs["link"] == "/sqlagent?j=1"
+
+
+def test_internal_push_rejects_bad_severity():
+    """severity вне набора Literal → 422, svc.push не вызван."""
+    svc = _make_service()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications/internal",
+            json={"severity": "critical", "title": "x"},
+        )
+    assert resp.status_code == 422, resp.text
+    svc.push.assert_not_awaited()
+
+
+def test_internal_push_available_to_non_admin():
+    """Внутренний эндпоинт доступен не-админу (в отличие от POST '' — не под require_admin)."""
+    svc = _make_service()
+    svc.push.return_value = "nid-9"
+    app = _build_app(
+        svc,
+        roles=[{"id": 1, "name": "Цифровой акт", "domain_name": "acts"}],
+    )
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications/internal",
+            json={"severity": "success", "title": "Готово"},
+        )
+    assert resp.status_code == 200, resp.text
+    svc.push.assert_awaited_once()
