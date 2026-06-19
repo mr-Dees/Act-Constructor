@@ -30,7 +30,7 @@ import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { getBlockType, isLeafBlockType } from '../block-types.js';
-import { isPinnedTable, isRiskTable, isMetricsTable } from '../table/table-kind.js';
+import { isPinnedTable, isRiskTable, isMetricsTable, getTableKind } from '../table/table-kind.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { formatMb } from '../../shared/format-units.js';
@@ -360,10 +360,11 @@ export const NodeClipboard = {
 
         resetInvoices(regenerated.node);
 
-        // Корень буфера — таблица рисков: допускается только в пункт раздела 5 (5.X+).
+        // Корень буфера — таблица рисков: полная проверка размещения.
         if (isRiskTable(regenerated.node)) {
-            if (!/^5\.\d+/.test(target.number || '')) {
-                Notifications.error('Таблицу рисков можно вставлять только в пункты раздела 5');
+            const placement = AppState._checkRiskTablePastePlacement(target, getTableKind(regenerated.node));
+            if (!placement.valid) {
+                Notifications.error(placement.message);
                 return false;
             }
         }

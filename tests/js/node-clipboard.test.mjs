@@ -42,7 +42,6 @@ import { CONTENT_TYPE_IMAGE } from '../../static/js/constructor/violation/violat
 import { TreeUtils } from '../../static/js/constructor/tree/tree-utils.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
 import { Notifications } from '../../static/js/shared/notifications.js';
-import { isRiskTable as kindIsRisk } from '../../static/js/constructor/table/table-kind.js';
 
 // ── In-memory localStorage поверх no-op stub'а ─────────────────────────────────
 const _store = new Map();
@@ -664,4 +663,37 @@ test('paste: пункт с рисками в раздел 5 пересоздаё
     assert.equal(NodeClipboard.pasteInto('5'), true);
     const node5 = AppState.findNodeById('5');
     assert.ok(node5.children.some(c => c.kind === 'mainMetrics'), 'общая сводная должна существовать');
+});
+
+test('paste: одиночный риск на уровень пункта при рисках на подпунктах — отклоняется', () => {
+    AppState.initializeTree(true);
+    AppState.addNode('5', 'Пункт1', true);
+    const p1 = AppState.findNodeById('5').children.at(-1);
+    AppState.addNode(p1.id, 'Подпункт', true);
+    const sub = AppState.findNodeById(p1.id).children.at(-1);
+    assert.ok(AppState._createRegularRiskTable(sub.id).valid);
+    MetricsRiskCoordinator.onRiskTableAdded(sub.id);
+    AppState.generateNumbering();
+    const risk = AppState.findNodeById(sub.id).children.find(c => c.kind && c.kind.endsWith('Risk'));
+    assert.ok(NodeClipboard.copyNode(risk.id));
+    AppState.addNode('5', 'Пункт2', true);
+    const p2 = AppState.findNodeById('5').children.at(-1);
+    AppState.generateNumbering();
+    const before = AppState.findNodeById(p2.id).children.length;
+    assert.equal(NodeClipboard.pasteInto(p2.id), false);
+    assert.equal(AppState.findNodeById(p2.id).children.length, before);
+});
+
+test('paste: второй риск того же типа на один пункт — отклоняется', () => {
+    AppState.initializeTree(true);
+    AppState.addNode('5', 'Пункт', true);
+    const p = AppState.findNodeById('5').children.at(-1);
+    assert.ok(AppState._createRegularRiskTable(p.id).valid);
+    MetricsRiskCoordinator.onRiskTableAdded(p.id);
+    AppState.generateNumbering();
+    const risk = AppState.findNodeById(p.id).children.find(c => c.kind && c.kind.endsWith('Risk'));
+    assert.ok(NodeClipboard.copyNode(risk.id));
+    const before = AppState.findNodeById(p.id).children.length;
+    assert.equal(NodeClipboard.pasteInto(p.id), false);
+    assert.equal(AppState.findNodeById(p.id).children.length, before);
 });

@@ -640,6 +640,49 @@ Object.assign(AppState, {
      * @param {Object} newParent - Новый родитель после перемещения
      * @returns {Object} Результат проверки
      */
+    /**
+     * Проверка размещения ОДИНОЧНОЙ таблицы рисков при copy/paste.
+     * Move-путь работает только с ITEM-поддеревьями, поэтому
+     * _checkSection5RiskConstraints пропускает узел-таблицу. Здесь — те же
+     * правила, что при создании риска через меню: согласованность уровней
+     * (пункты 5.X ↔ подпункты 5.X.Y) и запрет второй таблицы того же типа на узле.
+     * @param {Object} target - Узел-цель (риск вставляется как его ребёнок)
+     * @param {string} riskKind - kind вставляемой риск-таблицы
+     * @returns {Object} ValidationCore результат
+     */
+    _checkRiskTablePastePlacement(target, riskKind) {
+        const num = target.number || '';
+        const targetIsPoint = /^5\.\d+$/.test(num);
+        const targetIsSubpoint = /^5\.\d+\.\d+/.test(num);
+        if (!targetIsPoint && !targetIsSubpoint) {
+            return ValidationCore.failure('Таблицу рисков можно вставлять только в пункты раздела 5');
+        }
+        // Вторая таблица того же типа на одном узле запрещена.
+        const hasSameKind = (target.children || []).some(
+            c => c.type === AppConfig.nodeTypes.TABLE && c.kind === riskKind
+        );
+        if (hasSameKind) {
+            return ValidationCore.failure('На одном пункте может быть только одна таблица риска этого типа');
+        }
+        // Согласованность уровней: все риски §5 — либо на пунктах, либо на подпунктах.
+        const node5 = this.findNodeById('5');
+        let existingPoint = false, existingSubpoint = false;
+        const walk = (node) => {
+            if ((!node.type || node.type === AppConfig.nodeTypes.ITEM) && /^5\.\d+/.test(node.number || '')) {
+                if ((node.children || []).some(c => this._isRiskTable(c))) {
+                    if ((node.number.split('.').length - 1) === 1) existingPoint = true;
+                    else existingSubpoint = true;
+                }
+            }
+            (node.children || []).forEach(walk);
+        };
+        if (node5) (node5.children || []).forEach(walk);
+        if ((existingSubpoint && targetIsPoint) || (existingPoint && targetIsSubpoint)) {
+            return ValidationCore.failure('Нельзя: таблицы рисков окажутся на разных уровнях раздела 5');
+        }
+        return ValidationCore.success();
+    },
+
     _checkSection5RiskConstraints(draggedNode, newParent) {
         if (draggedNode.type && draggedNode.type !== AppConfig.nodeTypes.ITEM) return ValidationCore.success();
 
@@ -986,6 +1029,10 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
         if (root.children.some(c => c.special === 'process_mining')) {
+            return ValidationCore.failure('Пункт «Process Mining» уже добавлен');
+        }
+        // Защита от дубликата id на старых актах, где раздел '6' ещё в дереве.
+        if (root.children.some(c => c.id === AppConfig.tree.processMiningSection.id)) {
             return ValidationCore.failure('Пункт «Process Mining» уже добавлен');
         }
 

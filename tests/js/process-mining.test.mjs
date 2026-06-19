@@ -104,3 +104,12 @@ test('нельзя перенести нарушение под пункт Proce
     const res = await AppState.moveNode(vio.id, '6', 'child');
     assert.equal(res.valid, false);
 });
+
+test('addProcessMiningSection не создаёт дубликат id при наличии legacy-раздела 6', () => {
+    AppState.initializeTree(true);
+    AppState.treeData.children.push({ id: '6', label: 'Старый раздел', children: [], content: '' });
+    AppState._rebuildNodeIndex();
+    const res = AppState.addProcessMiningSection();
+    assert.equal(res.valid, false);
+    assert.equal(AppState.treeData.children.filter(c => c.id === '6').length, 1);
+});
