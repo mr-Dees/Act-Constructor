@@ -86,6 +86,28 @@ export const AppState = {
     },
 
     /**
+     * Создаёт опциональный защищённый пункт «Process Mining».
+     * protected: нельзя перетаскивать/переименовывать; deletable: можно удалить;
+     * titleLocked: заголовок зафиксирован.
+     * @private
+     * @returns {Object} Узел пункта Process Mining
+     */
+    _createProcessMiningSection() {
+        const cfg = AppConfig.tree.processMiningSection;
+        return {
+            id: cfg.id,
+            label: cfg.label,
+            special: cfg.special,
+            protected: true,
+            deletable: true,
+            titleLocked: true,
+            type: AppConfig.nodeTypes.ITEM,
+            children: [],
+            content: ''
+        };
+    },
+
+    /**
      * Создает предустановленные таблицы при инициализации
      * @private
      * @param {boolean} isProcessBased - Является ли проверка процессной

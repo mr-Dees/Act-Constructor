@@ -993,5 +993,59 @@ Object.assign(AppState, {
                 this._clearInvoiceRecursive(child);
             }
         }
+    },
+
+    /**
+     * Добавляет опциональный пункт «Process Mining» последним на 0 уровне.
+     * Если в дереве уже есть раздел с id '6' (из defaultSections), активирует
+     * его как PM-пункт (устанавливает флаги). Если нет — создаёт и вставляет.
+     * Идемпотентность: повторный вызов запрещён (проверяется по special).
+     * @returns {Object} Результат валидации
+     */
+    addProcessMiningSection() {
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
+
+        const root = this.treeData;
+        if (!root?.children) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+        if (root.children.some(c => c.special === 'process_mining')) {
+            return ValidationCore.failure('Пункт «Process Mining» уже добавлен');
+        }
+
+        const cfg = AppConfig.tree.processMiningSection;
+        // Если раздел с id='6' уже есть в дереве (из defaultSections) — активируем его.
+        const existing = root.children.find(c => c.id === cfg.id);
+        if (existing) {
+            existing.label = cfg.label;
+            existing.special = cfg.special;
+            existing.protected = true;
+            existing.deletable = true;
+            existing.titleLocked = true;
+            if (!existing.type) existing.type = AppConfig.nodeTypes.ITEM;
+            this.generateNumbering();
+            return ValidationCore.success();
+        }
+
+        const node = this._createProcessMiningSection();
+        root.children.push(node);
+        this._indexNodeAdded(node, root);
+        this.generateNumbering();
+        return ValidationCore.success();
+    },
+
+    /**
+     * Находится ли узел в поддереве пункта «Process Mining» (включая сам пункт).
+     * @param {string} nodeId
+     * @returns {boolean}
+     */
+    _isUnderProcessMining(nodeId) {
+        let cur = this.findNodeById(nodeId);
+        while (cur) {
+            if (cur.special === 'process_mining') return true;
+            cur = this.findParentNode(cur.id);
+        }
+        return false;
     }
 });
