@@ -398,7 +398,7 @@ export const NodeClipboard = {
             return false;
         }
 
-        // КП-5: лимит картинок (без изменений)
+        // КП-5: лимит суммарного размера картинок целевого акта.
         const limits = getImageLimits();
         const existingBytes = estimateActImageBytes(_unwrap(AppState.violations) || {});
         const pastedBytes = estimateActImageBytes(regenerated.dicts.violations || {});
@@ -417,6 +417,7 @@ export const NodeClipboard = {
         const appendIndex = target.children ? target.children.length : 0;
         const result = AppState.insertNodeAt(targetNodeId, regenerated.node, appendIndex);
         if (!result.valid) {
+            // Откат перенесённых записей словарей — узел не вставился.
             for (const [dictName, entries] of Object.entries(regenerated.dicts)) {
                 const dict = AppState[dictName];
                 if (!dict) continue;
