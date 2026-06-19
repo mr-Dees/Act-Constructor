@@ -65,3 +65,10 @@ test('по умолчанию дерево содержит 5 защищённы
         assert.notEqual(c.deletable, true, `раздел ${c.id} не должен быть deletable`);
     }
 });
+
+test('пункт 0 уровня определяется как ребёнок root', () => {
+    AppState.initializeTree(true);
+    assert.equal(AppState.findParentNode('5').id, 'root');
+    AppState.addProcessMiningSection();
+    assert.equal(AppState.findParentNode('6').id, 'root');
+});

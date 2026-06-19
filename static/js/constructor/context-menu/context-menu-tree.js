@@ -92,6 +92,21 @@ export class TreeContextMenu {
             addChildItem.classList.toggle('disabled', !!isAddChildBlocked);
         }
 
+        // На 0 уровне «Добавить соседний пункт» превращается в «Добавить пункт: Process Mining».
+        const siblingItem = this.menu.querySelector('[data-action="add-sibling"]');
+        if (siblingItem) {
+            const parent = AppState.findParentNode(nodeId);
+            const isLevelZero = parent?.id === 'root';
+            const pmExists = !!AppState.treeData?.children?.some(c => c.special === 'process_mining');
+            if (isLevelZero) {
+                siblingItem.innerHTML = '<span aria-hidden="true">➕</span> Добавить пункт: Process Mining';
+                siblingItem.classList.toggle('disabled', pmExists);
+            } else {
+                siblingItem.innerHTML = '<span aria-hidden="true">➕</span> Добавить соседний пункт';
+                siblingItem.classList.remove('disabled');
+            }
+        }
+
         // Доступность инъецированных пунктов «Копировать»/«Вставить» (clipboard).
         window.NodeClipboard?.refreshMenuState?.(node);
     }
@@ -303,8 +318,16 @@ export class TreeContextMenu {
         }
     }
 
-    /** Добавляет соседний элемент */
+    /** Добавляет соседний элемент (на 0 уровне — пункт Process Mining) */
     handleAddSibling(node, nodeId) {
+        const parent = AppState.findParentNode(nodeId);
+
+        // На 0 уровне «соседний пункт» = опциональный пункт Process Mining.
+        if (parent?.id === 'root') {
+            this.handleAddProcessMining();
+            return;
+        }
+
         // Нельзя добавлять соседние подпункты на уровне 5.*.*, если где-либо на 5.* есть таблица рисков
         if (node.number?.match(/^5\.\d+\./)) {
             if (this._hasRiskTablesAtLevel5x()) {
@@ -315,11 +338,20 @@ export class TreeContextMenu {
 
         const result = AppState.addNode(nodeId, '', false);
         if (result.valid) {
-            // Добавление сиблинга → пересборка поддерева общего родителя
-            const parent = AppState.findParentNode(nodeId);
-            this.updateTreeViews(parent ? parent.id : undefined);
+            const sibParent = AppState.findParentNode(nodeId);
+            this.updateTreeViews(sibParent ? sibParent.id : undefined);
         } else {
             Notifications.error(result.message || 'Не удалось добавить элемент');
+        }
+    }
+
+    /** Добавляет опциональный пункт Process Mining (0 уровень). */
+    handleAddProcessMining() {
+        const result = AppState.addProcessMiningSection();
+        if (result.valid) {
+            this.updateTreeViews(); // полный рендер: добавлен пункт 0 уровня
+        } else {
+            Notifications.error(result.message || 'Не удалось добавить пункт');
         }
     }
 
