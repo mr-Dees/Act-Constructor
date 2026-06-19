@@ -55,3 +55,13 @@ test('_isUnderProcessMining истинно для пункта PM и его по
     assert.equal(AppState._isUnderProcessMining(child.id), true);
     assert.equal(AppState._isUnderProcessMining('5'), false);
 });
+
+test('по умолчанию дерево содержит 5 защищённых разделов без Process Mining', () => {
+    AppState.initializeTree(true);
+    const ids = AppState.treeData.children.map(c => c.id);
+    assert.deepEqual(ids, ['1', '2', '3', '4', '5']);
+    for (const c of AppState.treeData.children) {
+        assert.equal(c.protected, true, `раздел ${c.id} должен быть protected`);
+        assert.notEqual(c.deletable, true, `раздел ${c.id} не должен быть deletable`);
+    }
+});

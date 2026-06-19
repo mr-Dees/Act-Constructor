@@ -77,9 +77,8 @@ export const AppState = {
         return {
             id,
             label,
-            // Раздел 6 — опциональный: пользователь может его удалить
-            protected: id !== '6',
-            deletable: id === '6',
+            protected: true,
+            deletable: false,
             children: [],
             content: ''
         };
