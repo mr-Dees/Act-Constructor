@@ -31,7 +31,11 @@ logger = logging.getLogger("audit_workstation.domains.notifications.api")
 
 router = APIRouter()
 
-# Источник и дефолтная ссылка уведомлений от встроенного SQL-агента (sidecar).
+# Источник и ссылка уведомлений от встроенного SQL-агента (sidecar).
+# Ссылкой владеет AW: для обычных уведомлений sidecar НЕ присылает link —
+# подставляется _SQLAGENT_DEFAULT_LINK (единственный источник строки `/sqlagent`).
+# Поле link в запросе оставлено опциональным override только под будущий
+# deep-link на конкретную job (в этом случае URL строит AW).
 _SQLAGENT_SOURCE = "sqlagent"
 _SQLAGENT_DEFAULT_LINK = "/sqlagent"
 
