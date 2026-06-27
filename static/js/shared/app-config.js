@@ -432,16 +432,10 @@ export class AppConfig {
             tableCols: 3,
             columnWidth: 100,
 
-            // Текстовые блоки
+            // Текстовые блоки. Начертание (жирный/курсив/подчёркивание) живёт
+            // только в content как inline-HTML (B-1) — дефолтов formatting нет.
             fontSize: 14,
-            alignment: 'justify',
-
-            // Форматирование
-            formatting: {
-                bold: false,
-                italic: false,
-                underline: false
-            }
+            alignment: 'justify'
         },
 
         // Сообщения об ошибках

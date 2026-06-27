@@ -183,10 +183,8 @@ Object.assign(AppState, {
             id: textBlockId,
             nodeId,
             content: '',
+            // Начертание задаётся inline-HTML в content (B-1) — без полей.
             formatting: {
-                bold: defaults.formatting.bold,
-                italic: defaults.formatting.italic,
-                underline: defaults.formatting.underline,
                 fontSize: defaults.fontSize,
                 alignment: defaults.alignment
             }

@@ -740,9 +740,14 @@ class TestDynamicLimitsFromSettings:
     @pytest.fixture(autouse=True)
     def _reset_registry(self):
         from app.core import settings_registry
+        # B-35: _textblock_font_bounds кэширует границы (@lru_cache) — между
+        # тестами, меняющими ACTS__TEXTBLOCKS__*, кэш сбрасываем.
+        from app.domains.acts.schemas.act_content import _textblock_font_bounds
         settings_registry.reset()
+        _textblock_font_bounds.cache_clear()
         yield
         settings_registry.reset()
+        _textblock_font_bounds.cache_clear()
 
     @staticmethod
     def _register(acts_settings):

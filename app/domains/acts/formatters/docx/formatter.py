@@ -29,12 +29,11 @@ from app.domains.acts.formatters.docx.styles import (
 )
 from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
 
-# Текстблок рендерится строго по своему formatting: выравнивание/начертание —
-# буквально. Размер ОТДЕЛЬНО: дефолтный fontSize → body_pt (12pt), изменённый
-# → px→pt (×0.75); alignment/bold/italic/underline на размер не влияют (M.1,
-# фикс #9). Дефолт схемы (alignment='justify' = тело акта) совпадает с прежним
-# «нетронутым» рендером, но теперь явный выбор выравнивания (напр. 'left')
-# уважается, а не подменяется на JUSTIFY.
+# Текстблок рендерится по formatting (выравнивание/размер) + inline-разметке
+# content (начертание). Размер: дефолтный fontSize → body_pt (12pt), изменённый
+# → px→pt (×0.75); выравнивание на размер не влияет (M.1, фикс #9). Начертание
+# (жирный/курсив/подчёркивание) — только из inline-тегов content (B-1).
+# Дефолт схемы (alignment='justify' = тело акта) совпадает с «нетронутым» рендером.
 _DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
 
 # px → pt (16px → 12pt) — единый источник в builders/inline.py (_PX_TO_PT).
@@ -94,16 +93,16 @@ class DocxFormatter:
             body_run.font.size = Pt(Sizes.body_pt)
 
     def _render_textblock(self, doc, schema) -> None:
-        """Текстблок по его formatting (M.1).
+        """Текстблок по его formatting (M.1) + inline-разметке content.
 
         Выравнивание применяется буквально через _TB_ALIGNMENT_MAP: дефолт
         схемы (alignment='justify') даёт то же, что прежний «нетронутый»
-        рендер, а явный выбор (напр. 'left') теперь уважается, а не
-        подменяется на JUSTIFY (фикс). Размер: дефолтный fontSize → body_pt
-        (12pt), изменённый → px→pt (×0.75) — смена только выравнивания/
-        начертания шрифт НЕ уменьшает (#9). bold/italic/underline ложатся
-        поверх runs. Inline-разметка содержимого (теги <b>/<i>/...) имеет
-        приоритет — базовые свойства лишь «включают», но не снимают начертание.
+        рендер, а явный выбор (напр. 'left') уважается, а не подменяется на
+        JUSTIFY. Размер: дефолтный fontSize → body_pt (12pt), изменённый →
+        px→pt (×0.75) — смена только выравнивания шрифт НЕ уменьшает (#9).
+        Начертание (жирный/курсив/подчёркивание) задаётся ИСКЛЮЧИТЕЛЬНО
+        inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html выставляет
+        run.bold/italic/underline per-run; базового применения из formatting нет.
         """
         para = doc.add_paragraph()
         fmt = schema.formatting
@@ -113,15 +112,12 @@ class DocxFormatter:
             if fmt.fontSize == _DEFAULT_TB_FORMATTING.fontSize
             else fmt.fontSize * _PX_TO_PT
         )
+        # Начертание — единственным источником истины выступают inline-теги
+        # <b>/<i>/<u> в content (apply_inline_html выставляет run.bold/italic/
+        # underline per-run). Базовое применение из formatting.{bold,italic,
+        # underline} УБРАНО (B-1/B-37): прежний пост-цикл форсил начертание на
+        # ВСЕ runs, перетирая per-run inline-состояние.
         apply_inline_html(para, schema.content, base_size_pt=base_size_pt)
-        if fmt.bold or fmt.italic or fmt.underline:
-            for run in para.runs:
-                if fmt.bold:
-                    run.bold = True
-                if fmt.italic:
-                    run.italic = True
-                if fmt.underline:
-                    run.underline = True
 
     def _add_table_title(self, doc, node) -> None:
         """Заголовок таблицы: жирная подпись без нумерации (таблица — не пункт)."""

@@ -687,10 +687,9 @@ export const AppState = {
                 id: block.id,
                 nodeId: block.nodeId,
                 content: block.content || '',
+                // Начертание (жирный/курсив/подчёркивание) — только в content
+                // как inline-HTML (B-1); отдельных полей formatting больше нет.
                 formatting: {
-                    bold: block.formatting?.bold ?? defaults.formatting.bold,
-                    italic: block.formatting?.italic ?? defaults.formatting.italic,
-                    underline: block.formatting?.underline ?? defaults.formatting.underline,
                     fontSize: block.formatting?.fontSize ?? defaults.fontSize,
                     alignment: block.formatting?.alignment ?? defaults.alignment
                 }
