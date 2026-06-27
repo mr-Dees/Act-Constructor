@@ -1,5 +1,6 @@
 """Тесты inline HTML → docx runs."""
 from docx import Document
+from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
@@ -8,6 +9,11 @@ from app.domains.acts.formatters.docx.styles import Fonts
 
 def _add_p(doc):
     return doc.add_paragraph()
+
+
+def _count_breaks(p) -> int:
+    """Число реальных OOXML-переносов строки (<w:br/>) в параграфе."""
+    return len(p._p.findall(".//" + qn("w:br")))
 
 
 def test_plain_text(doc):
@@ -56,19 +62,25 @@ def test_nested_bold_italic(doc):
 
 
 def test_br_creates_line_break(doc):
+    """<br/> вставляет реальный OOXML-перенос (<w:br/>), а не символ '\\n'
+    внутри <w:t>: литеральный '\\n' Word схлопывает в пробел (текст в одну
+    строку при экспорте). _count_breaks считает именно элементы w:br —
+    прежний баг (_add_run('\\n')) дал бы 0 переносов (python-docx показывает
+    w:br как '\\n' в .text, поэтому различаем по XML, а не по тексту)."""
     p = _add_p(doc)
     apply_inline_html(p, "первая<br/>вторая", base_size_pt=12)
     full_text = "".join(r.text for r in p.runs)
     assert "первая" in full_text and "вторая" in full_text
+    assert _count_breaks(p) == 1
 
 
 def test_br_void_no_slash(doc):
-    """<br> без слэша должно вставить перевод строки (handle_starttag path)."""
+    """<br> без слэша тоже вставляет OOXML-перенос (handle_starttag path)."""
     p = _add_p(doc)
     apply_inline_html(p, "первая<br>вторая", base_size_pt=12)
     full_text = "".join(r.text for r in p.runs)
     assert "первая" in full_text and "вторая" in full_text
-    assert "\n" in full_text
+    assert _count_breaks(p) == 1
 
 
 def test_br_with_closing_tag_preserves_formatting(doc):
@@ -105,6 +117,50 @@ def test_double_br_void_does_not_break_bold_balance(doc):
     assert ("a", True) in runs
     assert ("b", True) in runs
     assert (" tail", False) in runs
+    assert _count_breaks(p) == 2
+
+
+def test_block_div_breaks_between_blocks(doc):
+    """Enter в contenteditable → <div>: перенос МЕЖДУ блоками, не перед первым."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<div>строка1</div><div>строка2</div>", base_size_pt=12)
+    full_text = "".join(r.text for r in p.runs)
+    assert "строка1" in full_text and "строка2" in full_text
+    assert _count_breaks(p) == 1  # только между блоками
+
+
+def test_block_div_no_leading_break(doc):
+    """Одиночный <div>-wrapper вокруг содержимого не даёт ведущего переноса."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<div>единственная</div>", base_size_pt=12)
+    assert _count_breaks(p) == 0
+
+
+def test_block_paragraph_tag_breaks(doc):
+    """<p> трактуется как блок: перенос между абзацами."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<p>раз</p><p>два</p>", base_size_pt=12)
+    assert _count_breaks(p) == 1
+
+
+def test_break_preserves_inline_formatting(doc):
+    """Перенос не сбрасывает per-run начертание соседних runs."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<b>жирн</b><br><i>курс</i>", base_size_pt=12)
+    assert _count_breaks(p) == 1
+    bold = next(r for r in p.runs if r.text == "жирн")
+    italic = next(r for r in p.runs if r.text == "курс")
+    assert bold.bold is True
+    assert italic.italic is True
+
+
+def test_break_preserves_font_size(doc):
+    """Размер шрифта соседних с переносом runs сохраняется (20px → 15pt)."""
+    p = _add_p(doc)
+    apply_inline_html(p, '<span style="font-size:20px">A</span><br>B', base_size_pt=12)
+    assert _count_breaks(p) == 1
+    run_a = next(r for r in p.runs if r.text == "A")
+    assert run_a.font.size == Pt(15)
 
 
 def test_empty_html(doc):

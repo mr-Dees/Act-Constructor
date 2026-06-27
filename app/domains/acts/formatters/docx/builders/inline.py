@@ -2,7 +2,9 @@
 
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <s>/<strike>/<del>,
 <span style="font-size: ...">, <span style="text-decoration: line-through">,
-<br>, <a href="...">. Любой другой тег игнорируется (содержимое сохраняется).
+<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) рендерятся как
+мягкий перенос строки между блоками (контейнерная разметка contenteditable из
+обычного Enter). Любой другой тег игнорируется (содержимое сохраняется).
 
 Зачёркивание (M.19): Chromium execCommand('strikeThrough') эмитит <strike>
 (тег-форма, styleWithCSS в приложении не включается); CSS-форма
@@ -23,6 +25,7 @@ import re
 from html.parser import HTMLParser
 from dataclasses import dataclass, replace
 
+from docx.enum.text import WD_BREAK
 from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 from docx.oxml import OxmlElement
@@ -51,6 +54,8 @@ class _RunState:
 
 
 _PX_TO_PT = 0.75
+# Блочные теги: их граница = перенос строки (Enter в contenteditable → <div>).
+_BLOCK_TAGS = frozenset({"div", "p", "li", "h1", "h2", "h3", "h4", "h5", "h6"})
 _SIZE_RE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*(px|pt)", re.IGNORECASE)
 # Зачёркивание CSS-формой: и text-decoration, и text-decoration-line.
 _STRIKE_RE = re.compile(r"text-decoration(?:-line)?\s*:\s*[^;]*line-through", re.IGNORECASE)
@@ -73,6 +78,9 @@ class _InlineParser(HTMLParser):
         # Параллельно стеку span'ов: что делать при их закрытии.
         # ("footnote", текст) | ("link", None) | ("plain", None)
         self._span_kinds: list[tuple[str, str | None]] = []
+        # Был ли уже выведен видимый контент (run/перенос) — чтобы не ставить
+        # перенос ПЕРЕД самым первым блоком (иначе пустая первая строка).
+        self._produced_output = False
 
     @property
     def state(self) -> _RunState:
@@ -102,14 +110,21 @@ class _InlineParser(HTMLParser):
             # закрывающий </b> снял бы лишний кадр вместо bold-фрейма и
             # текст после </b> остался бы жирным (H7). </br>, если придёт,
             # игнорируется в handle_endtag.
-            self._add_run("\n")
+            self._add_break()
+        elif tag in _BLOCK_TAGS:
+            # Граница блока = перенос строки. Перед содержимым нового блока
+            # вставляем перенос, но НЕ перед первым (guard по _produced_output).
+            # Кадр пушим — парный close-tag снимет его в handle_endtag (len>1).
+            if self._produced_output:
+                self._add_break()
+            self.stack.append(current)
         else:
             self.stack.append(current)
 
     def handle_startendtag(self, tag, attrs):
         """Обрабатывает self-closing теги вида <br/>."""
         if tag == "br":
-            self._add_run("\n")
+            self._add_break()
         else:
             self.handle_starttag(tag, attrs)
             self.handle_endtag(tag)
@@ -156,6 +171,7 @@ class _InlineParser(HTMLParser):
             self._add_run(data)
 
     def _add_run(self, text: str) -> None:
+        self._produced_output = True
         # Вне <a> используем высокоуровневый API python-docx — он создаёт
         # `w:r` с привычным порядком элементов (важно для обратной совместимости
         # с тестами, читающими p.runs/run.bold/run.font.size).
@@ -207,6 +223,24 @@ class _InlineParser(HTMLParser):
         t_el.text = text
         r_el.append(t_el)
 
+        self._hyperlink.append(r_el)
+
+    def _add_break(self) -> None:
+        """Реальный OOXML-перенос строки (<w:br/>).
+
+        Литеральный '\\n' внутри <w:t> Word НЕ интерпретирует как разрыв
+        (схлопывает в пробел) — видимый перенос даёт только элемент w:br.
+        """
+        self._produced_output = True
+        if self._hyperlink is None:
+            run = self.paragraph.add_run()
+            run.font.name = Fonts.main
+            run.font.size = Pt(self.state.size_pt)
+            run.add_break(WD_BREAK.LINE)
+            return
+        # Внутри <a>: w:br отдельным w:r внутри w:hyperlink.
+        r_el = OxmlElement("w:r")
+        r_el.append(OxmlElement("w:br"))
         self._hyperlink.append(r_el)
 
     def _open_hyperlink(self, href: str) -> bool:
