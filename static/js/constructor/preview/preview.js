@@ -185,10 +185,13 @@ export class PreviewManager {
                 }
             }
 
-            if (hasTableEdit) {
-                const sheet = document.querySelector('#preview .preview-sheet');
-                if (sheet) this._applyTableOutlines(sheet);
+            const sheet = document.querySelector('#preview .preview-sheet');
+            if (hasTableEdit && sheet) {
+                this._applyTableOutlines(sheet);
             }
+            // B-10: добавление/удаление сноски в блоке сдвигает сквозную
+            // нумерацию — пере-нумеровать весь лист (атрибут рантайм-only).
+            if (sheet) window.numberFootnotes?.(sheet);
             this._emitContentChanged();
         });
     }
@@ -301,6 +304,12 @@ export class PreviewManager {
         this._renderTitle(sheet);
         this._renderTree(sheet);
         this._attachPreviewTooltips(sheet);
+
+        // B-10: сквозная нумерация сносок по всему листу (как в Word). Атрибут
+        // data-footnote-number — рантайм-only (санитайзер 'acts' его вырезает),
+        // поэтому проставляем после каждой полной сборки. window-глобал —
+        // во избежание цикла импортов preview ↔ textblock.
+        window.numberFootnotes?.(sheet);
 
         // Цветные рамки проблемных таблиц на листе (источник — те же замечания,
         // что и колокольчик). Внутри renderDocumentInto, поэтому работает и для

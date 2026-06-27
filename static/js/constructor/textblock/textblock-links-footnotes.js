@@ -59,6 +59,26 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Публичная фабрика inline-маркера ссылки (для paste-потока 4г, контракт C5).
+     * Создаёт detached span.text-link с уникальным id; НЕ вставляет в DOM и НЕ
+     * навешивает обработчики (их навесит attachLinkFootnoteHandlers при фокусе/
+     * после вставки) — маркер неотличим от созданного вручную.
+     * @param {string} text Видимый текст ссылки
+     * @param {string} url URL (вызывающий гарантирует валидную схему)
+     * @returns {HTMLSpanElement}
+     */
+    createLinkMarker(text, url) {
+        const markerId = 'link_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const span = document.createElement('span');
+        span.className = 'text-link';
+        span.setAttribute('data-link-id', markerId);
+        span.setAttribute('data-link-url', url);
+        span.contentEditable = 'false';
+        span.textContent = text;
+        return span;
+    },
+
+    /**
      * Общий поток создания/редактирования inline-маркера (ссылка/сноска):
      * поиск существующего маркера в выделении → prompt значения → обновление
      * атрибута существующего ЛИБО вставка нового span с наследованием
@@ -102,11 +122,24 @@ Object.assign(TextBlockManager.prototype, {
             return;
         }
 
+        // 6.8: UX-валидация URL — только для ссылок (текст сноски любой).
+        // Зеркалит допустимые схемы бэк-санитайзера (inline.py _is_safe_url:
+        // http/https/mailto); безсхемный ввод → https://.
+        let resolvedValue = value;
+        if (cfg.valueAttr === 'data-link-url') {
+            const verdict = validateLinkUrl(value);
+            if (!verdict.ok) {
+                alert(verdict.message);
+                return;
+            }
+            resolvedValue = verdict.url;
+        }
+
         const range = selection.getRangeAt(0);
         let selectedText = range.toString();
 
         if (isEditing) {
-            existing.setAttribute(cfg.valueAttr, value);
+            existing.setAttribute(cfg.valueAttr, resolvedValue);
             this.attachLinkFootnoteHandlers();
         } else {
             const trailingSpaces = selectedText.match(/\s+$/);
@@ -123,7 +156,7 @@ Object.assign(TextBlockManager.prototype, {
             const markerSpan = document.createElement('span');
             markerSpan.className = cfg.className;
             markerSpan.setAttribute(cfg.idAttr, markerId);
-            markerSpan.setAttribute(cfg.valueAttr, value);
+            markerSpan.setAttribute(cfg.valueAttr, resolvedValue);
             markerSpan.contentEditable = 'false';
             markerSpan.textContent = selectedText;
 
@@ -171,6 +204,8 @@ Object.assign(TextBlockManager.prototype, {
 
         const textBlockId = this.activeEditor.dataset.textBlockId;
         this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        // B-10: создание/правка маркера могли добавить сноску — пере-нумеровать.
+        this.renumberEditorFootnotes();
     },
 
     /**
@@ -318,6 +353,8 @@ Object.assign(TextBlockManager.prototype, {
         if (this.activeEditor) {
             const textBlockId = this.activeEditor.dataset.textBlockId;
             this.saveContent(textBlockId, this.activeEditor.innerHTML);
+            // B-10: сноска удалена — пере-нумеровать оставшиеся.
+            this.renumberEditorFootnotes();
         }
     },
 
@@ -328,9 +365,16 @@ Object.assign(TextBlockManager.prototype, {
         this.hideTooltip();
 
         const isLink = element.classList.contains('text-link');
-        const content = isLink
-            ? element.getAttribute('data-link-url')
-            : element.getAttribute('data-footnote-text');
+        let content;
+        if (isLink) {
+            content = element.getAttribute('data-link-url');
+        } else {
+            const text = element.getAttribute('data-footnote-text');
+            const num = element.getAttribute('data-footnote-number');
+            // B-10: номер проставлен numberFootnotes (рантайм-атрибут). Пустая/
+            // непронумерованная сноска — показываем только текст.
+            content = num ? `Сноска ${num}: ${text}` : text;
+        }
 
         if (!content) return;
 
@@ -445,6 +489,18 @@ Object.assign(TextBlockManager.prototype, {
                 e.stopPropagation();
             }, { capture: true, signal });
         });
+    },
+
+    /**
+     * B-10: проставляет сквозную нумерацию сносок активного редактора
+     * (data-footnote-number) с учётом сносок в предшествующих по дереву блоках.
+     * Вызывается из потока фокуса и после создания/удаления маркера (не из
+     * attachLinkFootnoteHandlers — нумерация не привязана к навешиванию слушателей).
+     */
+    renumberEditorFootnotes() {
+        if (!this.activeEditor) return;
+        const offset = footnoteOffsetForBlock(this.activeEditor.dataset.textBlockId);
+        numberFootnotes(this.activeEditor, offset + 1);
     }
 });
 
@@ -456,12 +512,105 @@ TextBlockManager.prototype.handleEditorFocus = function (editor, textBlock) {
     originalHandleEditorFocus.call(this, editor, textBlock);
     this.initLinkFootnoteManager();
     this.attachLinkFootnoteHandlers();
+    this.renumberEditorFootnotes(); // B-10: сквозная нумерация сносок при фокусе
 
     setTimeout(() => {
         this.applyFormattingToNewNodes(editor);
     }, 100);
 };
 
+/**
+ * B-10: проставляет сквозную нумерацию сносок (как в Word) рантайм-атрибутом
+ * data-footnote-number в порядке появления в DOM (DFS). Атрибут НЕ в content
+ * (санитайзер 'acts' его вырезает) — нумеровать надо после каждого рендера.
+ * Пустые сноски (без data-footnote-text) пропускаются (паритет с бэком).
+ * @param {ParentNode} root Корень обхода (контейнер превью или редактор)
+ * @param {number} [startNumber=1] Стартовый номер (для сквозной нумерации)
+ * @returns {number} Следующий свободный номер
+ */
+export function numberFootnotes(root, startNumber = 1) {
+    if (!root || typeof root.querySelectorAll !== 'function') return startNumber;
+    let n = startNumber;
+    root.querySelectorAll('.text-footnote').forEach((el) => {
+        const text = el.getAttribute('data-footnote-text');
+        if (!text || !text.trim()) {
+            el.removeAttribute('data-footnote-number');
+            return;
+        }
+        el.setAttribute('data-footnote-number', String(n));
+        n += 1;
+    });
+    return n;
+}
+
+/**
+ * B-10: число непустых сносок во всех текстблоках, предшествующих заданному по
+ * порядку обхода дерева — стартовый офсет сквозной нумерации в редакторе.
+ * Безопасно деградирует к 0 (локальная нумерация), если состояние недоступно.
+ * @param {string} textBlockId
+ * @returns {number}
+ */
+export function footnoteOffsetForBlock(textBlockId) {
+    const state = window.AppState;
+    if (!state || !state.treeData || !state.textBlocks) return 0;
+    const order = [];
+    const walk = (node) => {
+        if (!node) return;
+        if (node.textBlockId) order.push(node.textBlockId);
+        if (node.children) node.children.forEach(walk);
+    };
+    walk(state.treeData);
+    let offset = 0;
+    const tmp = document.createElement('div');
+    for (const id of order) {
+        if (id === textBlockId) break;
+        const tb = state.textBlocks[id];
+        if (!tb || typeof tb.content !== 'string') continue;
+        tmp.innerHTML = tb.content;
+        tmp.querySelectorAll('.text-footnote').forEach((el) => {
+            const t = el.getAttribute('data-footnote-text');
+            if (t && t.trim()) offset += 1;
+        });
+    }
+    return offset;
+}
+
+/**
+ * 6.8: UX-валидация и нормализация URL при вводе ссылки. НЕ замена
+ * бэк-санитайзеру (_is_safe_url) — дружелюбная подсказка до сохранения.
+ * Допустимые схемы зеркалят бэк: http/https/mailto. Схему парсим строго (до
+ * первого ':'), а не substring-поиском (обход 'javascript:alert("http://")').
+ * @param {string} raw Сырой ввод пользователя
+ * @returns {{ok: true, url: string} | {ok: false, message: string}}
+ */
+export function validateLinkUrl(raw) {
+    const value = (raw || '').trim();
+    if (!value) {
+        return { ok: false, message: 'URL ссылки не может быть пустым' };
+    }
+    const schemeMatch = value.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+    if (!schemeMatch) {
+        // Схемы нет — частый кейс «www.example.com», подставляем https://.
+        return { ok: true, url: 'https://' + value };
+    }
+    const scheme = schemeMatch[1].toLowerCase();
+    if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') {
+        return { ok: true, url: value };
+    }
+    if (scheme === 'javascript' || scheme === 'data') {
+        return {
+            ok: false,
+            message: 'Недопустимая схема ссылки. Разрешены только http://, https:// и mailto:',
+        };
+    }
+    return {
+        ok: false,
+        message: `Схема «${scheme}:» не поддерживается. Используйте http://, https:// или mailto:`,
+    };
+}
+
 // Window-globals для совместимости с inline-скриптами в шаблонах.
 window.linkFootnoteContextMenu = linkFootnoteContextMenu;
 window.originalHandleEditorFocus = originalHandleEditorFocus;
+window.numberFootnotes = numberFootnotes;
+window.validateLinkUrl = validateLinkUrl;

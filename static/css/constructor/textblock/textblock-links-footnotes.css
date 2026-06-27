@@ -7,7 +7,7 @@
 .text-footnote {
     position: relative;
     background-color: var(--link-bg);
-    color: var(--primary);
+    color: var(--link-text);
     padding: var(--link-footnote-padding) var(--spacing-xs);
     border-radius: var(--radius-xs);
     cursor: pointer;
@@ -29,7 +29,7 @@
 /* Отличительный стиль для сносок */
 .text-footnote {
     background-color: var(--footnote-bg);
-    color: var(--accent);
+    color: var(--footnote-text);
     border-bottom-color: var(--footnote-border);
 }
 
@@ -43,13 +43,14 @@
 .text-footnote.editing-mode {
     position: relative;
     z-index: var(--z-dropdown);
-    padding: var(--spacing-xs) var(--spacing-sm);
-    margin: calc(-1 * var(--spacing-xs));
+    /* B-31: убраны padding-скачок, negative-margin и transform — раскладка
+       строки не смещается при входе в правку, подсветка только рамкой/тенью.
+       Собственные inline-стили маркера (font-size/color) не перекрываются —
+       это и закрывает B-11. */
     background-color: var(--bg-primary);
     border: var(--link-footnote-editing-border-width) solid var(--primary);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-md);
-    transform: translateY(var(--link-footnote-editing-translate));
     cursor: text;
     animation: editingPulse var(--transition-slow) ease;
 }
@@ -93,7 +94,10 @@
     content: '';
     position: absolute;
     bottom: 100%;
-    left: var(--spacing);
+    /* B-27: стрелка по центру tooltip (а не прибита к левому краю) — указывает
+       на чип в типовом случае, когда tooltip центрирован под элементом. */
+    left: 50%;
+    transform: translateX(-50%);
     border: var(--link-tooltip-arrow-size) solid transparent;
     border-bottom-color: var(--tooltip-bg);
 }
@@ -108,6 +112,9 @@
     min-width: var(--link-popup-min-width);
     max-width: var(--link-popup-max-width);
     z-index: var(--z-modal);
+    /* B-20: длинный текст не должен уводить кнопки действий за нижний край. */
+    max-height: calc(100vh - 2 * var(--spacing-lg));
+    overflow-y: auto;
     animation: scaleIn var(--transition-base) ease;
 }
 
@@ -280,4 +287,9 @@
     vertical-align: super;
     margin-left: var(--link-footnote-number-offset);
     font-weight: var(--font-weight-semibold);
+}
+
+/* B-10: в режиме inline-правки номер не показываем — не мешает курсору. */
+.text-footnote.editing-mode::after {
+    content: none;
 }
