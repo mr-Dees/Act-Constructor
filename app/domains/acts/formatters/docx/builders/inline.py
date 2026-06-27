@@ -36,8 +36,11 @@ from app.domains.acts.formatters.docx.footnotes import add_footnote
 from app.domains.acts.formatters.docx.styles import Fonts
 
 
-# Протоколы, допустимые в гиперссылках DOCX (совпадает с html_sanitizer).
-_SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:")
+# Схемы, допустимые во ВНЕШНИХ гиперссылках DOCX. Зеркало фронтового
+# validateLinkUrl (textblock-links-footnotes.js): веб, почта, телефон, ftp и
+# локальные файлы. Якоря '#...' обрабатываются как ВНУТРЕННИЕ ссылки (w:anchor)
+# в _open_hyperlink. javascript:/data:/vbscript: сюда не попадают → текст plain.
+_SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "file:")
 
 
 def _is_safe_url(href: str) -> bool:
@@ -244,14 +247,20 @@ class _InlineParser(HTMLParser):
         self._hyperlink.append(r_el)
 
     def _open_hyperlink(self, href: str) -> bool:
-        """Создаёт w:hyperlink с external relationship. Небезопасный
+        """Создаёт w:hyperlink. Якорь '#...' → внутренняя ссылка (w:anchor),
+        безопасная внешняя схема → external relationship (r:id). Небезопасный
         протокол (javascript: и т.п.) отклоняется → текст останется plain."""
-        if not _is_safe_url(href):
-            return False
-        part = self.paragraph.part
-        r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+        href = href.strip()
         hyperlink = OxmlElement("w:hyperlink")
-        hyperlink.set(qn("r:id"), r_id)
+        if href.startswith("#"):
+            # Внутри-документный якорь (закладка) — без external relationship.
+            hyperlink.set(qn("w:anchor"), href[1:])
+        elif _is_safe_url(href):
+            part = self.paragraph.part
+            r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+            hyperlink.set(qn("r:id"), r_id)
+        else:
+            return False
         self.paragraph._p.append(hyperlink)
         self._hyperlink = hyperlink
         return True

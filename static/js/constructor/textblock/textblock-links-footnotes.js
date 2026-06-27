@@ -604,12 +604,21 @@ export function footnoteOffsetForBlock(textBlockId) {
     return offset;
 }
 
+// Допустимые схемы ссылок (зеркало DOCX-экспорта inline.py _SAFE_LINK_PREFIXES):
+// веб, почта, телефон, ftp и ЛОКАЛЬНЫЕ ФАЙЛЫ. Якоря '#...' обрабатываются
+// отдельной веткой (внутри-документные ссылки). Применяется и к ручному вводу,
+// и к вставке из Word.
+const ALLOWED_LINK_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'ftp', 'file']);
+// XSS-опасные схемы блокируются всегда (исполняемый/эксфильтрационный вектор).
+const DANGEROUS_LINK_SCHEMES = new Set(['javascript', 'data', 'vbscript']);
+
 /**
- * 6.8: UX-валидация и нормализация URL при вводе ссылки. НЕ замена
- * бэк-санитайзеру (_is_safe_url) — дружелюбная подсказка до сохранения.
- * Допустимые схемы зеркалят бэк: http/https/mailto. Схему парсим строго (до
- * первого ':'), а не substring-поиском (обход 'javascript:alert("http://")').
- * @param {string} raw Сырой ввод пользователя
+ * 6.8: UX-валидация и нормализация URL при вводе/вставке ссылки. НЕ замена
+ * бэк-санитайзеру — дружелюбная подсказка до сохранения. Допустимые схемы:
+ * http/https/mailto/tel/ftp/file + якоря '#...'. Схему парсим строго (до первого
+ * ':'), а не substring-поиском (обход 'javascript:alert("http://")').
+ * Опасные схемы (javascript/data/vbscript) блокируются.
+ * @param {string} raw Сырой ввод/href
  * @returns {{ok: true, url: string} | {ok: false, message: string}}
  */
 export function validateLinkUrl(raw) {
@@ -617,24 +626,28 @@ export function validateLinkUrl(raw) {
     if (!value) {
         return { ok: false, message: 'URL ссылки не может быть пустым' };
     }
+    // Внутри-документный якорь (#закладка) — допустимая ссылка как есть.
+    if (value.startsWith('#')) {
+        return { ok: true, url: value };
+    }
     const schemeMatch = value.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
     if (!schemeMatch) {
         // Схемы нет — частый кейс «www.example.com», подставляем https://.
         return { ok: true, url: 'https://' + value };
     }
     const scheme = schemeMatch[1].toLowerCase();
-    if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') {
-        return { ok: true, url: value };
-    }
-    if (scheme === 'javascript' || scheme === 'data') {
+    if (DANGEROUS_LINK_SCHEMES.has(scheme)) {
         return {
             ok: false,
-            message: 'Недопустимая схема ссылки. Разрешены только http://, https:// и mailto:',
+            message: 'Недопустимая схема ссылки (javascript/data/vbscript заблокированы)',
         };
+    }
+    if (ALLOWED_LINK_SCHEMES.has(scheme)) {
+        return { ok: true, url: value };
     }
     return {
         ok: false,
-        message: `Схема «${scheme}:» не поддерживается. Используйте http://, https:// или mailto:`,
+        message: `Схема «${scheme}:» не поддерживается. Разрешены http, https, mailto, tel, ftp, file и якоря «#…».`,
     };
 }
 

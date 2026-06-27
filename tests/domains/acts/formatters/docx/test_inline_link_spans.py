@@ -74,3 +74,62 @@ def test_a_tag_javascript_url_is_not_a_hyperlink():
     )
     assert para._p.find(qn("w:hyperlink")) is None
     assert "клик" in para.text
+
+
+def test_data_url_is_not_a_hyperlink():
+    """BUG-4: data: тоже остаётся вне гиперссылок (вектор эксфильтрации)."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="data:text/html,x">клик</span>',
+        base_size_pt=12.0,
+    )
+    assert para._p.find(qn("w:hyperlink")) is None
+    assert "клик" in para.text
+
+
+def test_file_url_creates_external_hyperlink():
+    """BUG-4: ссылка на локальный файл (file:) экспортируется как внешняя."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="file:///C:/doc.pdf">файл</span>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    assert hyperlink is not None
+    rel = para.part.rels[hyperlink.get(qn("r:id"))]
+    assert rel.target_ref == "file:///C:/doc.pdf"
+    assert rel.is_external
+
+
+def test_tel_url_creates_external_hyperlink():
+    """BUG-4: tel: распознаётся как ссылка."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<a href="tel:+74951234567">позвонить</a>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    assert hyperlink is not None
+    assert para.part.rels[hyperlink.get(qn("r:id"))].is_external
+
+
+def test_anchor_url_creates_internal_hyperlink():
+    """BUG-4: якорь '#...' → внутренняя ссылка (w:anchor), без external r:id."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="#bookmark1">к разделу</span>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    assert hyperlink is not None
+    assert hyperlink.get(qn("w:anchor")) == "bookmark1"
+    assert hyperlink.get(qn("r:id")) is None
+    assert "к разделу" in para.text

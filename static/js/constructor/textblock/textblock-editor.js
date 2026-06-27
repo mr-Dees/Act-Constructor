@@ -224,41 +224,63 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * 4г: строит DocumentFragment из вставленного HTML. <a href> с абсолютной
-     * схемой (http/https/mailto) → span.text-link (фабрика createLinkMarker, C5);
-     * любой другой узел → его textContent. Структура (абзацы/списки) теряется
-     * сознательно — режим «только ссылки», без рассинхрона с бэк-санитайзером.
+     * 4г: строит DocumentFragment из вставленного HTML. <a href> на ЛЮБОЙ глубине
+     * → span.text-link (фабрика createLinkMarker, C5); прочий текст → textContent.
+     * Структура (абзацы/списки) теряется сознательно — режим «только ссылки».
+     * Word оборачивает <a> в mso-разметку, поэтому обходим всё дерево рекурсивно
+     * (а не только top-level), иначе вложенная ссылка терялась бы (BUG-4).
+     * Схему href валидирует validateLinkUrl (http/https/mailto/tel/ftp/file/#),
+     * как и при ручном вводе.
      * @private
      */
     _buildPasteFragment(html) {
         // DOMPurify сводит вход к <a href>…</a> + текст; остальное вырезается
         // (KEEP_CONTENT=true по умолчанию сохраняет текст внутри удалённых тегов).
+        // BUG-4: дефолтный ALLOWED_URI_REGEXP вырезает href со схемой file: (и
+        // потому ссылка на локальный файл терялась). Расширяем allowlist схем до
+        // http/https/ftp/file/mailto/tel + относительные/якоря; javascript:/data:/
+        // vbscript: regex по-прежнему отбивает (нет в списке, двоеточие). Финальный
+        // гейт схемы — validateLinkUrl в _collectPasteNodes.
         const clean = SafeHTML.sanitize(html, {
             USE_PROFILES: false,
             ALLOWED_TAGS: ['a'],
             ALLOWED_ATTR: ['href'],
+            ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
         });
 
         const tmp = document.createElement('div');
         tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
         const fragment = document.createDocumentFragment();
+        this._collectPasteNodes(tmp, fragment);
+        return fragment;
+    },
 
-        tmp.childNodes.forEach((node) => {
+    /**
+     * BUG-4: рекурсивный DFS-обход вставленного фрагмента с сохранением порядка.
+     * <a> превращается в маркер ссылки (внутрь не спускаемся — текст уже взят);
+     * прочие элементы рекурсируем (ищем вложенные <a>); текстовые узлы — как есть.
+     * validateLinkUrl лежит в window (избегаем циклического импорта с
+     * links-footnotes.js, который держит порядок инициализации handleEditorFocus).
+     * @private
+     */
+    _collectPasteNodes(root, fragment) {
+        root.childNodes.forEach((node) => {
             if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'A') {
-                const url = (node.getAttribute('href') || '').trim();
-                const text = node.textContent.trim();
-                // Только абсолютные http/https/mailto становятся ссылкой; без
-                // схемы/относительные (paste НЕ подставляет https://) → текст.
-                if (text && /^(https?:\/\/|mailto:)/i.test(url)) {
-                    fragment.appendChild(this.createLinkMarker(text, url));
+                const href = (node.getAttribute('href') || '').trim();
+                const text = node.textContent.replace(/\s+/g, ' ').trim();
+                const verdict = href && window.validateLinkUrl
+                    ? window.validateLinkUrl(href) : { ok: false };
+                if (text && verdict.ok) {
+                    fragment.appendChild(this.createLinkMarker(text, verdict.url));
                 } else if (node.textContent) {
                     fragment.appendChild(document.createTextNode(node.textContent));
                 }
-            } else if (node.textContent) {
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                this._collectPasteNodes(node, fragment);
+            } else if (node.nodeType === Node.TEXT_NODE && node.textContent) {
                 fragment.appendChild(document.createTextNode(node.textContent));
             }
         });
-        return fragment;
     },
 
     /**

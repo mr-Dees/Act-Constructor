@@ -77,17 +77,26 @@ test('validateLinkUrl: регистр/пробелы вокруг значени
   assert.equal(r.url, 'https://X.RU'); // значение триммится, схема валидна
 });
 
-test('validateLinkUrl: javascript/data отбиваются (в т.ч. substring-обход)', () => {
+test('validateLinkUrl: расширенные схемы (tel/ftp/file) и якорь проходят (BUG-4)', () => {
+  assert.deepEqual(validateLinkUrl('tel:+74951234567'), { ok: true, url: 'tel:+74951234567' });
+  assert.deepEqual(validateLinkUrl('ftp://host/file'), { ok: true, url: 'ftp://host/file' });
+  assert.deepEqual(validateLinkUrl('file:///C:/doc.pdf'), { ok: true, url: 'file:///C:/doc.pdf' });
+  // Внутри-документный якорь — допустимая ссылка как есть.
+  assert.deepEqual(validateLinkUrl('#bookmark1'), { ok: true, url: '#bookmark1' });
+});
+
+test('validateLinkUrl: javascript/data/vbscript отбиваются (в т.ч. substring-обход)', () => {
   assert.equal(validateLinkUrl('javascript:alert(1)').ok, false);
   // Классический обход substring-проверки 'http://' — схема парсится строго.
   assert.equal(validateLinkUrl('javascript:alert("http://x")').ok, false);
   assert.equal(validateLinkUrl('data:text/html,<b>x</b>').ok, false);
+  assert.equal(validateLinkUrl('vbscript:msgbox(1)').ok, false);
 });
 
-test('validateLinkUrl: пустой/пробельный и неподдерживаемая схема', () => {
+test('validateLinkUrl: пустой/пробельный и неизвестная схема отбиваются', () => {
   assert.equal(validateLinkUrl('').ok, false);
   assert.equal(validateLinkUrl('   ').ok, false);
-  const ftp = validateLinkUrl('ftp://x');
-  assert.equal(ftp.ok, false);
-  assert.match(ftp.message, /ftp/);
+  const unknown = validateLinkUrl('gopher://x');
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.message, /gopher/);
 });
