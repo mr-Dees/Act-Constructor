@@ -21,7 +21,9 @@
     min-height: var(--input-min-height);
     font-family: var(--font-family-base);
     font-size: var(--font-size-sm);
-    line-height: var(--line-height-relaxed);
+    /* B-22: единый line-height редактор↔превью через общий токен (fallback 1.75),
+       чтобы будущие правки переменных не развели редактор и предпросмотр. */
+    line-height: var(--textblock-line-height, 1.75);
     color: var(--input-text);
     transition: var(--transition-all);
     cursor: text;
@@ -56,8 +58,10 @@
     cursor: not-allowed;
 }
 
-/* Placeholder для пустого редактора */
-.textblock-editor:empty::before {
+/* Placeholder для пустого редактора.
+ * B-26: класс .textblock-editor--empty (тоггл в JS), не :empty — :empty
+ * ненадёжен в contenteditable (после удаления остаётся <br>/<div>). */
+.textblock-editor--empty::before {
     content: attr(data-placeholder);
     color: var(--input-placeholder);
     pointer-events: none;

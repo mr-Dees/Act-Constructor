@@ -36,6 +36,10 @@ Object.assign(TextBlockManager.prototype, {
         // вектор stored-XSS на клиенте.
         SafeHTML.set(editor, textBlock.content || '');
 
+        // B-26: начальное состояние пустоты — JS-класс, не CSS :empty
+        // (:empty ненадёжен в contenteditable: после ввода/удаления остаётся <br>/<div>).
+        this._toggleEmptyClass(editor);
+
         // Привязываем tooltip к ссылкам/сноскам сразу при создании
         this._attachInitialTooltipHandlers(editor);
 
@@ -80,6 +84,17 @@ Object.assign(TextBlockManager.prototype, {
                 this.hideTooltip();
             }, { signal });
         });
+    },
+
+    /**
+     * B-26: тоггл класса .textblock-editor--empty по реальной пустоте.
+     * Пусто = нет видимого текста И нет значимых элементов (картинок/маркеров).
+     * @private
+     */
+    _toggleEmptyClass(editor) {
+        const hasText = editor.textContent.trim().length > 0;
+        const hasInlineEl = editor.querySelector('.text-link, .text-footnote, img') !== null;
+        editor.classList.toggle('textblock-editor--empty', !hasText && !hasInlineEl);
     },
 
     /**
@@ -137,6 +152,10 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик ввода с debounce
      */
     handleEditorInput(editor, textBlock) {
+        // B-26: пустоту определяем синхронно при каждом вводе — мгновенный
+        // показ/скрытие placeholder, без зависимости от save-debounce.
+        this._toggleEmptyClass(editor);
+
         if (editor.saveTimeout) {
             clearTimeout(editor.saveTimeout);
         }
@@ -158,20 +177,81 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Обработчик вставки текста - удаляет все стили перед вставкой
+     * Обработчик вставки. Стратегия «только ссылки» (4г): <a href> с абсолютной
+     * схемой http/https/mailto → внутренний span.text-link, всё остальное
+     * форматирование схлопывается в plain-text. Сноски из буфера не адаптируем.
      */
     handleEditorPaste(e, editor, textBlock) {
         e.preventDefault();
 
-        // Получаем чистый текст из буфера обмена
-        const text = e.clipboardData.getData('text/plain');
+        const html = e.clipboardData.getData('text/html');
+        const plain = e.clipboardData.getData('text/plain');
 
-        // Вставляем только чистый текст без форматирования
-        document.execCommand('insertText', false, text);
+        // Нет HTML — прежний путь: только чистый текст.
+        if (!html || !html.trim()) {
+            document.execCommand('insertText', false, plain);
+            this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+            this._toggleEmptyClass(editor);
+            return;
+        }
 
-        // Сохраняем изменения
-        const textBlockId = editor.dataset.textBlockId;
-        this.saveContent(textBlockId, editor.innerHTML);
+        const fragment = this._buildPasteFragment(html);
+
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(fragment);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        } else {
+            // Нет каретки — деградируем до plain-text.
+            document.execCommand('insertText', false, plain);
+        }
+
+        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // Наследуем форматирование на новые маркеры (как при ручном создании).
+        this.applyFormattingToNewNodes(editor);
+        this._toggleEmptyClass(editor);
+    },
+
+    /**
+     * 4г: строит DocumentFragment из вставленного HTML. <a href> с абсолютной
+     * схемой (http/https/mailto) → span.text-link (фабрика createLinkMarker, C5);
+     * любой другой узел → его textContent. Структура (абзацы/списки) теряется
+     * сознательно — режим «только ссылки», без рассинхрона с бэк-санитайзером.
+     * @private
+     */
+    _buildPasteFragment(html) {
+        // DOMPurify сводит вход к <a href>…</a> + текст; остальное вырезается
+        // (KEEP_CONTENT=true по умолчанию сохраняет текст внутри удалённых тегов).
+        const clean = SafeHTML.sanitize(html, {
+            USE_PROFILES: false,
+            ALLOWED_TAGS: ['a'],
+            ALLOWED_ATTR: ['href'],
+        });
+
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
+        const fragment = document.createDocumentFragment();
+
+        tmp.childNodes.forEach((node) => {
+            if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'A') {
+                const url = (node.getAttribute('href') || '').trim();
+                const text = node.textContent.trim();
+                // Только абсолютные http/https/mailto становятся ссылкой; без
+                // схемы/относительные (paste НЕ подставляет https://) → текст.
+                if (text && /^(https?:\/\/|mailto:)/i.test(url)) {
+                    fragment.appendChild(this.createLinkMarker(text, url));
+                } else if (node.textContent) {
+                    fragment.appendChild(document.createTextNode(node.textContent));
+                }
+            } else if (node.textContent) {
+                fragment.appendChild(document.createTextNode(node.textContent));
+            }
+        });
+        return fragment;
     },
 
     /**

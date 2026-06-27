@@ -72,6 +72,12 @@
     hyphens: auto;
 }
 
+/* B-22: line-height текстблока в превью — тот же токен, что и в редакторе
+   (--textblock-line-height), чтобы редактор и предпросмотр не разъезжались. */
+.preview-textblock-content {
+    line-height: var(--textblock-line-height, 1.75);
+}
+
 /* Первый абзац после заголовка */
 .preview h1 + p,
 .preview h2 + p,
