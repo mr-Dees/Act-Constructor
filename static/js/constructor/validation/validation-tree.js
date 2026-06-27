@@ -10,6 +10,7 @@ import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationCore } from './validation-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { getBlockType } from '../block-types.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 export const ValidationTree = {
     /**
@@ -138,7 +139,13 @@ export const ValidationTree = {
         // Лимит per-type — из реестра типов блоков (block-types.js).
         const spec = getBlockType(contentType);
         const existingCount = TreeUtils.countChildrenByType(node, contentType);
-        const limit = spec ? spec.limitPerNode : undefined;
+        let limit = spec ? spec.limitPerNode : undefined;
+        // B-13: лимит текстблоков — из рантайм-настроек (/acts/limits, синхронно
+        // с серверной валидацией), фолбэк — захардкоженный реестр block-types.
+        if (spec && spec.dictName === 'textBlocks') {
+            const runtime = getStructureLimits().textBlocksPerNode;
+            if (typeof runtime === 'number') limit = runtime;
+        }
         const limitName = AppConfig.content.limitNames[contentType];
 
         return ValidationCore.validateLimit(existingCount, limit, limitName);

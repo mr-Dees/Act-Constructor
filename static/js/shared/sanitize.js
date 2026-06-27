@@ -42,35 +42,80 @@ const DEFAULT_CONFIG = {
 // Allowlist CSS-свойств для inline-style профиля 'acts' — зеркало бэкового
 // ALLOWED_CSS_PROPERTIES (app/domains/acts/utils/html_sanitizer.py). JS не
 // импортирует Python — СИНХРОНИЗИРОВАТЬ ВРУЧНУЮ (страж: sanitize-profiles.test.mjs).
+// Хардкод-ФОЛБЭК зеркала бэк-whitelist (html_sanitizer.py / SanitizerSettings).
+// Источник истины в рантайме — GET /acts/limits (секция sanitizer), применяется
+// через applyActsAllowlist(); до ответа сервера и офлайн действует этот фолбэк.
+// Страж паритета фолбэка с бэком — tests/js/sanitize-profiles.test.mjs.
 export const ACTS_CSS_PROPERTIES = [
     'font-size', 'color', 'background-color',
     'font-weight', 'font-style', 'text-decoration', 'text-decoration-line',
 ];
+const ACTS_TAGS_FALLBACK = [
+    'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del',
+    'span', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div',
+];
+// DOMPurify не разделяет атрибуты по тегам — объединение бэковых
+// a[href,title] + span[class,style,data-*] + *[class].
+const ACTS_ATTR_FALLBACK = [
+    'href', 'title', 'class', 'style',
+    'data-footnote-id', 'data-footnote-text',
+    'data-link-id', 'data-link-url',
+];
 
-// Allowlist контента актов — зеркало ALLOWED_TAGS/ALLOWED_ATTRS бэка
-// (app/domains/acts/utils/html_sanitizer.py). При изменении бэк-whitelist —
-// менять синхронно (страж: tests/js/sanitize-profiles.test.mjs).
+// Активный конфиг профиля 'acts' — изначально фолбэк, перезаписывается
+// applyActsAllowlist() после ответа /acts/limits. Массивы — КОПИИ, чтобы
+// мутация не затронула экспортируемый фолбэк ACTS_CSS_PROPERTIES (страж-тест).
 const ACTS_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del',
-        'span', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div',
-    ],
-    // DOMPurify не разделяет атрибуты по тегам — объединение бэковых
-    // a[href,title] + span[class,style,data-*] + *[class].
-    ALLOWED_ATTR: [
-        'href', 'title', 'class', 'style',
-        'data-footnote-id', 'data-footnote-text',
-        'data-link-id', 'data-link-url',
-    ],
+    ALLOWED_TAGS: [...ACTS_TAGS_FALLBACK],
+    ALLOWED_ATTR: [...ACTS_ATTR_FALLBACK],
     // Кастомный ключ (DOMPurify его игнорирует): allowlist CSS-свойств для
-    // хука afterSanitizeAttributes. Только профиль 'acts' его несёт — default
-    // (чат/diff) хук пропускает, его inline-style не трогается.
-    __cssAllowlist: ACTS_CSS_PROPERTIES,
+    // хука afterSanitizeAttributes. Только профиль 'acts' его несёт.
+    __cssAllowlist: [...ACTS_CSS_PROPERTIES],
 };
 
 export const SAFE_HTML_PROFILES = {
     acts: ACTS_CONFIG,
 };
+
+/**
+ * B-5/Е2: применяет allowlist санитайзера, полученный с GET /acts/limits
+ * (секция sanitizer бэка). Перезаписывает активный профиль 'acts'. При
+ * расхождении серверного и фолбэк-набора — console.warn (диагностика дрейфа
+ * фронт↔бэк), но НЕ падаем: офлайн/ошибка сети → остаётся фолбэк.
+ * @param {{allowed_tags?:string[], allowed_css_properties?:string[],
+ *          allowed_data_attrs?:string[]}} sanitizerCfg
+ */
+export function applyActsAllowlist(sanitizerCfg) {
+    if (!sanitizerCfg || typeof sanitizerCfg !== 'object') return;
+    const { allowed_tags, allowed_css_properties, allowed_data_attrs } = sanitizerCfg;
+    if (Array.isArray(allowed_tags) && allowed_tags.length) {
+        _warnIfDrift('теги', allowed_tags, ACTS_TAGS_FALLBACK);
+        ACTS_CONFIG.ALLOWED_TAGS = [...allowed_tags];
+    }
+    if (Array.isArray(allowed_css_properties) && allowed_css_properties.length) {
+        _warnIfDrift('css', allowed_css_properties, ACTS_CSS_PROPERTIES);
+        ACTS_CONFIG.__cssAllowlist = [...allowed_css_properties];
+    }
+    if (Array.isArray(allowed_data_attrs) && allowed_data_attrs.length) {
+        // Бэк отдаёт только data-атрибуты span; фронтовый ALLOWED_ATTR плоский,
+        // дополняем базовыми href/title/class/style (паритет составов).
+        const merged = ['href', 'title', 'class', 'style', ...allowed_data_attrs];
+        _warnIfDrift('атрибуты', merged, ACTS_ATTR_FALLBACK);
+        ACTS_CONFIG.ALLOWED_ATTR = merged;
+    }
+}
+
+function _warnIfDrift(label, server, fallback) {
+    const a = [...server].sort().join(',');
+    const b = [...fallback].sort().join(',');
+    if (a !== b) {
+        console.warn(
+            `SafeHTML: allowlist '${label}' с сервера расходится с хардкод-фолбэком. `
+            + 'Сервер — источник истины; обнови фолбэк в sanitize.js при следующем релизе.',
+            { server, fallback },
+        );
+    }
+}
 
 // Активный CSS-allowlist на время одного синхронного вызова DOMPurify.sanitize.
 // sanitize синхронен → переинициализации/реентрантности нет; хук читает эту
@@ -133,10 +178,20 @@ let fallbackWarned = false;
 function warnFallbackOnce() {
     if (fallbackWarned) return;
     fallbackWarned = true;
-    console.error(
-        'SafeHTML: DOMPurify не загружен (static/vendor/dompurify/purify.min.js). '
-        + 'HTML заменяется на текстовое представление. Подключи vendor-файл в шаблоне.'
-    );
+    const msg = 'SafeHTML: DOMPurify не загружен (static/vendor/dompurify/purify.min.js). '
+        + 'HTML заменяется на текстовое представление. Подключи vendor-файл в шаблоне.';
+    console.error(msg);
+    // B-18: на проде консоль никто не смотрит — шлём в ErrorBoundary, чтобы
+    // отсутствие vendor было видно в серверном логе клиентских ошибок. Через
+    // window (прямой импорт ErrorBoundary создал бы цикл sanitize↔error-boundary).
+    try {
+        window.ErrorBoundary?._reportToServer?.({
+            category: 'sanitize-fallback',
+            message: msg,
+        });
+    } catch (_) {
+        /* репортер не должен сам падать */
+    }
 }
 
 function _purify(str, extraConfig) {

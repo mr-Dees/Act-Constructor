@@ -27,9 +27,10 @@ const DICT_REFS = LEAF_BLOCK_TYPES.map((t) => [BLOCK_TYPES[t].dictName, BLOCK_TY
  * Чистит несогласованные данные контента акта на месте.
  *
  * @param {Object} content Контент акта ({tree, tables, textBlocks, violations, ...})
- * @returns {{changed: boolean, droppedEntries: Object<string, string[]>, removedNodes: string[]}}
+ * @returns {{changed: boolean, droppedEntries: Object<string, string[]>, removedNodes: Array<{id:string,type:string}>}}
  *   Отчёт: changed — было ли что-то исправлено; droppedEntries — id отброшенных
- *   записей по словарям; removedNodes — id удалённых узлов-зомби.
+ *   записей по словарям; removedNodes — {id,type} удалённых узлов-зомби (B-38:
+ *   структурно, т.к. отчёт уходит в серверный лог).
  */
 export function sanitizeActContent(content) {
     const report = {
@@ -70,7 +71,9 @@ export function sanitizeActContent(content) {
             const dict = content[dictName];
             if (!dict || typeof dict !== 'object') continue;
             for (const [entryId, entry] of Object.entries(dict)) {
-                if (!entry || !nodeIds.has(entry.nodeId)) {
+                // B-38: явная проверка отсутствия nodeId (раньше срабатывала
+                // косвенно через nodeIds.has(undefined)===false — неочевидно).
+                if (!entry || !entry.nodeId || !nodeIds.has(entry.nodeId)) {
                     delete dict[entryId];
                     report.droppedEntries[dictName].push(entryId);
                     report.changed = true;
@@ -91,7 +94,11 @@ export function sanitizeActContent(content) {
                 const idx = parent.children.indexOf(node);
                 if (idx !== -1) {
                     parent.children.splice(idx, 1);
-                    report.removedNodes.push(node.id || '(без id)');
+                    // B-38: {id,type} — тип узла помогает диагностике в логе.
+                    report.removedNodes.push({
+                        id: node.id || '(без id)',
+                        type: node.type || '(без типа)',
+                    });
                     report.changed = true;
                     changedThisPass = true;
                 }

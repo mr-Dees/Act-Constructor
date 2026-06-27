@@ -56,6 +56,8 @@ export const BLOCK_TYPES = Object.freeze({
         idProp: 'textBlockId',
         dictName: 'textBlocks',
         defaultLabel: AppConfig.tree.labels.textBlock,
+        // B-13: фолбэк-дефолт; рантайм-источник — getStructureLimits().textBlocksPerNode
+        // из /acts/limits (читается в validation-tree._validateContentLimits).
         limitPerNode: AppConfig.content.limits.textBlocksPerNode,
         domIndexPrefix: 'textblock',
     }),

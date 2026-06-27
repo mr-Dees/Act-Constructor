@@ -103,7 +103,7 @@ test('узел-зомби (нет записи в словаре) удаляет
 
   assert.equal(report.changed, true);
   assert.ok(!nodeIdsOf(content.tree).has('n1'), 'узел-зомби n1 не удалён');
-  assert.deepEqual(report.removedNodes, ['n1']);
+  assert.deepEqual(report.removedNodes, [{ id: 'n1', type: 'table' }]);
   // Соседние валидные узлы на месте.
   assert.ok(nodeIdsOf(content.tree).has('n2'));
 });
@@ -120,7 +120,7 @@ test('зомби-текстблок и зомби-нарушение (вложе
   assert.ok(!ids.has('n4'), 'вложенный зомби-нарушение n4 не удалён');
   // Родительский item n3 (не лист) сохранён, его children пуст.
   assert.ok(ids.has('n3'));
-  assert.deepEqual([...report.removedNodes].sort(), ['n2', 'n4']);
+  assert.deepEqual([...report.removedNodes].map((n) => n.id).sort(), ['n2', 'n4']);
 });
 
 test('цепочка: сирота словаря + узел, ссылающийся на неё → запись отброшена, узел удалён', () => {
@@ -133,7 +133,7 @@ test('цепочка: сирота словаря + узел, ссылающий
   assert.equal(content.tables.t1, undefined);          // (а) сирота отброшена
   assert.ok(!nodeIdsOf(content.tree).has('n1'), 'узел n1 не удалён'); // (б) узел вырезан
   assert.deepEqual(report.droppedEntries.tables, ['t1']);
-  assert.deepEqual(report.removedNodes, ['n1']);
+  assert.deepEqual(report.removedNodes, [{ id: 'n1', type: 'table' }]);
 });
 
 test('пустое/отсутствующее дерево → no-op', () => {
@@ -151,7 +151,7 @@ test('отсутствующие словари не ломают обход (б
 
   assert.equal(report.changed, true);
   assert.ok(!nodeIdsOf(content.tree).has('n1'));
-  assert.deepEqual(report.removedNodes, ['n1']);
+  assert.deepEqual(report.removedNodes, [{ id: 'n1', type: 'table' }]);
 });
 
 test('удаление зомби-узла вычищает осиротевшие записи его потомков', () => {
@@ -182,6 +182,6 @@ test('удаление зомби-узла вычищает осиротевши
   assert.ok(!ids.has('n2'), 'потомок зомби n2 не удалён');
   // Осиротевшая запись потомка вычищена (а не оставлена бэкенду).
   assert.equal(content.violations.v2, undefined);
-  assert.ok(report.removedNodes.includes('n1'));
+  assert.ok(report.removedNodes.some((n) => n.id === 'n1'));
   assert.deepEqual(report.droppedEntries.violations, ['v2']);
 });
