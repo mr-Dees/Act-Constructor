@@ -84,6 +84,9 @@ class _InlineParser(HTMLParser):
         # Был ли уже выведен видимый контент (run/перенос) — чтобы не ставить
         # перенос ПЕРЕД самым первым блоком (иначе пустая первая строка).
         self._produced_output = False
+        # BUG-5: следующий текстовый run идёт сразу за номером сноски — его
+        # ведущий обычный пробел делаем неразрывным (см. _add_run).
+        self._after_footnote_ref = False
 
     @property
     def state(self) -> _RunState:
@@ -164,6 +167,9 @@ class _InlineParser(HTMLParser):
             kind, payload = self._span_kinds.pop()
             if kind == "footnote" and payload:
                 add_footnote(self.paragraph, payload)
+                # Номер сноски только что вставлен — следующий текстовый run
+                # должен начинаться с неразрывного пробела (BUG-5).
+                self._after_footnote_ref = True
             elif kind == "link":
                 self._close_hyperlink()
         if len(self.stack) > 1:
@@ -174,6 +180,15 @@ class _InlineParser(HTMLParser):
             self._add_run(data)
 
     def _add_run(self, text: str) -> None:
+        # BUG-5: текст сразу после сноски, начинающийся с ОБЫЧНОГО пробела-
+        # разделителя, под выравниванием «по ширине» (w:jc both) отрывал бы номер
+        # сноски — Word растягивает обычные пробелы. Делаем этот первый пробел
+        # неразрывным (U+00A0): номер «прилипает» к последующему слову. Работает
+        # для любого контента (старого/нового), т.к. нормализуется на экспорте.
+        if self._after_footnote_ref:
+            self._after_footnote_ref = False
+            if text.startswith(" "):
+                text = "\u00A0" + text[1:]
         self._produced_output = True
         # Вне <a> используем высокоуровневый API python-docx — он создаёт
         # `w:r` с привычным порядком элементов (важно для обратной совместимости

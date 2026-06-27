@@ -25,7 +25,45 @@ def test_footnote_span_renders_anchor_text():
     )
     assert "До " in para.text
     assert "факта" in para.text
-    assert " и после." in para.text
+    # BUG-5: пробел СРАЗУ после номера сноски — неразрывный (U+00A0), а не обычный.
+    assert "\u00A0и после." in para.text
+
+
+def test_footnote_followed_by_space_uses_nbsp():
+    """BUG-5: обычный пробел-разделитель сразу ПОСЛЕ номера сноски экспортируется
+    неразрывным (U+00A0) — под выравниванием «по ширине» (w:jc both) Word не
+    растягивает NBSP, и номер не отрывается от последующего текста."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="прим">слово</span> далее текст',
+        base_size_pt=12.0,
+    )
+    assert "\u00A0далее" in para.text          # номер приклеен к «далее» неразрывно
+    assert " далее" not in para.text           # обычного растяжимого пробела перед «далее» нет
+    assert "далее текст" in para.text          # последующий обычный пробел сохранён
+
+    # XML-уровень: текстовый run сразу за footnoteReference начинается с NBSP.
+    runs = para._p.findall(qn("w:r"))
+    ref_idx = next(
+        i for i, r in enumerate(runs) if r.find(qn("w:footnoteReference")) is not None
+    )
+    next_text = runs[ref_idx + 1].find(qn("w:t")).text
+    assert next_text.startswith("\u00A0")
+
+
+def test_footnote_without_trailing_space_unaffected():
+    """BUG-5: если после номера нет ведущего пробела — текст не трогаем."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="прим">слово</span>, далее',
+        base_size_pt=12.0,
+    )
+    assert "\u00A0" not in para.text  # ведущего пробела нет → NBSP не вставляем
+    assert ", далее" in para.text
 
 
 def test_footnote_span_creates_footnote_reference():
