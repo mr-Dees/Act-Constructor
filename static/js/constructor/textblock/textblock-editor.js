@@ -140,7 +140,14 @@ Object.assign(TextBlockManager.prototype, {
         PreviewManager.updateBlock('textblock', textBlock.id);
 
         setTimeout(() => {
-            if (document.activeElement !== editor &&
+            // Ownership-guard: если фокус ушёл на ДРУГОЙ текстблок, его
+            // handleEditorFocus уже выполнил setActiveEditor(B) → this.activeEditor
+            // указывает на B, не на этот editor(A). Стейл-таймер A не должен гасить
+            // тулбар, которым теперь владеет B (иначе тулбар мигает и пропадает при
+            // каждом переходе между блоками). Прячем только когда ЭТОТ редактор всё
+            // ещё активный владелец, а фокус ушёл наружу (не в редактор и не в тулбар).
+            if (this.activeEditor === editor &&
+                document.activeElement !== editor &&
                 !this.globalToolbar?.contains(document.activeElement)) {
                 this.hideToolbar();
                 this.clearActiveEditor();
