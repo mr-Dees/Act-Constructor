@@ -34,12 +34,18 @@ Object.assign(TextBlockManager.prototype, {
             <div class="toolbar-separator"></div>
             
             <div class="toolbar-group">
-                <select class="toolbar-select" id="fontSizeSelect" title="Размер шрифта (Ctrl+Shift+> / <)">
-                    <option value="" disabled hidden>—</option>
-                    ${this.fontSizes.map(size =>
-            `<option value="${size}" ${size === 14 ? 'selected' : ''}>${size}px</option>`
+                <div class="toolbar-fontsize" id="fontSizePicker">
+                    <button type="button" class="toolbar-btn toolbar-fontsize-trigger" id="fontSizeTrigger"
+                            title="Размер шрифта (Ctrl+Shift+> / <)" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="toolbar-fontsize-value">14</span>
+                        <span class="toolbar-fontsize-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="toolbar-fontsize-menu hidden" id="fontSizeMenu" role="listbox" aria-label="Размер шрифта">
+                        ${this.fontSizes.map(size =>
+            `<div class="toolbar-fontsize-option" role="option" data-size="${size}" tabindex="-1">${size}px</div>`
         ).join('')}
-                </select>
+                    </div>
+                </div>
             </div>
             
             <div class="toolbar-separator"></div>
@@ -123,27 +129,83 @@ Object.assign(TextBlockManager.prototype, {
             });
         });
 
-        // Обработчик размера шрифта
-        const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
-        if (fontSizeSelect) {
-            // BUG-1: нативный <select> крадёт фокус у contenteditable и схлопывает
-            // выделение (preventDefault на mousedown ему нельзя — иначе дропдаун
-            // не откроется). Запоминаем диапазон ДО открытия и восстанавливаем
-            // перед применением размера, иначе 2-я+ смена идёт по схлопнутому
-            // выделению — текст/маркеры перестают менять размер.
-            fontSizeSelect.addEventListener('mousedown', () => this._captureEditorRange());
-            fontSizeSelect.addEventListener('change', (e) => {
+        // BUG-3: кастомный дропдаун размера шрифта вместо нативного <select>.
+        // Нативный <select> крал фокус у contenteditable и схлопывал выделение
+        // (preventDefault на его mousedown нельзя — дропдаун не откроется), из-за
+        // чего applyFontSize уходил в ветку каретки и ресайз выделения «не работал».
+        // Триггер и пункты — на mousedown/pointerdown→preventDefault, как кнопки
+        // тулбара: редактор НЕ теряет фокус/выделение, applyFontSize работает по
+        // живому Range без save/restore-хаков.
+        const fontSizePicker = this.globalToolbar.querySelector('#fontSizePicker');
+        const fontSizeTrigger = this.globalToolbar.querySelector('#fontSizeTrigger');
+        const fontSizeMenu = this.globalToolbar.querySelector('#fontSizeMenu');
+        if (fontSizePicker && fontSizeTrigger && fontSizeMenu) {
+            fontSizeTrigger.addEventListener('mousedown', (e) => e.preventDefault());
+            fontSizeTrigger.addEventListener('pointerdown', (e) => e.preventDefault());
+            fontSizeTrigger.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this._restoreEditorRange();
-                this.applyFontSize(parseInt(e.target.value));
-                if (this.activeEditor) {
-                    this.activeEditor.focus();
-                    this.applyFormattingToNewNodes(this.activeEditor);
+                this._toggleFontSizeMenu();
+            });
+
+            fontSizeMenu.querySelectorAll('.toolbar-fontsize-option').forEach(opt => {
+                opt.addEventListener('mousedown', (e) => e.preventDefault());
+                opt.addEventListener('pointerdown', (e) => e.preventDefault());
+                opt.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this._closeFontSizeMenu();
+                    this.applyFontSize(parseInt(opt.dataset.size));
+                });
+            });
+
+            // Закрытие меню по клику вне пикера и по Escape. Документ-уровневые
+            // слушатели навешиваются один раз (тулбар создаётся единожды).
+            document.addEventListener('mousedown', (e) => {
+                if (fontSizePicker && !fontSizePicker.contains(e.target)) {
+                    this._closeFontSizeMenu();
                 }
-                this.updateToolbarState();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') this._closeFontSizeMenu();
             });
         }
+    },
+
+    /**
+     * BUG-3: переключает видимость меню размера шрифта.
+     * @private
+     */
+    _toggleFontSizeMenu() {
+        const menu = this.globalToolbar?.querySelector('#fontSizeMenu');
+        if (!menu) return;
+        if (menu.classList.contains('hidden')) this._openFontSizeMenu();
+        else this._closeFontSizeMenu();
+    },
+
+    /**
+     * BUG-3: открывает меню и подсвечивает текущий размер.
+     * @private
+     */
+    _openFontSizeMenu() {
+        const menu = this.globalToolbar?.querySelector('#fontSizeMenu');
+        const trigger = this.globalToolbar?.querySelector('#fontSizeTrigger');
+        if (!menu) return;
+        menu.classList.remove('hidden');
+        trigger?.setAttribute('aria-expanded', 'true');
+        this.updateFontSizeSelect();
+    },
+
+    /**
+     * BUG-3: закрывает меню размера шрифта.
+     * @private
+     */
+    _closeFontSizeMenu() {
+        const menu = this.globalToolbar?.querySelector('#fontSizeMenu');
+        const trigger = this.globalToolbar?.querySelector('#fontSizeTrigger');
+        if (!menu) return;
+        menu.classList.add('hidden');
+        trigger?.setAttribute('aria-expanded', 'false');
     },
 
     /**
@@ -310,43 +372,49 @@ Object.assign(TextBlockManager.prototype, {
      * Обновляет выбранный размер шрифта в select
      */
     updateFontSizeSelect() {
-        const fontSizeSelect = this.globalToolbar?.querySelector('#fontSizeSelect');
-        if (!fontSizeSelect) return;
+        const trigger = this.globalToolbar?.querySelector('#fontSizeTrigger');
+        const valueEl = trigger?.querySelector('.toolbar-fontsize-value');
+        const menu = this.globalToolbar?.querySelector('#fontSizeMenu');
+        if (!valueEl) return;
 
         const selection = window.getSelection();
+        let display = null;     // текст в триггере ('—' для смешанных размеров)
+        let activeSize = null;  // размер из палитры для подсветки пункта
 
         // Если есть выделение — проверяем смешанные размеры
         if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
             const sizes = this._getSelectedFontSizes(selection);
-
             if (sizes.size > 1) {
-                // Смешанные размеры — показываем прочерк
-                fontSizeSelect.value = '';
-                return;
-            }
-
-            if (sizes.size === 1) {
+                display = '—'; // Смешанные размеры — прочерк, ни один пункт не активен
+            } else if (sizes.size === 1) {
                 const fontSize = [...sizes][0];
-                const closestSize = this.fontSizes.reduce((prev, curr) =>
+                activeSize = this.fontSizes.reduce((prev, curr) =>
                     Math.abs(curr - fontSize) < Math.abs(prev - fontSize) ? curr : prev
                 );
-                fontSizeSelect.value = closestSize;
-                return;
+                display = String(activeSize);
             }
         }
 
         // Курсор без выделения — размер под кареткой с учётом соседних span (B-9).
-        let fontSize = 14;
-        if (selection && selection.rangeCount > 0) {
-            fontSize = this._resolveCaretFontSize(selection.getRangeAt(0));
-        } else if (this.activeEditor) {
-            fontSize = parseInt(window.getComputedStyle(this.activeEditor).fontSize);
+        if (display === null) {
+            let fontSize = 14;
+            if (selection && selection.rangeCount > 0) {
+                fontSize = this._resolveCaretFontSize(selection.getRangeAt(0));
+            } else if (this.activeEditor) {
+                fontSize = parseInt(window.getComputedStyle(this.activeEditor).fontSize);
+            }
+            activeSize = this.fontSizes.reduce((prev, curr) =>
+                Math.abs(curr - fontSize) < Math.abs(prev - fontSize) ? curr : prev
+            );
+            display = String(activeSize);
         }
 
-        const closestSize = this.fontSizes.reduce((prev, curr) =>
-            Math.abs(curr - fontSize) < Math.abs(prev - fontSize) ? curr : prev
-        );
-        fontSizeSelect.value = closestSize;
+        valueEl.textContent = display;
+        menu?.querySelectorAll('.toolbar-fontsize-option').forEach(opt => {
+            const on = activeSize !== null && parseInt(opt.dataset.size) === activeSize;
+            opt.classList.toggle('active', on);
+            opt.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
     },
 
     /**
@@ -431,36 +499,6 @@ Object.assign(TextBlockManager.prototype, {
         if (startMarker) range.setStartBefore(startMarker);
         const endMarker = markerAncestor(range.endContainer);
         if (endMarker) range.setEndAfter(endMarker);
-    },
-
-    /**
-     * BUG-1: сохраняет текущее выделение редактора перед тем, как нативный
-     * <select> размера украдёт фокус (он схлопывает selection в contenteditable).
-     * @private
-     */
-    _captureEditorRange() {
-        const sel = window.getSelection();
-        if (sel && sel.rangeCount > 0) {
-            const r = sel.getRangeAt(0);
-            if (this.activeEditor?.contains(r.commonAncestorContainer)) {
-                this._savedEditorRange = r.cloneRange();
-                return;
-            }
-        }
-        this._savedEditorRange = null;
-    },
-
-    /**
-     * BUG-1: восстанавливает выделение, сохранённое перед кражей фокуса селектом.
-     * Без него 2-я+ смена размера идёт по схлопнутому/потерянному выделению.
-     * @private
-     */
-    _restoreEditorRange() {
-        if (!this._savedEditorRange || !this.activeEditor) return;
-        this.activeEditor.focus();
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(this._savedEditorRange);
     }
 });
 

@@ -159,9 +159,68 @@
     box-shadow: var(--input-shadow-focus);
 }
 
-/* Специфичные размеры для селектов */
-#fontSizeSelect {
+/* BUG-3: кастомный дропдаун размера шрифта (вместо нативного <select>, который
+   крал фокус у contenteditable и схлопывал выделение). Триггер — обычная
+   toolbar-btn; список открывается под ней без потери фокуса редактора. */
+.toolbar-fontsize {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.toolbar-fontsize-trigger {
+    gap: var(--spacing-xs);
     min-width: var(--toolbar-font-size-min-width);
+}
+
+.toolbar-fontsize-caret {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    line-height: 1;
+}
+
+.toolbar-fontsize-menu {
+    position: absolute;
+    top: calc(100% + var(--spacing-xs));
+    left: 0;
+    z-index: var(--z-dropdown);
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-xs);
+    max-height: var(--toolbar-fontsize-menu-max-height);
+    overflow-y: auto;
+    min-width: var(--toolbar-font-size-min-width);
+    display: flex;
+    flex-direction: column;
+    gap: var(--textblock-mark-padding);
+}
+
+.toolbar-fontsize-menu.hidden {
+    display: none;
+}
+
+.toolbar-fontsize-option {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    white-space: nowrap;
+    user-select: none;
+    transition: var(--transition-all);
+}
+
+.toolbar-fontsize-option:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.toolbar-fontsize-option.active {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    font-weight: var(--font-weight-semibold);
 }
 
 #headingSelect {
