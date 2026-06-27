@@ -314,6 +314,33 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
 
+        // BUG-6: Enter у границы inline-маркера (contenteditable=false). Нативный
+        // SplitBlock расщепляет/клонирует маркер — фантомные пустые капсулы и
+        // задвоение нумерации сносок. Перехватываем и вставляем перенос вручную,
+        // не расщепляя маркер: контент до каретки остаётся на строке, маркер
+        // уходит на новую (либо появляется пустая строка над ведущим маркером).
+        if (e.key === 'Enter' && !e.shiftKey) {
+            const sel = window.getSelection();
+            if (sel && sel.isCollapsed && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+                const { before, after } = this._caretAdjacentMarkers(range);
+                if (before || after) {
+                    e.preventDefault();
+                    const br = document.createElement('br');
+                    range.insertNode(br);
+                    const caret = document.createRange();
+                    caret.setStartAfter(br);
+                    caret.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(caret);
+                    this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+                    this.renumberEditorFootnotes();
+                    this._toggleEmptyClass(editor);
+                    return;
+                }
+            }
+        }
+
         // Shift+Enter - двойной перенос
         if (e.key === 'Enter' && e.shiftKey) {
             e.preventDefault();
@@ -334,5 +361,41 @@ Object.assign(TextBlockManager.prototype, {
         if (this.activeEditor) {
             this.updateToolbarState();
         }
+    },
+
+    /**
+     * BUG-6: возвращает inline-маркеры (.text-link/.text-footnote), непосредственно
+     * примыкающие к схлопнутой каретке слева (before) и справа (after). Пустые
+     * текстовые узлы пропускаются. Используется для перехвата Enter у границы
+     * маркера, где нативный SplitBlock клонировал бы contenteditable=false узел.
+     * @private
+     */
+    _caretAdjacentMarkers(range) {
+        const c = range.startContainer;
+        const o = range.startOffset;
+        let beforeNode = null;
+        let afterNode = null;
+        if (c.nodeType === Node.TEXT_NODE) {
+            if (o > 0 && o < c.length) return { before: null, after: null }; // внутри текста — границы нет
+            if (o === 0) {
+                beforeNode = c.previousSibling;
+                afterNode = c.length === 0 ? c.nextSibling : null;
+            } else { // o === c.length
+                beforeNode = c.length === 0 ? c.previousSibling : null;
+                afterNode = c.nextSibling;
+            }
+        } else {
+            beforeNode = c.childNodes[o - 1] || null;
+            afterNode = c.childNodes[o] || null;
+        }
+        const skipEmpty = (n, dir) => {
+            while (n && n.nodeType === Node.TEXT_NODE && n.data === '') n = n[dir];
+            return n;
+        };
+        beforeNode = skipEmpty(beforeNode, 'previousSibling');
+        afterNode = skipEmpty(afterNode, 'nextSibling');
+        const isMarker = (n) => n && n.nodeType === Node.ELEMENT_NODE && n.classList &&
+            (n.classList.contains('text-link') || n.classList.contains('text-footnote'));
+        return { before: isMarker(beforeNode) ? beforeNode : null, after: isMarker(afterNode) ? afterNode : null };
     }
 });

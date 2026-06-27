@@ -359,6 +359,25 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * BUG-2: ставит схлопнутую каретку вплотную к маркеру (after=false → перед,
+     * after=true → после) и фокусирует редактор. Позволяет печатать рядом с
+     * ведущим/единственным маркером, кликнув по самому маркеру.
+     * @private
+     */
+    _placeCaretBesideMarker(marker, after) {
+        const editor = marker.closest('.textblock-editor');
+        if (!editor) return;
+        editor.focus();
+        const sel = window.getSelection();
+        const range = document.createRange();
+        if (after) range.setStartAfter(marker);
+        else range.setStartBefore(marker);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    },
+
+    /**
      * Показывает tooltip при наведении
      */
     showTooltip(element, event) {
@@ -483,10 +502,20 @@ Object.assign(TextBlockManager.prototype, {
                 this.hideTooltip();
             }, { signal });
 
-            // Предотвращаем случайное редактирование (capture-фаза)
+            // BUG-2: одиночный клик по маркеру ставит каретку ВПЛОТНУЮ к нему
+            // (левая половина → перед маркером, правая → после). Без этого у
+            // ведущего/единственного маркера слева нет кликабельной зоны, а сам
+            // маркер contenteditable=false (клик по нему каретку не ставит), и
+            // после перезахода написать рядом с капсулой было неудобно.
+            // preventDefault+stopPropagation сохраняем — каретка не должна попасть
+            // ВНУТРЬ маркера. Двойной клик (edit-mode) обрабатывается отдельно.
             element.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                if (element.classList.contains('editing-mode')) return;
+                const rect = element.getBoundingClientRect();
+                const after = e.clientX > rect.left + rect.width / 2;
+                this._placeCaretBesideMarker(element, after);
             }, { capture: true, signal });
         });
     },
