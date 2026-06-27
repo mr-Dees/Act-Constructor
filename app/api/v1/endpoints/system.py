@@ -67,6 +67,12 @@ class ClientErrorPayload(BaseModel):
     stack: Optional[str] = Field(None, description="Stack trace, если доступен")
     userAgent: Optional[str] = Field(None, description="navigator.userAgent клиента")
     currentActId: Optional[int] = Field(None, description="ID акта в момент ошибки (если есть)")
+    # Категория клиентского события (B-18/19): 'sanitize-fallback' (DOMPurify
+    # не загрузился, превью деградировало в textContent), 'sanitize-report'
+    # (act-content-sanitizer вычистил зомби-узлы/висячие записи). None — обычная
+    # JS-ошибка window.onerror/unhandledrejection.
+    category: Optional[str] = Field(None, description="Категория события")
+    detail: Optional[dict] = Field(None, description="Детали (droppedEntries/removedNodes и т.п.)")
 
 
 @router.post(
@@ -86,9 +92,12 @@ async def client_error(
     Принимает отчёт об ошибке от глобального error-boundary на фронте.
 
     Логирует с уровнем WARNING — это не критические серверные ошибки, но
-    сигнал для мониторинга качества фронта. Per-user rate-limit (см.
-    `_client_error_check_rate_limit`) защищает логи от storm'а сломанной
-    страницы. При превышении лимита возвращаем 429.
+    сигнал для мониторинга качества фронта. Помимо обычных JS-ошибок
+    (type='error') принимает sanitize/fallback-события (category=
+    'sanitize-fallback' | 'sanitize-report', B-18/19): по ним фронт
+    пользовательский toast НЕ показывает, деталь уходит только в этот лог.
+    Per-user rate-limit (см. `_client_error_check_rate_limit`) защищает логи
+    от storm'а сломанной страницы. При превышении лимита возвращаем 429.
     """
     if not _client_error_check_rate_limit(username):
         raise HTTPException(
@@ -97,8 +106,10 @@ async def client_error(
         )
 
     ip = request.client.host if request.client else "?"
+    category = payload.category or payload.type
     logger.warning(
-        f"[client-error] user={username} ip={ip} payload={payload.model_dump()}"
+        "[client-error] category=%s user=%s ip=%s act=%s payload=%s",
+        category, username, ip, payload.currentActId, payload.model_dump(),
     )
     return Response(status_code=204)
 

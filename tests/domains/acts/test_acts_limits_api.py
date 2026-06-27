@@ -161,10 +161,15 @@ class TestActsLimitsEndpoint:
         assert body["textblocks"] == {
             "font_size_min": FONT_SIZE_MIN,
             "font_size_max": FONT_SIZE_MAX,
+            "per_node": 10,
         }
         # Фактические значения границ (пин против случайной правки дефолтов)
         assert body["tables"] == {"max_rows": 64, "max_cols": 16, "min_col_width_px": 80}
-        assert body["textblocks"] == {"font_size_min": 8, "font_size_max": 72}
+        assert body["textblocks"] == {"font_size_min": 8, "font_size_max": 72, "per_node": 10}
+        # B-5: секция sanitizer — единый allowlist фронт↔бэк.
+        assert set(body["sanitizer"]) == {
+            "allowed_tags", "allowed_css_properties", "allowed_data_attrs",
+        }
 
     def test_limits_reflect_settings_override(self):
         """Эндпоинт отдаёт значения из настроек (config/env), не хардкод."""
@@ -180,7 +185,7 @@ class TestActsLimitsEndpoint:
         with TestClient(app) as client:
             body = client.get("/api/v1/acts/limits").json()
         assert body["tables"] == {"max_rows": 100, "max_cols": 20, "min_col_width_px": 50}
-        assert body["textblocks"] == {"font_size_min": 6, "font_size_max": 96}
+        assert body["textblocks"] == {"font_size_min": 6, "font_size_max": 96, "per_node": 10}
         assert body["images"]["max_items_per_violation"] == 80
 
     def test_limits_not_shadowed_by_act_id_route(self):
