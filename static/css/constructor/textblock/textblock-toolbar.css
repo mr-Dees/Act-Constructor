@@ -20,8 +20,11 @@
     gap: var(--spacing-sm);
     transition: var(--transition-all);
     max-width: var(--toolbar-max-width);
-    overflow-x: auto;
-    scrollbar-width: thin;
+    /* B-21: на узком экране группы переносятся во второй ряд, а не уезжают в
+       горизонтальный скролл (неудобный fallback). */
+    flex-wrap: wrap;
+    row-gap: var(--spacing-sm);
+    justify-content: center;
 }
 
 /* Скрытое состояние панели */
@@ -29,20 +32,6 @@
     opacity: 0;
     pointer-events: none;
     transform: translateX(-50%) translateY(calc(-1 * var(--translate-lg)));
-}
-
-/* Скроллбар для узких экранов */
-.textblock-toolbar-global::-webkit-scrollbar {
-    height: var(--toolbar-scrollbar-height);
-}
-
-.textblock-toolbar-global::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.textblock-toolbar-global::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb);
-    border-radius: var(--radius-full);
 }
 
 /* Метка панели инструментов */
@@ -62,6 +51,7 @@
     align-items: center;
     gap: var(--translate-md);
     flex-shrink: 0;
+    flex-wrap: nowrap; /* B-21: группа кнопок не рвётся при переносе строк тулбара */
 }
 
 /* Разделитель между группами */

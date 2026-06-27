@@ -92,6 +92,12 @@ Object.assign(TextBlockManager.prototype, {
 
         // Обработчики для кнопок форматирования
         this.globalToolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
+            // B-40: кнопка тулбара не должна воровать фокус у редактора.
+            // preventDefault на mousedown/pointerdown сохраняет caret/selection
+            // в contenteditable — click отрабатывает на ещё активном редакторе,
+            // blur не стреляет. На <select> размера НЕ вешаем (нужен нативный фокус).
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('pointerdown', (e) => e.preventDefault());
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -120,9 +126,16 @@ Object.assign(TextBlockManager.prototype, {
         // Обработчик размера шрифта
         const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
         if (fontSizeSelect) {
+            // BUG-1: нативный <select> крадёт фокус у contenteditable и схлопывает
+            // выделение (preventDefault на mousedown ему нельзя — иначе дропдаун
+            // не откроется). Запоминаем диапазон ДО открытия и восстанавливаем
+            // перед применением размера, иначе 2-я+ смена идёт по схлопнутому
+            // выделению — текст/маркеры перестают менять размер.
+            fontSizeSelect.addEventListener('mousedown', () => this._captureEditorRange());
             fontSizeSelect.addEventListener('change', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                this._restoreEditorRange();
                 this.applyFontSize(parseInt(e.target.value));
                 if (this.activeEditor) {
                     this.activeEditor.focus();
@@ -152,79 +165,71 @@ Object.assign(TextBlockManager.prototype, {
         if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
 
-            // Собираем ID ссылок/сносок в выделении до изменения DOM
-            // (contentEditable=false не позволяет execCommand менять их напрямую)
-            const selectedSpecialIds = new Set();
-            this.activeEditor.querySelectorAll('.text-link, .text-footnote').forEach(el => {
-                if (range.intersectsNode(el)) {
-                    selectedSpecialIds.add(
-                        el.getAttribute('data-link-id') || el.getAttribute('data-footnote-id')
-                    );
+            // BUG-2: расширяем границы наружу contentEditable=false маркеров.
+            // extractContents() с границей ВНУТРИ маркера клонирует его (визуальный
+            // дубль ссылки в начале строки) — двигаем границы по целым маркерам,
+            // тогда маркер уходит во фрагмент целиком, без клона.
+            this._expandRangeOutOfMarkers(range);
+
+            // B-24: без execCommand/font[size=7]. Оборачиваем выделение в
+            // span[style=font-size]; extractContents сохраняет вложенную разметку
+            // (b/i/u, ссылки, сноски) — узлы перемещаются целиком, обработчики
+            // ссылок/сносок на них выживают.
+            const span = document.createElement('span');
+            span.style.fontSize = `${fontSize}px`;
+            span.appendChild(range.extractContents());
+
+            // Снимаем font-size у вложенных span (кроме ссылок/сносок) — внешний
+            // размер выигрывает.
+            span.querySelectorAll('[style]').forEach(child => {
+                if (child.style.fontSize &&
+                    !child.classList?.contains('text-link') &&
+                    !child.classList?.contains('text-footnote')) {
+                    child.style.fontSize = '';
+                    if (!child.getAttribute('style')?.trim()) {
+                        child.removeAttribute('style');
+                    }
                 }
             });
 
-            // Запоминаем font[size="7"], уже существовавшие ДО операции (юзер
-            // мог раньше явно выставить word-размер 7) — execCommand добавит
-            // новые такие теги только для текущего выделения. Преобразуем только
-            // их, чужие не трогаем.
-            const preExistingFont7 = new Set(
-                this.activeEditor.querySelectorAll('font[size="7"]')
-            );
-
-            // Применяем к обычному тексту через execCommand
-            this.execCommand('fontSize', '7');
-
-            // Заменяем font tags на span с точным размером, сохраняя выделение.
-            // Берём только теги, созданные текущим execCommand (не пред-существующие).
-            const fontTags = [...this.activeEditor.querySelectorAll('font[size="7"]')]
-                .filter(font => !preExistingFont7.has(font));
-            const newSpans = [];
-            fontTags.forEach(font => {
-                const span = document.createElement('span');
-                span.style.fontSize = `${fontSize}px`;
-                span.innerHTML = font.innerHTML;
-
-                // Удаляем font-size у вложенных элементов (кроме ссылок/сносок)
-                span.querySelectorAll('[style]').forEach(child => {
-                    if (child.style.fontSize &&
-                        !child.classList?.contains('text-link') &&
-                        !child.classList?.contains('text-footnote')) {
-                        child.style.fontSize = '';
-                        if (!child.getAttribute('style')?.trim()) {
-                            child.removeAttribute('style');
-                        }
-                    }
-                });
-
-                font.parentNode.replaceChild(span, font);
-                newSpans.push(span);
+            // BUG-1: размер ставим ВСЕМ маркерам, реально попавшим во фрагмент —
+            // безусловно. Маркеры contentEditable=false, внешний span их не
+            // накрывает (нужен собственный inline font-size). Прежняя завязка на
+            // range.intersectsNode «промахивалась» по границам маркера на 2-й+
+            // смене → маркер застывал на первом применённом размере.
+            span.querySelectorAll('.text-link, .text-footnote').forEach(el => {
+                el.style.fontSize = `${fontSize}px`;
             });
 
-            // Применяем размер к ссылкам/сноскам, попавшим в выделение
-            if (selectedSpecialIds.size > 0) {
-                this.activeEditor.querySelectorAll('.text-link, .text-footnote').forEach(el => {
-                    const id = el.getAttribute('data-link-id') || el.getAttribute('data-footnote-id');
-                    if (selectedSpecialIds.has(id)) {
-                        el.style.fontSize = `${fontSize}px`;
-                    }
-                });
-            }
+            range.insertNode(span);
 
-            // Восстанавливаем выделение на новые элементы
-            if (newSpans.length > 0) {
-                const newRange = document.createRange();
-                newRange.setStartBefore(newSpans[0]);
-                newRange.setEndAfter(newSpans[newSpans.length - 1]);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-            }
-        } else {
-            // Применяем ко всему блоку редактора
-            this.activeEditor.style.fontSize = `${fontSize}px`;
+            // Восстанавливаем выделение на новый span.
+            const newRange = document.createRange();
+            newRange.selectNodeContents(span);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+        } else if (selection && selection.rangeCount > 0) {
+            // B-2 (флагман data-loss): материализуем размер на каретке в content,
+            // а НЕ в editor.style — стиль контейнера в innerHTML не попадает и
+            // теряется при reload/preview/export. Вставляем span с ZWSP-якорем и
+            // ставим каретку внутрь — будущий ввод унаследует размер.
+            const range = selection.getRangeAt(0);
+            const span = document.createElement('span');
+            span.style.fontSize = `${fontSize}px`;
+            span.appendChild(document.createTextNode('​'));
+            range.insertNode(span);
+            const caret = document.createRange();
+            caret.setStart(span.firstChild, 1); // после ZWSP
+            caret.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(caret);
         }
 
         const textBlockId = this.activeEditor.dataset.textBlockId;
         this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        // B-4: при прямом программном вызове (stepFontSize/hotkey) тулбар иначе
+        // остаётся с устаревшим значением размера.
+        this.updateToolbarState();
     },
 
     /**
@@ -244,13 +249,8 @@ Object.assign(TextBlockManager.prototype, {
                 fontSize = [...sizes][0];
             }
         } else if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const container = range.startContainer;
-            const element = container.nodeType === 3 ? container.parentElement : container;
-
-            if (element && this.activeEditor.contains(element)) {
-                fontSize = parseInt(window.getComputedStyle(element).fontSize);
-            }
+            // B-9: размер под кареткой с учётом соседних span'ов.
+            fontSize = this._resolveCaretFontSize(selection.getRangeAt(0));
         } else {
             fontSize = parseInt(window.getComputedStyle(this.activeEditor).fontSize);
         }
@@ -294,7 +294,8 @@ Object.assign(TextBlockManager.prototype, {
             }
 
             try {
-                const isActive = document.queryCommandState(command);
+                // B-6: через защитную обёртку core.js, не напрямую document.
+                const isActive = this.queryCommandState(command);
                 btn.classList.toggle('active', isActive);
             } catch (e) {
                 btn.classList.remove('active');
@@ -334,16 +335,10 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
 
-        // Курсор без выделения
+        // Курсор без выделения — размер под кареткой с учётом соседних span (B-9).
         let fontSize = 14;
         if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const container = range.startContainer;
-            const element = container.nodeType === 3 ? container.parentElement : container;
-
-            if (element && this.activeEditor?.contains(element)) {
-                fontSize = parseInt(window.getComputedStyle(element).fontSize);
-            }
+            fontSize = this._resolveCaretFontSize(selection.getRangeAt(0));
         } else if (this.activeEditor) {
             fontSize = parseInt(window.getComputedStyle(this.activeEditor).fontSize);
         }
@@ -384,5 +379,132 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         return sizes;
+    },
+
+    /**
+     * Размер шрифта под кареткой с учётом соседних span'ов (B-9). На стыке
+     * <span 12px>|<span 18px> getComputedStyle родителя даёт ~14px — берём
+     * явный размер соседа по стороне каретки.
+     * @private
+     */
+    _resolveCaretFontSize(range) {
+        const container = range.startContainer;
+        const offset = range.startOffset;
+        let probe = null;
+        if (container.nodeType === 3) {
+            if (offset === 0) probe = container.previousSibling || container.parentElement;
+            else if (offset === container.textContent.length) probe = container.nextSibling || container.parentElement;
+            else probe = container.parentElement;
+        } else {
+            probe = container.childNodes[offset] || container.childNodes[offset - 1] || container;
+        }
+        let el = probe?.nodeType === 3 ? probe.parentElement : probe;
+        while (el && this.activeEditor?.contains(el)) {
+            if (el.style?.fontSize) return parseInt(el.style.fontSize);
+            el = el.parentElement;
+        }
+        const fb = probe?.nodeType === 3 ? probe.parentElement : probe;
+        return fb && this.activeEditor?.contains(fb)
+            ? parseInt(window.getComputedStyle(fb).fontSize) : 14;
+    },
+
+    /**
+     * BUG-2: расширяет границы Range наружу contentEditable=false маркеров
+     * (.text-link/.text-footnote). Если граница лежит ВНУТРИ текста маркера,
+     * range.extractContents() клонирует частично выделенный маркер (дубль ссылки
+     * в начале строки). Сдвигаем start перед маркером, end — после, чтобы маркер
+     * переместился во фрагмент целиком.
+     * @private
+     */
+    _expandRangeOutOfMarkers(range) {
+        const markerAncestor = (node) => {
+            let el = node?.nodeType === 3 ? node.parentElement : node;
+            while (el && el !== this.activeEditor && this.activeEditor?.contains(el)) {
+                if (el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) {
+                    return el;
+                }
+                el = el.parentElement;
+            }
+            return null;
+        };
+        const startMarker = markerAncestor(range.startContainer);
+        if (startMarker) range.setStartBefore(startMarker);
+        const endMarker = markerAncestor(range.endContainer);
+        if (endMarker) range.setEndAfter(endMarker);
+    },
+
+    /**
+     * BUG-1: сохраняет текущее выделение редактора перед тем, как нативный
+     * <select> размера украдёт фокус (он схлопывает selection в contenteditable).
+     * @private
+     */
+    _captureEditorRange() {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+            const r = sel.getRangeAt(0);
+            if (this.activeEditor?.contains(r.commonAncestorContainer)) {
+                this._savedEditorRange = r.cloneRange();
+                return;
+            }
+        }
+        this._savedEditorRange = null;
+    },
+
+    /**
+     * BUG-1: восстанавливает выделение, сохранённое перед кражей фокуса селектом.
+     * Без него 2-я+ смена размера идёт по схлопнутому/потерянному выделению.
+     * @private
+     */
+    _restoreEditorRange() {
+        if (!this._savedEditorRange || !this.activeEditor) return;
+        this.activeEditor.focus();
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(this._savedEditorRange);
     }
 });
+
+/**
+ * 6.4: нормализует нестандартные размеры шрифта в content текстблоков к
+ * ближайшему из палитры (унифицированный акт). Одноразовый идемпотентный проход
+ * при загрузке: правит content (span[style]); при изменении возвращает
+ * changed=true → вызывающий помечает акт как несохранённый.
+ * @param {Object<string,{content:string}>} textBlocks
+ * @param {number[]} palette - доступные размеры (textBlockManager.fontSizes)
+ * @returns {{changed: boolean, count: number}}
+ */
+export function normalizeFontSizes(textBlocks, palette) {
+    if (!textBlocks || typeof textBlocks !== 'object'
+        || !Array.isArray(palette) || !palette.length) {
+        return { changed: false, count: 0 };
+    }
+    const snap = (px) => palette.reduce((best, cur) =>
+        Math.abs(cur - px) < Math.abs(best - px) ? cur : best);
+    let changed = false;
+    let count = 0;
+    const tmp = document.createElement('div');
+    for (const tb of Object.values(textBlocks)) {
+        if (!tb || typeof tb.content !== 'string' || !tb.content) continue;
+        tmp.innerHTML = tb.content;
+        let blockChanged = false;
+        tmp.querySelectorAll('[style*="font-size"]').forEach(el => {
+            const raw = el.style.fontSize;
+            const px = parseFloat(raw);
+            // Нормализуем только px; em/%/pt оставляем как есть.
+            if (!raw.endsWith('px') || Number.isNaN(px)) return;
+            const snapped = snap(px);
+            if (snapped !== px) {
+                el.style.fontSize = `${snapped}px`;
+                blockChanged = true;
+                count++;
+            }
+        });
+        if (blockChanged) {
+            tb.content = tmp.innerHTML;
+            changed = true;
+        }
+    }
+    return { changed, count };
+}
+
+window.normalizeFontSizes = normalizeFontSizes;
