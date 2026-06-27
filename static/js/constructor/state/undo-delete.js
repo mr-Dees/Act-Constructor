@@ -202,6 +202,14 @@ export const UndoDeleteManager = {
             return false;
         }
 
+        // B-17: insertNodeAt не синхронизирует node.parentId — восстанавливаем
+        // из снимка, иначе узел физически на месте, но его ссылка на родителя
+        // несёт устаревшее значение (используется в drag/debug).
+        if (snapshot.parentId) {
+            const restored = AppState._findNodeRaw?.(snapshot.node.id) || snapshot.node;
+            if (restored) restored.parentId = snapshot.parentId;
+        }
+
         // Если в восстановленном поддереве есть риск-таблицы — пересобираем
         // сводные (metrics) фасадом из ТЕКУЩЕГО §5, как при создании риск-таблиц.
         // Сводные авто-выводимы: их пересоздание (с новыми id) данных не теряет,

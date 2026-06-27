@@ -143,6 +143,23 @@ export class StorageManager {
     static _saveInProgress = false;
 
     /**
+     * B-15: lock «идёт PUT /content в БД» — сериализует периодическое и
+     * повторное сохранение, чтобы на сервер не уехали две версии в
+     * неопределённом порядке (optimistic locking на бэке нет).
+     * @private
+     * @type {boolean}
+     */
+    static _dbSaveInProgress = false;
+
+    /**
+     * B-3: lock «идёт аварийная quota-эскалация в БД» — не плодим параллельные
+     * форс-PUT при серии переполнений localStorage.
+     * @private
+     * @type {boolean}
+     */
+    static _quotaEscalationInFlight = false;
+
+    /**
      * Инициализация менеджера хранилища
      *
      * НЕ восстанавливает состояние автоматически.
@@ -239,7 +256,9 @@ export class StorageManager {
         // сервером (HTTP 422) на каждом PUT /content независимо от saveType.
         this._periodicDbSaveInterval = setInterval(async () => {
             if (AppState._dragInProgress) return;
+            if (this._dbSaveInProgress) return; // B-15: другое сохранение уже пишет
             if (this.hasUnsyncedChanges() && window.currentActId) {
+                this._dbSaveInProgress = true;
                 try {
                     await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
                 } catch (err) {
@@ -247,6 +266,8 @@ export class StorageManager {
                     // до успеха) и подписываемся на восстановление соединения.
                     console.error('Периодическое сохранение в БД не удалось:', err);
                     this._notifyDbSaveFailure();
+                } finally {
+                    this._dbSaveInProgress = false;
                 }
             }
         }, AppConfig.localStorage.periodicSaveInterval);
@@ -285,11 +306,15 @@ export class StorageManager {
      */
     static async _retryDbSave() {
         if (AppState._dragInProgress) return;
+        if (this._dbSaveInProgress) return; // B-15
         if (!this.hasUnsyncedChanges() || !window.currentActId) return;
+        this._dbSaveInProgress = true;
         try {
             await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
         } catch (err) {
             console.error('Повторное сохранение после восстановления сети не удалось:', err);
+        } finally {
+            this._dbSaveInProgress = false;
         }
     }
 
@@ -569,25 +594,22 @@ export class StorageManager {
                 return true;
             }
 
-            // Перед сериализацией коммитим зависшие правки (текстблок в debounce,
-            // редактируемая ячейка таблицы), иначе снимок уедет без последних
-            // символов. Централизованно — той же воронкой, что и PUT /content
-            // и экспорт (см. _flushPendingEdits).
-            this._flushPendingEdits();
-
             const snapshot = {
                 actId,
                 savedAt: new Date().toISOString(),
                 baseUpdatedAt: this._baseUpdatedAt,
                 version: 2,
-                data: AppState.exportData()
+                // B-16: flush зависших правок + сериализация одной воронкой —
+                // снимок не уедет без последних символов активного редактора.
+                data: this.exportActData()
             };
             const stateJson = JSON.stringify(snapshot);
 
-            // Проверка размера данных
+            // Проверка размера данных. B-3: снимок не влезает в localStorage —
+            // не сдаёмся, а эскалируем в БД (надёжный носитель) и освобождаем LS.
             if (stateJson.length > AppConfig.localStorage.maxStorageSize) {
-                console.warn('Размер данных превышает лимит localStorage');
-                Notifications.warning('Недостаточно места для сохранения. Попробуйте упростить структуру акта.');
+                console.warn('Размер данных превышает лимит localStorage — эскалация в БД');
+                this._escalateQuotaToDb();
                 return false;
             }
 
@@ -608,8 +630,10 @@ export class StorageManager {
         } catch (error) {
             console.error('Ошибка сохранения в localStorage:', error);
 
+            // B-3: переполнение localStorage — снимок не записан, правки сейчас
+            // только в памяти. Эскалируем в БД, затем освобождаем LS.
             if (error.name === 'QuotaExceededError') {
-                Notifications.error('Недостаточно места для сохранения. Попробуйте упростить структуру акта.');
+                this._escalateQuotaToDb();
             } else {
                 Notifications.error('Ошибка сохранения данных');
             }
@@ -650,6 +674,54 @@ export class StorageManager {
             // предыдущее значение, но снимок/PUT всё равно состоится.
             console.error('Ошибка коммита зависших правок перед сохранением:', error);
         }
+    }
+
+    /**
+     * B-16: единственная точка «flush зависших правок → сериализация». Любой
+     * путь экспорта/сохранения (снимок, PUT /content, файл-экспорт, аварийный
+     * save) обязан читать состояние через неё, а не AppState.exportData()
+     * напрямую — иначе экспорт уедет без последних символов активного редактора.
+     * @returns {Object} сериализованное состояние акта
+     */
+    static exportActData() {
+        this._flushPendingEdits();
+        return AppState.exportData();
+    }
+
+    /**
+     * B-3: аварийная эскалация при переполнении localStorage (паттерн
+     * server-fallback + eviction). Снимок в LS записать не удалось → форс-PUT
+     * текущего акта в БД (надёжный носитель, в обход _saveInFlight) →
+     * removeSnapshot освобождает LS. При неудаче БД — critical + предложение
+     * экспортировать акт. fire-and-forget: не блокирует синхронный saveState
+     * (его зовёт и beforeunload).
+     * @private
+     */
+    static _escalateQuotaToDb() {
+        const actId = window.currentActId || null;
+        if (!actId) {
+            Notifications.error('Недостаточно места для сохранения. Упростите структуру акта.');
+            return;
+        }
+        if (this._quotaEscalationInFlight) return; // не плодим параллельные эскалации
+        this._quotaEscalationInFlight = true;
+        APIClient.forceSaveToDb(actId)
+            .then(() => {
+                this.removeSnapshot(actId); // eviction: освободить LS
+                Notifications.success(
+                    'Локальное хранилище переполнено — изменения сохранены в базу данных.'
+                );
+            })
+            .catch((err) => {
+                console.error('B-3: аварийное сохранение в БД не удалось:', err);
+                Notifications.error(
+                    'Локальное хранилище переполнено, а сохранить в базу данных не удалось. '
+                    + 'Экспортируйте акт в файл, чтобы не потерять изменения.'
+                );
+            })
+            .finally(() => {
+                this._quotaEscalationInFlight = false;
+            });
     }
 
     /**
@@ -777,6 +849,13 @@ export class StorageManager {
                 this.enableTracking();
             };
 
+            // B-14: страховочный таймер ВНЕ requestAnimationFrame. RAF не
+            // гарантирован в фоновой вкладке/при уничтожении страницы — без него
+            // _trackingDepth залип бы >0 и markAsUnsaved() стал бы no-op'ом
+            // (тихая потеря правок). setTimeout надёжнее RAF и идемпотентно
+            // отпускает трекинг (release защищён released-флагом).
+            const safety = setTimeout(release, AppConfig.timings.enableTrackingAfterSave + 1000);
+
             try {
                 requestAnimationFrame(() => {
                     let result = false;
@@ -792,6 +871,7 @@ export class StorageManager {
                         // синхронно (иначе ре-рендер генерации пометил бы только
                         // что сохранённый акт грязным).
                         setTimeout(() => {
+                            clearTimeout(safety);
                             release();
                             resolve(threw ? false : result);
                         }, AppConfig.timings.enableTrackingAfterSave);
@@ -799,6 +879,7 @@ export class StorageManager {
                 });
             } catch (error) {
                 console.error('Ошибка планирования forceSaveAsync:', error);
+                clearTimeout(safety);
                 release();
                 resolve(false);
             }

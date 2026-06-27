@@ -106,14 +106,11 @@ export class APIClient {
         window.StorageManager.disableTracking();
 
         try {
-            // Коммитим зависшие правки ДО сериализации экспорта. saveState ниже
-            // тоже флашит, но порядок гарантируем явно: data читается из
-            // exportData() сразу после.
-            window.StorageManager._flushPendingEdits();
-
+            // B-16: snapshot (с внутренним flush) + сериализация через единую
+            // воронку exportActData — экспорт не уедет без последних символов.
             window.StorageManager.saveState(true);
 
-            const data = window.AppState.exportData();
+            const data = window.StorageManager.exportActData();
             const formatList = Array.isArray(formats) ? formats : [formats];
 
             const validFormats = formatList.filter(fmt =>
@@ -456,8 +453,24 @@ export class APIClient {
             // но в БД могли остаться исторически испорченные записи.
             const sanitizeReport = sanitizeActContent(content);
             if (sanitizeReport.changed) {
+                // B-19: детальный report уходит в серверный лог (контракт C4);
+                // пользователю молчим — это not-actionable фоновая чистка зомби-данных.
                 console.warn('Несогласованные данные акта исправлены при загрузке:', sanitizeReport);
-                Notifications.warning('Обнаружены и исправлены несогласованные данные акта');
+                window.ErrorBoundary?._reportToServer?.({
+                    category: 'sanitize-report',
+                    message: 'Несогласованные данные акта исправлены при загрузке',
+                    detail: { actId, ...sanitizeReport },
+                });
+            }
+
+            // 6.4: нормализуем нестандартные размеры шрифта legacy-актов к палитре
+            // (унифицированный акт). Правит content ДО присвоения в AppState; при
+            // изменении помечаем акт несохранённым после re-enable tracking (ниже).
+            const fontNorm = window.normalizeFontSizes
+                ? window.normalizeFontSizes(content.textBlocks, window.textBlockManager?.fontSizes || [])
+                : { changed: false, count: 0 };
+            if (fontNorm.changed) {
+                console.info(`6.4: нормализовано нестандартных размеров шрифта: ${fontNorm.count}`);
             }
 
             // Отключаем tracking на время загрузки
@@ -546,6 +559,11 @@ export class APIClient {
             // при несинхронизированных правках (см. StorageManager.saveState).
             setTimeout(() => {
                 window.StorageManager.enableTracking();
+                if (fontNorm.changed) {
+                    // 6.4: нормализация изменила content — теперь, когда tracking
+                    // снова включён, помечаем акт несохранённым (автосейв персистит).
+                    window.StorageManager.markAsUnsaved();
+                }
                 if (draftRestored) {
                     // Восстановленный черновик ещё не в БД — помечаем как
                     // несинхронизированный ПОСЛЕ bootstrap-вызовов
@@ -702,11 +720,9 @@ export class APIClient {
             // Блокируем отслеживание на время сохранения
             window.StorageManager.disableTracking();
 
-            // Коммитим зависшие правки (textblock в debounce, ячейка таблицы)
-            // ДО сериализации — иначе PUT уедет без последних символов.
-            window.StorageManager._flushPendingEdits();
-
-            const data = window.AppState.exportData();
+            // B-16: flush зависших правок + сериализация одной воронкой —
+            // иначе PUT уедет без последних символов активного редактора.
+            const data = window.StorageManager.exportActData();
             data.saveType = saveType;
             data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
 
@@ -814,6 +830,45 @@ export class APIClient {
                 window.StorageManager.enableTracking();
             }, AppConfig.timings.enableTrackingAfterSave);
         }
+    }
+
+    /**
+     * B-3: форс-PUT текущего акта в БД в обход localStorage и гарда _saveInFlight.
+     * Вызывается ТОЛЬКО из аварийной эскалации StorageManager при переполнении
+     * localStorage: снимок записать не удалось, единственный носитель правок —
+     * память, надо немедленно зафиксировать в БД. Бросает ошибку наверх БЕЗ
+     * собственного toast (решение об UX принимает вызывающий StorageManager).
+     * @param {number} actId
+     * @returns {Promise<Object>} ответ PUT
+     * @throws {Error|LockLostError}
+     */
+    static async forceSaveToDb(actId) {
+        const username = AuthManager.getCurrentUser();
+        if (!username) {
+            throw new Error('Пользователь не авторизован');
+        }
+        // flush+сериализация одной воронкой (B-16); _saveInFlight сознательно НЕ
+        // трогаем — обычный PUT мог быть в полёте, но quota-эскалация важнее дедупа.
+        const data = window.StorageManager.exportActData();
+        data.saveType = 'manual';
+        data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
+
+        const resp = await this._fetchWithTimeout(
+            AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`),
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            }
+        );
+        if (!resp.ok) {
+            if (resp.status === 409) throw new LockLostError();
+            throw new Error(`Аварийное сохранение в БД не удалось (HTTP ${resp.status})`);
+        }
+        const result = await resp.json();
+        if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
+        window.StorageManager.markAsSyncedWithDB();
+        return result;
     }
 
     /**
