@@ -25,7 +25,7 @@ import re
 from html.parser import HTMLParser
 from dataclasses import dataclass, replace
 
-from docx.enum.text import WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 from docx.oxml import OxmlElement
@@ -87,6 +87,16 @@ class _InlineParser(HTMLParser):
         # BUG-5: следующий текстовый run идёт сразу за номером сноски — его
         # ведущий обычный пробел делаем неразрывным (см. _add_run).
         self._after_footnote_ref = False
+        # BUG-3: под выравниванием «по ширине» (w:jc both) Word растягивает
+        # ТОЛЬКО обычный пробел U+0020 (U+00A0 не тянется). Разделитель перед
+        # словом-якорем сноски тогда растягивается и отрывает блок «слово+номер»
+        # от предыдущего слова — под justify делаем его неразрывным (см.
+        # _open_span footnote-ветку). Выравнивание известно: formatter.py
+        # выставляет paragraph.alignment ДО apply_inline_html.
+        self._justify = paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+        # BUG-3: последний run параграфа на момент открытия footnote-span —
+        # ориентир, чтобы strip хвостового пробела якоря не задел предыдущий run.
+        self._footnote_run_before: OxmlElement | None = None
 
     @property
     def state(self) -> _RunState:
@@ -139,6 +149,15 @@ class _InlineParser(HTMLParser):
         """Открывает <span>: footnote-якорь, ссылку или обычный span."""
         cls = attrs.get("class", "")
         if "text-footnote" in cls:
+            # BUG-3: под justify разделитель перед словом-якорем делаем
+            # неразрывным, иначе блок «слово-якорь + номер» отрывается от
+            # предыдущего слова (Word тянет только U+0020).
+            if self._justify:
+                self._nbsp_trailing_space_before_footnote()
+            # Снимок последнего run'а ДО якоря — чтобы strip хвостового пробеля
+            # якоря (BUG-3) не задел предыдущий run, если якорь без текста.
+            existing_runs = self.paragraph._p.findall(qn("w:r"))
+            self._footnote_run_before = existing_runs[-1] if existing_runs else None
             # Якорь рендерим обычным текстом; сноску добавим при закрытии.
             self._span_kinds.append(("footnote", attrs.get("data-footnote-text")))
             self.stack.append(current)
@@ -166,6 +185,10 @@ class _InlineParser(HTMLParser):
         if tag == "span" and self._span_kinds:
             kind, payload = self._span_kinds.pop()
             if kind == "footnote" and payload:
+                # BUG-3: хвостовой обычный пробел ВНУТРИ якоря (например из
+                # вставки Word) дал бы растяжимую щель между якорем и номером
+                # под justify — срезаем его перед добавлением сноски.
+                self._strip_trailing_anchor_space()
                 add_footnote(self.paragraph, payload)
                 # Номер сноски только что вставлен — следующий текстовый run
                 # должен начинаться с неразрывного пробела (BUG-5).
@@ -260,6 +283,38 @@ class _InlineParser(HTMLParser):
         r_el = OxmlElement("w:r")
         r_el.append(OxmlElement("w:br"))
         self._hyperlink.append(r_el)
+
+    def _nbsp_trailing_space_before_footnote(self) -> None:
+        """BUG-3: заменяет единственный хвостовой U+0020 предыдущего текстового
+        run'а на U+00A0 — под justify слово-якорь со своим номером не отрывается
+        от предыдущего слова. Несколько пробелов: рвём только последний (стык
+        слово↔якорь), более ранние остаются растяжимыми. Берём только прямые
+        w:r параграфа (runs внутри w:hyperlink не трогаем — сноска сразу за
+        ссылкой редка, неразрывный пробел тогда просто не ставится)."""
+        for r in reversed(self.paragraph._p.findall(qn("w:r"))):
+            t = r.find(qn("w:t"))
+            if t is None or not t.text:
+                continue
+            if t.text.endswith(" "):
+                t.text = t.text[:-1] + chr(0xA0)
+                t.set(qn("xml:space"), "preserve")
+            return
+
+    def _strip_trailing_anchor_space(self) -> None:
+        """BUG-3: срезает хвостовые обычные пробелы у текста ЯКОРЯ сноски —
+        иначе они дали бы растяжимую щель между якорем и номером под justify.
+        Стрипаем только run, добавленный ВНУТРИ footnote-span (сравнение со
+        снимком _footnote_run_before), чтобы у пустого якоря не задеть
+        предыдущий run."""
+        runs = self.paragraph._p.findall(qn("w:r"))
+        if not runs:
+            return
+        last = runs[-1]
+        if last is self._footnote_run_before:
+            return  # якорь без текста — собственный run не добавлялся
+        t = last.find(qn("w:t"))
+        if t is not None and t.text and t.text.endswith(" "):
+            t.text = t.text.rstrip(" ")
 
     def _open_hyperlink(self, href: str) -> bool:
         """Создаёт w:hyperlink. Якорь '#...' → внутренняя ссылка (w:anchor),
