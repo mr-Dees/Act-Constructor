@@ -203,6 +203,8 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         const textBlockId = this.activeEditor.dataset.textBlockId;
+        // Капсула появилась/изменилась — пере-расставляем caret-guard'ы.
+        this.normalizeMarkers(this.activeEditor);
         this.saveContent(textBlockId, this.activeEditor.innerHTML);
         // B-10: создание/правка маркера могли добавить сноску — пере-нумеровать.
         this.renumberEditorFootnotes();
@@ -352,6 +354,8 @@ Object.assign(TextBlockManager.prototype, {
 
         if (this.activeEditor) {
             const textBlockId = this.activeEditor.dataset.textBlockId;
+            // Капсула удалена — пере-расставляем caret-guard'ы.
+            this.normalizeMarkers(this.activeEditor);
             this.saveContent(textBlockId, this.activeEditor.innerHTML);
             // B-10: сноска удалена — пере-нумеровать оставшиеся.
             this.renumberEditorFootnotes();
@@ -368,10 +372,21 @@ Object.assign(TextBlockManager.prototype, {
         const editor = marker.closest('.textblock-editor');
         if (!editor) return;
         editor.focus();
+        // Гарантируем caret-guard (U+FEFF) с нужной стороны маркера — он даёт
+        // браузеру реальную DOM-позицию каретки вплотную к contenteditable=false
+        // капсуле (нужно и для клавиатуры, и у ведущей/единственной капсулы, где
+        // позиции «снаружи» иначе нет). Guard рантайм-only, стрипается при save.
+        const guardChar = this.CAP_GUARD_CHAR;
+        let guard = after ? marker.nextSibling : marker.previousSibling;
+        if (!(guard && guard.nodeType === Node.TEXT_NODE && guard.data === guardChar)) {
+            guard = document.createTextNode(guardChar);
+            marker.parentNode.insertBefore(guard, after ? marker.nextSibling : marker);
+        }
         const sel = window.getSelection();
         const range = document.createRange();
-        if (after) range.setStartAfter(marker);
-        else range.setStartBefore(marker);
+        // before → каретка в КОНЦЕ guard (вплотную к маркеру слева);
+        // after  → каретка в НАЧАЛЕ guard (вплотную к маркеру справа).
+        range.setStart(guard, after ? 0 : guard.length);
         range.collapse(true);
         sel.removeAllRanges();
         sel.addRange(range);

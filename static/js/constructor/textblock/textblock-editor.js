@@ -65,14 +65,19 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * BUG-2.2: ре-применяет рантайм-атрибут contenteditable="false" ко всем
-     * inline-маркерам (ссылки/сноски) редактора. Атрибут НЕ хранится в БД —
-     * бэк-санитайзер его срезает (он рантайм-only, как data-footnote-number),
-     * а все зрелые редакторы (ProseMirror/Slate/Lexical/CKEditor) тоже
-     * ре-применяют contenteditable при рендере, а не сериализуют. Без этого
-     * после reload капсула становится редактируемой. Только setAttribute на
-     * существующих span — НЕ вставляет текстовых узлов (нумерация сносок и
-     * textContent-инварианты не затрагиваются).
+     * BUG-2.2 + каретка (гибрид Варианта 2): рантайм-нормализация маркеров при
+     * каждом рендере/структурной правке. Делает две вещи:
+     *  1. Ре-применяет contenteditable="false" ко всем .text-link/.text-footnote.
+     *     Атрибут НЕ хранится в БД (бэк-санитайзер его срезает, он рантайм-only,
+     *     как data-footnote-number); без ре-применения после reload капсула
+     *     редактируема.
+     *  2. Расставляет невидимые caret-guard'ы (U+FEFF) у проблемных границ
+     *     капсул (ведущая/хвостовая/смежные), где браузер не даёт поставить
+     *     каретку рядом с contenteditable=false-атомом. Идемпотентно: сначала
+     *     снимаем все старые guard'ы, потом расставляем заново. Guard'ы живут
+     *     ТОЛЬКО в живом DOM — стрипаются при сохранении (_stripGuards) и на
+     *     DOCX-экспорте, в БД/превью/Word не попадают. guard=U+FEFF, НЕ U+200B
+     *     (последний занят якорем размера в applyFontSize).
      * @param {HTMLElement} editor
      */
     normalizeMarkers(editor) {
@@ -82,6 +87,103 @@ Object.assign(TextBlockManager.prototype, {
                 marker.setAttribute('contenteditable', 'false');
             }
         });
+        this._cleanCapGuards(editor);
+        this._placeCapGuards(editor);
+    },
+
+    /** Символ-«пустышка» caret-guard'а (U+FEFF, BOM/zero-width-no-break-space). */
+    CAP_GUARD_CHAR: '\uFEFF',
+
+    /** @private Узел — это inline-капсула (ссылка/сноска)? */
+    _isCapsule(node) {
+        return !!(node && node.nodeType === Node.ELEMENT_NODE && node.classList &&
+            (node.classList.contains('text-link') || node.classList.contains('text-footnote')));
+    },
+
+    /** @private Текстовый узел — чистый caret-guard (один U+FEFF)? */
+    _isGuardNode(node) {
+        return !!(node && node.nodeType === Node.TEXT_NODE && node.data === this.CAP_GUARD_CHAR);
+    },
+
+    /** @private Текстовый узел незначим (пустой ИЛИ caret-guard U+FEFF). */
+    _isInsignificantText(n) {
+        return n && n.nodeType === Node.TEXT_NODE &&
+            (n.data === '' || n.data === this.CAP_GUARD_CHAR);
+    },
+
+    /** @private Соседний значимый узел (пропускает пустые тексты и guard'ы). */
+    _significantSibling(node, dir) {
+        let n = node ? node[dir] : null;
+        while (this._isInsignificantText(n)) n = n[dir];
+        return n;
+    },
+
+    /** @private Первый/последний значимый ребёнок (пропускает пустые/guard'ы). */
+    _firstSignificantChild(editor) {
+        let n = editor.firstChild;
+        while (this._isInsignificantText(n)) n = n.nextSibling;
+        return n;
+    },
+    _lastSignificantChild(editor) {
+        let n = editor.lastChild;
+        while (this._isInsignificantText(n)) n = n.previousSibling;
+        return n;
+    },
+
+    /**
+     * @private Снимает caret-guard'ы: чистые U+FEFF-узлы удаляет, а U+FEFF
+     * ВНУТРИ текста с реальными символами (guard, в который успели напечатать)
+     * срезает, сохраняя текст. Идемпотентно. U+200B (якорь размера) не трогает.
+     */
+    _cleanCapGuards(editor) {
+        const guardChar = this.CAP_GUARD_CHAR;
+        const toRemove = [];
+        const walk = (node) => {
+            let child = node.firstChild;
+            while (child) {
+                const next = child.nextSibling;
+                if (child.nodeType === 3) {              // TEXT_NODE
+                    if (child.data === guardChar) {
+                        toRemove.push(child);
+                    } else if (child.data && child.data.indexOf(guardChar) !== -1) {
+                        child.data = child.data.split(guardChar).join('');
+                    }
+                } else if (child.nodeType === 1 && child.firstChild) {  // ELEMENT_NODE
+                    walk(child);
+                }
+                child = next;
+            }
+        };
+        if (editor && editor.firstChild) walk(editor);
+        toRemove.forEach(t => { if (t.parentNode) t.parentNode.removeChild(t); });
+    },
+
+    /**
+     * @private Ставит caret-guard'ы у трёх проблемных границ капсул: перед
+     * ведущей, после хвостовой и между двумя смежными. Где с одной стороны есть
+     * обычный текст — guard не нужен (каретка ставится штатно). Зовётся ПОСЛЕ
+     * _cleanCapGuards (в DOM нет старых guard'ов).
+     */
+    _placeCapGuards(editor) {
+        const g = () => document.createTextNode(this.CAP_GUARD_CHAR);
+        const first = this._firstSignificantChild(editor);
+        if (this._isCapsule(first)) editor.insertBefore(g(), first);
+        const last = this._lastSignificantChild(editor);
+        if (this._isCapsule(last)) editor.insertBefore(g(), last.nextSibling); // null ref → append
+        editor.querySelectorAll('.text-link, .text-footnote').forEach(m => {
+            if (this._isCapsule(this._significantSibling(m, 'nextSibling'))) {
+                m.parentNode.insertBefore(g(), m.nextSibling);
+            }
+        });
+    },
+
+    /**
+     * @private Убирает caret-guard'ы (U+FEFF) из HTML-строки перед сохранением в
+     * content/БД. Guard'ы — рантайм-only, в хранимый контент/превью/DOCX не
+     * попадают. U+200B (якорь размера) сознательно НЕ трогаем.
+     */
+    _stripGuards(html) {
+        return typeof html === 'string' ? html.split(this.CAP_GUARD_CHAR).join('') : html;
     },
 
     /**
@@ -119,7 +221,10 @@ Object.assign(TextBlockManager.prototype, {
      * @private
      */
     _toggleEmptyClass(editor) {
-        const hasText = editor.textContent.trim().length > 0;
+        // U+FEFF (caret-guard) и U+200B (якорь размера) невидимы, но переживают
+        // String.trim() — вычищаем их перед проверкой, иначе блок из одних
+        // невидимок считался бы непустым и placeholder не показывался.
+        const hasText = editor.textContent.replace(/[\uFEFF\u200B]/g, '').trim().length > 0;
         const hasInlineEl = editor.querySelector('.text-link, .text-footnote, img') !== null;
         editor.classList.toggle('textblock-editor--empty', !hasText && !hasInlineEl);
     },
@@ -154,7 +259,7 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
-        textBlock.content = editor.innerHTML;
+        textBlock.content = this._stripGuards(editor.innerHTML);
 
         // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
         // успеть сработать, и превью оставалось бы с устаревшим текстом до
@@ -195,7 +300,7 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         editor.saveTimeout = setTimeout(() => {
-            textBlock.content = editor.innerHTML;
+            textBlock.content = this._stripGuards(editor.innerHTML);
 
             if (typeof ChangelogTracker !== 'undefined') {
                 ChangelogTracker._recordDebounced('modify_textblock', textBlock.id, '', {field: 'content'}, 5000);
@@ -406,6 +511,14 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
 
+        // Каретка у границы капсулы с КЛАВИАТУРЫ (Home/←/→) — приземляется в
+        // caret-guard у ведущей/хвостовой капсулы (мышь делает то же через
+        // click-обработчик). Только «голые» стрелки/Home, без модификаторов.
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey &&
+            this._handleCapsuleCaretKey(e, editor)) {
+            return;
+        }
+
         // BUG-6: Enter у границы inline-маркера (contenteditable=false). Нативный
         // SplitBlock расщепляет/клонирует маркер — фантомные пустые капсулы и
         // задвоение нумерации сносок. Перехватываем и вставляем перенос вручную,
@@ -456,6 +569,51 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Каретка у границы капсулы с КЛАВИАТУРЫ (гибрид Варианта 2): Home / ←/→ у
+     * ведущей/хвостовой капсулы ставит каретку в её caret-guard через
+     * _placeCaretBesideMarker — ту же точку приземления, что и клик мышью.
+     * Возвращает true, если перехватил клавишу.
+     * @private
+     */
+    _handleCapsuleCaretKey(e, editor) {
+        const sel = window.getSelection();
+        if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return false;
+        const range = sel.getRangeAt(0);
+
+        if (e.key === 'Home') {
+            // Строка начинается капсулой → каретка перед ней (в guard).
+            const first = this._firstSignificantChild(editor);
+            if (this._isCapsule(first)) {
+                e.preventDefault();
+                this._placeCaretBesideMarker(first, false);
+                return true;
+            }
+            return false;
+        }
+        if (e.key === 'ArrowLeft') {
+            // Капсула слева, и слева от НЕЁ нет реального контента (ведущая) →
+            // встаём ПЕРЕД ней (в guard), а не «проскакиваем» в пустоту.
+            const { before } = this._caretAdjacentMarkers(range);
+            if (before && !this._significantSibling(before, 'previousSibling')) {
+                e.preventDefault();
+                this._placeCaretBesideMarker(before, false);
+                return true;
+            }
+            return false;
+        }
+        if (e.key === 'ArrowRight') {
+            const { after } = this._caretAdjacentMarkers(range);
+            if (after && !this._significantSibling(after, 'nextSibling')) {
+                e.preventDefault();
+                this._placeCaretBesideMarker(after, true);
+                return true;
+            }
+            return false;
+        }
+        return false;
+    },
+
+    /**
      * BUG-6: возвращает inline-маркеры (.text-link/.text-footnote), непосредственно
      * примыкающие к схлопнутой каретке слева (before) и справа (after). Пустые
      * текстовые узлы пропускаются. Используется для перехвата Enter у границы
@@ -480,8 +638,11 @@ Object.assign(TextBlockManager.prototype, {
             beforeNode = c.childNodes[o - 1] || null;
             afterNode = c.childNodes[o] || null;
         }
+        // Пропускаем пустые текстовые узлы И caret-guard'ы (U+FEFF) — иначе
+        // guard между кареткой и капсулой «спрятал» бы маркер от перехвата Enter.
         const skipEmpty = (n, dir) => {
-            while (n && n.nodeType === Node.TEXT_NODE && n.data === '') n = n[dir];
+            while (n && n.nodeType === Node.TEXT_NODE &&
+                (n.data === '' || n.data === this.CAP_GUARD_CHAR)) n = n[dir];
             return n;
         };
         beforeNode = skipEmpty(beforeNode, 'previousSibling');

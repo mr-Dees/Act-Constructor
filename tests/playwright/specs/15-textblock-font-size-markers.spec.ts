@@ -102,17 +102,20 @@ test.describe('Текстблок: граница contenteditable=false марк
     const box = await page.locator(`${EDITOR} .text-link`).boundingBox();
     if (!box) throw new Error('marker box not found');
 
+    // невидимые caret-guard'ы (U+FEFF) и якорь размера (U+200B) вычищаем из текста
+    const visibleText = (el: HTMLElement) => el.textContent!.replace(/[\uFEFF\u200B]/g, '');
+
     // левая половина → каретка ПЕРЕД → "L" уходит до маркера
     await page.mouse.click(box.x + box.width * 0.2, box.y + box.height / 2);
     await page.keyboard.type('L');
     await page.waitForTimeout(30);
-    expect(await page.locator(EDITOR).evaluate((el) => el.textContent!.startsWith('L'))).toBe(true);
+    expect(await page.locator(EDITOR).evaluate(visibleText)).toMatch(/^L/);
 
     // правая половина → каретка ПОСЛЕ → "R" уходит за маркер
     await page.mouse.click(box.x + box.width * 0.85, box.y + box.height / 2);
     await page.keyboard.type('R');
     await page.waitForTimeout(30);
-    expect(await page.locator(EDITOR).evaluate((el) => el.textContent!.endsWith('R'))).toBe(true);
+    expect(await page.locator(EDITOR).evaluate(visibleText)).toMatch(/R$/);
   });
 
   test('BUG-6: Enter перед ведущей сноской не клонирует капсулу', async ({ page }) => {
@@ -273,5 +276,87 @@ test.describe('Текстблок: рендер из сохранённого к
     expect(res.sizeLive).toBe('36px');
     // BUG-1: раньше inheritFormattingToElement откатывал маркер на внешний 20px
     expect(res.sizeAfter).toBe('36px');
+  });
+});
+
+test.describe('Текстблок: каретка у капсулы (гибрид Варианта 2)', () => {
+  test('CARET: guard-узлы расставлены при рендере и вычищены при сохранении', async ({ page }) => {
+    await openTextblock(page);
+    const res = await page.evaluate(() => {
+      const tbm = (window as any).textBlockManager;
+      const tb = {
+        id: 'txt-guard',
+        content: '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru">ссылка</span> хвост'
+          + '<span class="text-footnote" data-footnote-id="F1" data-footnote-text="п">сн</span>',
+        formatting: {},
+      };
+      (window as any).AppState.textBlocks['txt-guard'] = tb;
+      const ed = tbm.createEditor(tb);
+      document.body.appendChild(ed);
+      // ведущая капсула (text-link первой) → перед ней guard U+FEFF;
+      // хвостовая (text-footnote последней) → guard после неё.
+      const leadGuard = ed.firstChild && ed.firstChild.nodeType === 3
+        && (ed.firstChild as Text).data === '\uFEFF';
+      const tailGuard = ed.lastChild && ed.lastChild.nodeType === 3
+        && (ed.lastChild as Text).data === '\uFEFF';
+      // saveContent стрипает guard'ы из хранимого content
+      tbm.saveContent('txt-guard', ed.innerHTML);
+      const stored = (window as any).AppState.textBlocks['txt-guard'].content as string;
+      ed.remove();
+      return { leadGuard, tailGuard, storedHasGuard: stored.indexOf('\uFEFF') !== -1 };
+    });
+    expect(res.leadGuard).toBe(true);
+    expect(res.tailGuard).toBe(true);
+    expect(res.storedHasGuard).toBe(false);   // в БД/превью/DOCX guard'ы не уходят
+  });
+
+  test('CARET: Home + ввод печатает текст ПЕРЕД ведущей капсулой (клавиатура)', async ({ page }) => {
+    await openTextblock(page);
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru" contenteditable="false">ссылка</span> хвост';
+      tbm.normalizeMarkers(ed);          // расставит guard перед ведущей капсулой
+      tbm.attachLinkFootnoteHandlers();
+      ed.focus();
+      const sel = window.getSelection()!; const r = document.createRange();
+      r.selectNodeContents(ed); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); // каретка в конец
+    });
+    await page.keyboard.press('Home');       // → каретка в guard перед капсулой
+    await page.keyboard.type('НАЧАЛО');
+    await page.waitForTimeout(30);
+    const text = await page.locator(EDITOR).evaluate(
+      (el) => el.textContent!.replace(/[\uFEFF\u200B]/g, ''));
+    expect(text.startsWith('НАЧАЛО')).toBe(true);
+    expect(text).toContain('ссылка');
+  });
+
+  test('CARET: ← печатает перед ведущей капсулой, → печатает после хвостовой', async ({ page }) => {
+    await openTextblock(page);
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      // единственная капсула — она и ведущая, и хвостовая
+      ed.innerHTML = '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru" contenteditable="false">ссылка</span>';
+      tbm.normalizeMarkers(ed);
+      tbm.attachLinkFootnoteHandlers();
+      ed.focus();
+      const sel = window.getSelection()!; const r = document.createRange();
+      r.selectNodeContents(ed); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); // каретка после капсулы
+    });
+    // → у хвостовой капсулы → guard после неё → печатаем "ПОСЛЕ"
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.type('ПОСЛЕ');
+    // Home → перед ведущей капсулой → печатаем "ДО"
+    await page.keyboard.press('Home');
+    await page.keyboard.type('ДО');
+    await page.waitForTimeout(30);
+    const text = await page.locator(EDITOR).evaluate(
+      (el) => el.textContent!.replace(/[\uFEFF\u200B]/g, ''));
+    expect(text.startsWith('ДО')).toBe(true);
+    expect(text.endsWith('ПОСЛЕ')).toBe(true);
+    expect(text).toContain('ссылка');
   });
 });
