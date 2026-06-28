@@ -34,39 +34,31 @@ Object.assign(TextBlockManager.prototype, {
     inheritFormattingToElement(element) {
         if (!element) return;
 
-        // Получаем форматирование из парента (контейнера с форматированием)
+        const props = ['fontSize', 'fontWeight', 'fontStyle', 'textDecoration', 'color', 'backgroundColor'];
+
+        // Собираем inline-стили предков: БЛИЖАЙШИЙ предок выигрывает (не
+        // перезаписываем уже найденное, идём изнутри наружу). BUG-1: прежний
+        // цикл без guard'а отдавал победу САМОМУ ВНЕШНЕМУ враппер-размеру.
+        const styles = {};
         let parent = element.parentElement;
-        let styles = {};
-
-        // Ищем родительский элемент с форматированием
         while (parent && parent !== this.activeEditor) {
-            const style = window.getComputedStyle(parent);
-
-            // Копируем стили, если они есть
-            if (parent.style.fontSize) {
-                styles.fontSize = parent.style.fontSize;
+            for (const prop of props) {
+                if (!styles[prop] && parent.style[prop]) {
+                    styles[prop] = parent.style[prop];
+                }
             }
-            if (parent.style.fontWeight) {
-                styles.fontWeight = parent.style.fontWeight;
-            }
-            if (parent.style.fontStyle) {
-                styles.fontStyle = parent.style.fontStyle;
-            }
-            if (parent.style.textDecoration) {
-                styles.textDecoration = parent.style.textDecoration;
-            }
-            if (parent.style.color) {
-                styles.color = parent.style.color;
-            }
-            if (parent.style.backgroundColor) {
-                styles.backgroundColor = parent.style.backgroundColor;
-            }
-
             parent = parent.parentElement;
         }
 
-        // Применяем найденные стили к элементу
-        Object.assign(element.style, styles);
+        // Наследуем ТОЛЬКО недостающее — НЕ затираем собственное явное значение
+        // маркера. BUG-1: безусловный Object.assign откатывал заданный
+        // пользователем размер ссылки/сноски на размер внешнего враппера при
+        // каждом возврате фокуса в блок (и закреплял откат в content на blur).
+        for (const prop of props) {
+            if (styles[prop] && !element.style[prop]) {
+                element.style[prop] = styles[prop];
+            }
+        }
 
         // Также наследуем форматирование от соседних элементов
         this.inheritFromNeighbors(element);
