@@ -36,6 +36,13 @@ Object.assign(TextBlockManager.prototype, {
         // вектор stored-XSS на клиенте.
         SafeHTML.set(editor, textBlock.content || '');
 
+        // BUG-2.2: бэк-санитайзер (bleach, html_sanitizer.py) срезает с маркеров
+        // contenteditable — его НЕТ в allowlist'е span-атрибутов (рантайм-only,
+        // как data-footnote-number). Возвращаем его при каждом рендере из
+        // сохранённого контента, иначе после reload капсула редактируема:
+        // каретка заходит внутрь, а Enter у её границы клонирует маркер.
+        this.normalizeMarkers(editor);
+
         // B-26: начальное состояние пустоты — JS-класс, не CSS :empty
         // (:empty ненадёжен в contenteditable: после ввода/удаления остаётся <br>/<div>).
         this._toggleEmptyClass(editor);
@@ -55,6 +62,26 @@ Object.assign(TextBlockManager.prototype, {
         this.applyFormatting(editor, textBlock.formatting);
 
         return editor;
+    },
+
+    /**
+     * BUG-2.2: ре-применяет рантайм-атрибут contenteditable="false" ко всем
+     * inline-маркерам (ссылки/сноски) редактора. Атрибут НЕ хранится в БД —
+     * бэк-санитайзер его срезает (он рантайм-only, как data-footnote-number),
+     * а все зрелые редакторы (ProseMirror/Slate/Lexical/CKEditor) тоже
+     * ре-применяют contenteditable при рендере, а не сериализуют. Без этого
+     * после reload капсула становится редактируемой. Только setAttribute на
+     * существующих span — НЕ вставляет текстовых узлов (нумерация сносок и
+     * textContent-инварианты не затрагиваются).
+     * @param {HTMLElement} editor
+     */
+    normalizeMarkers(editor) {
+        if (!editor || typeof editor.querySelectorAll !== 'function') return;
+        editor.querySelectorAll('.text-link, .text-footnote').forEach(marker => {
+            if (marker.getAttribute('contenteditable') !== 'false') {
+                marker.setAttribute('contenteditable', 'false');
+            }
+        });
     },
 
     /**
@@ -217,7 +244,13 @@ Object.assign(TextBlockManager.prototype, {
             document.execCommand('insertText', false, plain);
         }
 
+        this.normalizeMarkers(editor);
         this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // BUG-4: навешиваем ПОЛНЫЙ набор обработчиков (tooltip/contextmenu/
+        // dblclick/клик-каретка) на вставленные маркеры сразу. Иначе ссылка из
+        // Word оживала (наведение/редактирование) только при следующем фокусе —
+        // перезаход на шаг, перезагрузка или клик в другое поле и обратно.
+        this.attachLinkFootnoteHandlers();
         // Наследуем форматирование на новые маркеры (как при ручном создании).
         this.applyFormattingToNewNodes(editor);
         this._toggleEmptyClass(editor);
@@ -234,16 +267,19 @@ Object.assign(TextBlockManager.prototype, {
      * @private
      */
     _buildPasteFragment(html) {
-        // DOMPurify сводит вход к <a href>…</a> + текст; остальное вырезается
-        // (KEEP_CONTENT=true по умолчанию сохраняет текст внутри удалённых тегов).
-        // BUG-4: дефолтный ALLOWED_URI_REGEXP вырезает href со схемой file: (и
-        // потому ссылка на локальный файл терялась). Расширяем allowlist схем до
-        // http/https/ftp/file/mailto/tel + относительные/якоря; javascript:/data:/
-        // vbscript: regex по-прежнему отбивает (нет в списке, двоеточие). Финальный
-        // гейт схемы — validateLinkUrl в _collectPasteNodes.
+        // DOMPurify сводит вход к <a href> + блочной разметке + тексту; прочее
+        // вырезается (KEEP_CONTENT=true по умолчанию сохраняет текст внутри
+        // удалённых тегов). BUG-4: дефолтный ALLOWED_URI_REGEXP вырезает href со
+        // схемой file: (ссылка на локальный файл терялась). Расширяем allowlist
+        // схем до http/https/ftp/file/mailto/tel + относительные/якоря;
+        // javascript:/data:/vbscript: regex по-прежнему отбивает. Финальный гейт
+        // схемы — validateLinkUrl в _collectPasteNodes. BUG-5: разрешаем
+        // блочные теги br/p/div/li, чтобы _collectPasteNodes восстановил
+        // переносы абзацев (Word размечает их <p class=MsoNormal>); теги инертны
+        // и без атрибутов (ALLOWED_ATTR=['href']) — XSS-вектора не несут.
         const clean = SafeHTML.sanitize(html, {
             USE_PROFILES: false,
-            ALLOWED_TAGS: ['a'],
+            ALLOWED_TAGS: ['a', 'br', 'p', 'div', 'li'],
             ALLOWED_ATTR: ['href'],
             ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
         });
@@ -252,6 +288,12 @@ Object.assign(TextBlockManager.prototype, {
         tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
         const fragment = document.createDocumentFragment();
         this._collectPasteNodes(tmp, fragment);
+        // BUG-5: хвостовой перенос после последнего абзаца не нужен.
+        while (fragment.lastChild
+            && fragment.lastChild.nodeType === Node.ELEMENT_NODE
+            && fragment.lastChild.tagName === 'BR') {
+            fragment.removeChild(fragment.lastChild);
+        }
         return fragment;
     },
 
@@ -264,6 +306,8 @@ Object.assign(TextBlockManager.prototype, {
      * @private
      */
     _collectPasteNodes(root, fragment) {
+        const BLOCK = new Set(['P', 'DIV', 'LI']);
+        const isBlockEl = (n) => n && n.nodeType === Node.ELEMENT_NODE && BLOCK.has(n.tagName);
         root.childNodes.forEach((node) => {
             if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'A') {
                 const href = (node.getAttribute('href') || '').trim();
@@ -275,12 +319,38 @@ Object.assign(TextBlockManager.prototype, {
                 } else if (node.textContent) {
                     fragment.appendChild(document.createTextNode(node.textContent));
                 }
+            } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+                // BUG-5: явный перенос строки внутри абзаца.
+                this._appendPasteBreak(fragment);
+            } else if (isBlockEl(node)) {
+                // BUG-5: содержимое блока + перенос-разделитель абзаца после него.
+                this._collectPasteNodes(node, fragment);
+                this._appendPasteBreak(fragment);
             } else if (node.nodeType === Node.ELEMENT_NODE) {
                 this._collectPasteNodes(node, fragment);
             } else if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+                // BUG-5: пропускаем чисто-пробельный форматирующий whitespace
+                // МЕЖДУ блоками (перевод строки между </p> и <p>) — иначе
+                // появился бы лишний пробел; внутри-абзацные пробелы сохраняем.
+                const blank = !node.textContent.trim();
+                if (blank && (isBlockEl(node.previousElementSibling) || isBlockEl(node.nextElementSibling))) {
+                    return;
+                }
                 fragment.appendChild(document.createTextNode(node.textContent));
             }
         });
+    },
+
+    /**
+     * BUG-5: добавляет перенос строки <br> во фрагмент вставки без ведущих и
+     * двойных переносов (не ставит первым узлом и не задваивает подряд).
+     * @private
+     */
+    _appendPasteBreak(fragment) {
+        const last = fragment.lastChild;
+        if (!last) return;
+        if (last.nodeType === Node.ELEMENT_NODE && last.tagName === 'BR') return;
+        fragment.appendChild(document.createElement('br'));
     },
 
     /**

@@ -165,4 +165,113 @@ test.describe('Текстблок: вставка ссылок из Word', () =>
     expect(res.links).toEqual(['https://example.com/p', 'file:///C:/d.pdf', '#ch2']);
     expect(res.hasJs).toBe(false);
   });
+
+  test('BUG-5: вставка из Word сохраняет переносы абзацев как <br>', async ({ page }) => {
+    await openTextblock(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed; ed.innerHTML = ''; ed.focus();
+      const sel = window.getSelection()!; const r = document.createRange();
+      r.selectNodeContents(ed); r.collapse(false); sel.removeAllRanges(); sel.addRange(r);
+
+      const wordHtml = '<html><body><!--StartFragment-->'
+        + '<p class="MsoNormal">Первый абзац</p>'
+        + '<p class="MsoNormal">Второй абзац</p>'
+        + '<p class="MsoNormal">Третий</p>'
+        + '<!--EndFragment--></body></html>';
+      const ev = { preventDefault() {}, clipboardData: { getData(t: string) {
+        if (t === 'text/html') return wordHtml;
+        if (t === 'text/plain') return 'Первый абзац\nВторой абзац\nТретий';
+        return '';
+      } } };
+      tbm.handleEditorPaste(ev, ed, { id: 'txt-seed-1' });
+      return { brs: ed.querySelectorAll('br').length, text: ed.textContent };
+    });
+    // три абзаца → два разделителя-переноса (хвостовой снят)
+    expect(res.brs).toBe(2);
+    expect(res.text).toContain('Первый абзац');
+    expect(res.text).toContain('Второй абзац');
+    expect(res.text).toContain('Третий');
+  });
+
+  test('BUG-4: вставленная ссылка получает обработчики сразу (без перезахода)', async ({ page }) => {
+    await openTextblock(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed; ed.innerHTML = ''; ed.focus();
+      const sel = window.getSelection()!; const r = document.createRange();
+      r.selectNodeContents(ed); r.collapse(false); sel.removeAllRanges(); sel.addRange(r);
+
+      const wordHtml = '<p>См <a href="https://example.com">сайт</a> тут</p>';
+      const ev = { preventDefault() {}, clipboardData: { getData(t: string) {
+        return t === 'text/html' ? wordHtml : 'См сайт тут';
+      } } };
+      tbm.handleEditorPaste(ev, ed, { id: 'txt-seed-1' });
+      const marker = ed.querySelector('.text-link') as any;
+      // attachLinkFootnoteHandlers вешает набор через AbortController _lfAbort
+      return { hasHandlers: !!(marker && marker._lfAbort), ce: marker && marker.getAttribute('contenteditable') };
+    });
+    expect(res.hasHandlers).toBe(true);
+    expect(res.ce).toBe('false');
+  });
+});
+
+test.describe('Текстблок: рендер из сохранённого контента (reload)', () => {
+  test('BUG-2.2: contenteditable=false ре-применяется при createEditor (бэк его срезал)', async ({ page }) => {
+    await openTextblock(page);
+    const res = await page.evaluate(() => {
+      const tbm = (window as any).textBlockManager;
+      // Контент, каким он приходит из БД: бэк-санитайзер (bleach) срезал
+      // contenteditable — его нет в allowlist'е span-атрибутов.
+      const tb = {
+        id: 'txt-reload',
+        content: '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru">ссылка</span> хвост'
+          + '<span class="text-footnote" data-footnote-id="F1" data-footnote-text="п">сн</span>',
+        formatting: {},
+      };
+      (window as any).AppState.textBlocks['txt-reload'] = tb;
+      const ed = tbm.createEditor(tb);
+      const markers = [...ed.querySelectorAll('.text-link, .text-footnote')];
+      return { ce: markers.map((m) => m.getAttribute('contenteditable')) };
+    });
+    // normalizeMarkers восстановил рантайм-атрибут на ВСЕХ маркерах
+    expect(res.ce).toEqual(['false', 'false']);
+  });
+
+  test('BUG-1: размер маркера не откатывается после выхода и возврата в блок', async ({ page }) => {
+    await openTextblock(page);
+    const res = await page.evaluate(async () => {
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      ed.focus(); tbm.activeEditor = ed;
+      ed.innerHTML = 'до <span class="text-link" data-link-id="L1" data-link-url="https://a.ru" contenteditable="false">ссылка</span> после';
+      tbm.attachLinkFootnoteHandlers();
+
+      const selectMarker = () => {
+        const m = ed.querySelector('.text-link')!;
+        const sel = window.getSelection()!; const r = document.createRange();
+        r.selectNode(m); sel.removeAllRanges(); sel.addRange(r);
+      };
+      // две смены размера → вложенность OUTER20[ SPAN36[ MARKER ] ]
+      selectMarker(); tbm.applyFontSize(20);
+      selectMarker(); tbm.applyFontSize(36);
+      const sizeLive = (ed.querySelector('.text-link') as HTMLElement).style.fontSize;
+
+      // выход и возврат: blur → focus (focus-обёртка зовёт applyFormattingToNewNodes,
+      // в т.ч. через setTimeout(100))
+      ed.dispatchEvent(new FocusEvent('blur'));
+      await sleep(10);
+      ed.focus();
+      tbm.handleEditorFocus(ed, (window as any).AppState.textBlocks['txt-seed-1']);
+      await sleep(160);
+      const sizeAfter = (ed.querySelector('.text-link') as HTMLElement).style.fontSize;
+      return { sizeLive, sizeAfter };
+    });
+    expect(res.sizeLive).toBe('36px');
+    // BUG-1: раньше inheritFormattingToElement откатывал маркер на внешний 20px
+    expect(res.sizeAfter).toBe('36px');
+  });
 });
