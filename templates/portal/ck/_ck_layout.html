@@ -8,9 +8,6 @@
     <div class="ck-toolbar">
         <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
         <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
-        <div class="ck-toolbar__user">
-            Пользователь: <b id="ckUsername"></b>
-        </div>
     </div>
 
     <!-- 2. Sub-header -->
@@ -56,9 +53,6 @@
         if (isAuthorized) {
             PortalSidebar.init();
             LandingSettingsManager.init();
-
-            const usernameEl = document.getElementById('ckUsername');
-            if (usernameEl) usernameEl.textContent = AuthManager.getCurrentUser();
 
             {% block ck_init %}{% endblock %}
         }
