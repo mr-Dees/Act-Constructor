@@ -165,6 +165,7 @@ test.describe('capsule-integrity: атомарность при наших оп�
     await selectAcrossCapsuleBoundary(page);
     await page.evaluate(() => {
       const dt = new DataTransfer();
+      dt.setData('text/html', '<p>ВСТАВКА</p>'); // HTML-ветка → проходит через _expandRangeOutOfMarkers
       dt.setData('text/plain', 'ВСТАВКА');
       const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
       ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
