@@ -88,10 +88,11 @@ export class TextBlockManager {
     saveContent(textBlockId, content) {
         const textBlock = this.getTextBlock(textBlockId);
         if (textBlock) {
-            // Снимаем caret-guard'ы (U+FEFF) перед записью: они рантайм-only, в
-            // хранимый content/БД/превью/DOCX попадать не должны (_stripGuards
-            // навешен на прототип в textblock-editor.js).
-            textBlock.content = this._stripGuards ? this._stripGuards(content) : content;
+            // Снимаем caret-guard'ы + чиним инварианты капсул (дубль-id,
+            // расщеплённый клон, пустой data-*) ПЕРЕД записью в БД.
+            const stripped = this._stripGuards ? this._stripGuards(content) : content;
+            textBlock.content = this.validateAndRepairCapsules
+                ? this.validateAndRepairCapsules(stripped) : stripped;
             // Контентная правка одного блока → точечный патч превью.
             PreviewManager.updateBlock('textblock', textBlockId);
         }

@@ -98,6 +98,7 @@ import '../constructor/textblock/textblock-editor.js';
 import '../constructor/textblock/textblock-formatting.js';
 import '../constructor/textblock/textblock-toolbar.js';
 import '../constructor/textblock/textblock-links-footnotes.js';
+import '../constructor/textblock/textblock-capsule-integrity.js';
 
 // Violation (violation-init.js — последним, инстанцирует ViolationManager)
 import '../constructor/violation/violation-core.js';

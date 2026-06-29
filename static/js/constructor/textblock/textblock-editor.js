@@ -36,6 +36,11 @@ Object.assign(TextBlockManager.prototype, {
         // вектор stored-XSS на клиенте.
         SafeHTML.set(editor, textBlock.content || '');
 
+        // O1: чиним уже-битые капсулы старых актов при открытии (дубль-id и т.п.).
+        if (this.validateAndRepairCapsules) {
+            SafeHTML.set(editor, this.validateAndRepairCapsules(editor.innerHTML));
+        }
+
         // BUG-2.2: бэк-санитайзер (bleach, html_sanitizer.py) срезает с маркеров
         // contenteditable — его НЕТ в allowlist'е span-атрибутов (рантайм-only,
         // как data-footnote-number). Возвращаем его при каждом рендере из
