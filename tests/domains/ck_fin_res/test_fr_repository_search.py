@@ -107,7 +107,20 @@ class TestSearchFiltered:
 
         sql = mock_conn.fetch.call_args[0][0]
         assert "evil" not in sql
-        assert "metric_code ILIKE" in sql
+        assert "CAST(metric_code AS TEXT) ILIKE" in sql
+
+    async def test_filter_casts_column_to_text(self, repo, mock_conn):
+        """Фильтр кастует колонку в TEXT (ILIKE не определён для numeric/date/bool)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"metric_amount_rubles": "100"},
+            sort_by=None, sort_dir="asc", limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "CAST(metric_amount_rubles AS TEXT) ILIKE" in sql
 
     async def test_empty_filters_no_where_default_order(self, repo, mock_conn):
         """Без фильтров: нет WHERE, дефолтный ORDER BY id."""

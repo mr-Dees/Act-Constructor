@@ -6,7 +6,7 @@
 import { filterRows, sortRows, paginate } from './datatable-logic.js';
 import { renderFilterRow } from './column-filters.js';
 import { attachColumnResize } from './column-resize.js';
-import { showCellPopover } from './cell-popover.js';
+import { showCellPopover, isTruncated } from './cell-popover.js';
 
 export class DataTable {
   /**
@@ -104,6 +104,7 @@ export class DataTable {
   setSort(key) {
     if (this._sortKey === key) this._sortDir = this._sortDir === 'asc' ? 'desc' : 'asc';
     else { this._sortKey = key; this._sortDir = 'asc'; }
+    this._page = 1;
     this.render();
   }
 
@@ -185,7 +186,11 @@ export class DataTable {
         if (col.align === 'center') td.classList.add('align-center');
         if (col.longText) {
           td.classList.add('dt-clickable');
-          td.addEventListener('click', (e) => { e.stopPropagation(); showCellPopover(td, text); });
+          td.addEventListener('click', (e) => {
+            if (!isTruncated(td)) return; // не обрезан — пусть клик выделит строку
+            e.stopPropagation();
+            showCellPopover(td, text);
+          });
         }
         tr.appendChild(td);
       }

@@ -40,9 +40,9 @@ export class DataSource {
   get total() { return this._total; }
   getAllRows() { return this._all; }
 
-  async fetchServerPage({ filters, sortBy, sortDir, page, signal }) {
+  async fetchServerPage({ filters, sortBy, sortDir, page }) {
     const offset = (Math.max(1, page) - 1) * this._pageSize;
-    const res = await this._fetchPage({ filters, sortBy, sortDir, limit: this._pageSize, offset, signal });
+    const res = await this._fetchPage({ filters, sortBy, sortDir, limit: this._pageSize, offset });
     this._total = res.total;
     return res;
   }

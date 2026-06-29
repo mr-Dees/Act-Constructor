@@ -200,6 +200,9 @@ class FRValidationRepository(BaseRepository):
 
         Учитываются только колонки из ALLOWED_COLUMNS; значения подставляются
         bind-параметрами вида ``%значение%`` (не конкатенируются в SQL).
+        Колонка кастуется в TEXT (``CAST(col AS TEXT)``), т.к. ILIKE не
+        определён для numeric/date/bool — без каста фильтр по таким колонкам
+        падал бы с ``operator does not exist``. Совместимо с PG 9.4 / GP 6.x.
         Возвращает (clause, params, next_idx).
         """
         conditions: list[str] = []
@@ -210,7 +213,7 @@ class FRValidationRepository(BaseRepository):
                 continue
             if value is None or str(value).strip() == "":
                 continue
-            conditions.append(f"{column} ILIKE ${idx}")
+            conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
             params.append(f"%{value}%")
             idx += 1
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
