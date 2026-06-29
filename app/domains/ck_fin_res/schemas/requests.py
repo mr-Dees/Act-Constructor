@@ -18,7 +18,9 @@ class ValidationSearchRequest(BaseModel):
     filters: dict[str, str] = Field(default_factory=dict)
     sort_by: Optional[str] = None
     sort_dir: Literal["asc", "desc"] = "asc"
-    limit: int = Field(default=50, ge=1, le=200)
+    # Верхняя граница страницы определяется working_set_cap домена (сервис
+    # клампит limit), поэтому жёсткого потолка в схеме нет.
+    limit: int = Field(default=50, ge=1)
     offset: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")

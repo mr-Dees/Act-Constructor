@@ -38,18 +38,19 @@ async def search_records(
     body: ValidationSearchRequest,
     service: FRValidationService = Depends(get_fr_validation_service),
 ):
-    """Поиск записей FR-валидации по фильтрам."""
-    items, total = await service.search_records(
-        start_date=body.start_date,
-        end_date=body.end_date,
-        metric_code=body.metric_code or None,
-        process_code=body.process_code or None,
+    """Поиск записей FR-валидации по колоночным фильтрам.
+
+    Колоночные фильтры (``filters``), сортировка и пагинация выполняются на
+    сервере; размер страницы ограничен ``working_set_cap`` домена.
+    """
+    result = await service.search(
+        filters=body.filters,
+        sort_by=body.sort_by,
+        sort_dir=body.sort_dir,
         limit=body.limit,
         offset=body.offset,
     )
-    return PaginatedResponse[dict](
-        items=items, total=total, limit=body.limit, offset=body.offset,
-    )
+    return PaginatedResponse[dict](**result)
 
 
 @router.get("/records/{record_id}", dependencies=[_access])
