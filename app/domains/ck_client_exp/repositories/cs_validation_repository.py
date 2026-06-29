@@ -12,9 +12,15 @@ import asyncpg
 
 from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
+from app.domains.ck_client_exp.schemas.cs_validation import CSValidationView
 from app.domains.ck_client_exp.settings import CkClientExpSettings
 
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
+
+# Колонки представления v_db_oarb_ck_cs_validation, разрешённые для серверной
+# фильтрации (ILIKE) и сортировки (ORDER BY). Источник истины — поля схемы
+# CSValidationView; whitelist защищает от инъекций в имена колонок/ORDER BY.
+ALLOWED_COLUMNS: set[str] = set(CSValidationView.model_fields.keys())
 
 _DATE_FIELDS = {"dt_sz"}
 _NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id", "reestr_metric_id"}
@@ -155,6 +161,75 @@ class CSValidationRepository(BaseRepository):
             f"SELECT COUNT(*) FROM {self.view}{where}",
             *params,
         )
+
+    # ------------------------------------------------------------------
+    # ПОИСК ПО КОЛОНОЧНЫМ ФИЛЬТРАМ (настраиваемая таблица)
+    # ------------------------------------------------------------------
+
+    def _build_filter_where(
+        self, filters: dict[str, str] | None,
+    ) -> tuple[str, list, int]:
+        """Собирает WHERE из колоночных фильтров (ILIKE по whitelist).
+
+        Учитываются только колонки из ALLOWED_COLUMNS; значения подставляются
+        bind-параметрами вида ``%значение%`` (не конкатенируются в SQL).
+        Возвращает (clause, params, next_idx).
+        """
+        conditions: list[str] = []
+        params: list = []
+        idx = 1
+        for column, value in (filters or {}).items():
+            if column not in ALLOWED_COLUMNS:
+                continue
+            if value is None or str(value).strip() == "":
+                continue
+            conditions.append(f"{column} ILIKE ${idx}")
+            params.append(f"%{value}%")
+            idx += 1
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params, idx
+
+    async def search_filtered(
+        self,
+        *,
+        filters: dict[str, str] | None = None,
+        sort_by: str | None = None,
+        sort_dir: str = "asc",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Поиск записей по колоночным фильтрам с сортировкой и подсчётом total.
+
+        - Фильтры — ILIKE по whitelisted-колонкам (значения — bind-параметры).
+        - ``sort_by`` валидируется против ALLOWED_COLUMNS (иначе ValueError —
+          защита от инъекции в ORDER BY); направление — только ASC/DESC.
+          Без ``sort_by`` — стабильный ``ORDER BY id``.
+        - ``COUNT(*)`` считается отдельным запросом с теми же WHERE-параметрами.
+
+        Возвращает (страница записей, общее количество). SQL — PG 9.4 / GP 6.x.
+        """
+        if sort_by is not None and sort_by not in ALLOWED_COLUMNS:
+            raise ValueError(f"Недопустимая колонка сортировки: {sort_by}")
+
+        where, params, idx = self._build_filter_where(filters)
+        direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+        order_by = f"ORDER BY {sort_by} {direction}" if sort_by else "ORDER BY id"
+
+        total = await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.view}{where}",
+            *params,
+        )
+
+        query = (
+            f"SELECT * FROM {self.view}{where} "
+            f"{order_by} LIMIT ${idx} OFFSET ${idx + 1}"
+        )
+        rows = await self.conn.fetch(query, *params, limit, offset)
+        logger.debug(
+            "Поиск CS-валидации (фильтры): %s условий, sort_by=%s",
+            len(params), sort_by,
+        )
+        return [dict(r) for r in rows], int(total or 0)
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID
