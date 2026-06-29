@@ -106,4 +106,149 @@ Object.assign(TextBlockManager.prototype, {
     _freshMarkerId() {
         return 'm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     },
+
+    /**
+     * Слой 1 (prevent): перехват нативных правок ДО мутации DOM. Останавливает
+     * порчу капсул — атомарное удаление, ввод снаружи, неклипающее удаление.
+     * @param {InputEvent} e
+     * @param {HTMLElement} editor
+     * @param {object} textBlock
+     */
+    handleEditorBeforeInput(e, editor, textBlock) {
+        const ranges = typeof e.getTargetRanges === 'function' ? e.getTargetRanges() : [];
+        const type = e.inputType;
+
+        const DELETE_TYPES = ['deleteContentBackward', 'deleteContentForward',
+            'deleteWordBackward', 'deleteWordForward', 'deleteByCut',
+            'deleteByDrag', 'deleteSoftLineBackward'];
+        const INSERT_TEXT_TYPES = ['insertText', 'insertReplacementText'];
+
+        if (DELETE_TYPES.includes(type)) {
+            if (!ranges.length) return;
+            const r = ranges[0];
+            // (а) схлопнутое удаление, примыкающее к капсуле → удалить целиком.
+            if (r.collapsed) {
+                const hit = this._staticRangeTouchesCapsule(r, editor);
+                if (hit && (hit.side === 'before' || hit.side === 'after')) {
+                    const forward = (type === 'deleteContentForward' || type === 'deleteWordForward');
+                    // Backspace удаляет капсулу СЛЕВА от каретки, Delete — СПРАВА.
+                    const target = forward
+                        ? (hit.side === 'before' ? hit.capsule : null)
+                        : (hit.side === 'after' ? hit.capsule : null);
+                    if (target) {
+                        e.preventDefault();
+                        this._deleteCapsuleWhole(target);
+                        if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
+                        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+                        this._toggleEmptyClass(editor);
+                    }
+                }
+                return;
+            }
+            // (б) непустое удаление, клипающее тело капсулы → расширить и удалить.
+            const hit = this._staticRangeTouchesCapsule(r, editor);
+            if (hit && hit.side === 'inside') {
+                e.preventDefault();
+                const range = this._expandStaticRangeOutOfMarkers(r, editor);
+                range.deleteContents();
+                const sel = window.getSelection();
+                if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+                this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+                this._toggleEmptyClass(editor);
+            }
+            return;
+        }
+
+        if (INSERT_TEXT_TYPES.includes(type)) {
+            if (!ranges.length) return;
+            const hit = this._staticRangeTouchesCapsule(ranges[0], editor);
+            if (hit && hit.side === 'inside') {
+                // Ввод пришёлся в тело/guard капсулы → перенаправляем наружу.
+                e.preventDefault();
+                this._placeCaretBesideMarker(hit.capsule, true); // каретка справа от капсулы
+                const sel = window.getSelection();
+                if (sel && sel.rangeCount && e.data) {
+                    const range = sel.getRangeAt(0);
+                    range.insertNode(document.createTextNode(e.data));
+                    range.collapse(false);
+                    sel.removeAllRanges(); sel.addRange(range);
+                }
+                this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+                this._toggleEmptyClass(editor);
+            }
+        }
+        // insertCompositionText (IME), historyUndo/Redo, insertFromDrop —
+        // не вмешиваемся, страхует слой 3.
+    },
+
+    /**
+     * @private Классифицирует StaticRange относительно капсул редактора.
+     * @returns {{capsule: Element, side: 'before'|'after'|'inside'}|null}
+     */
+    _staticRangeTouchesCapsule(range, editor) {
+        const sc = range.startContainer, so = range.startOffset;
+        const ec = range.endContainer, eo = range.endOffset;
+
+        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом).
+        const insideCapsule = (node) => {
+            let el = node && node.nodeType === 3 ? node.parentElement : node;
+            while (el && el !== editor) {
+                if (this._isCapsule(el)) return el;
+                el = el.parentElement;
+            }
+            return null;
+        };
+        const insStart = insideCapsule(sc);
+        const insEnd = insideCapsule(ec);
+        if (insStart || insEnd) return { capsule: insStart || insEnd, side: 'inside' };
+
+        // Схлопнутая каретка примыкает к капсуле (через guard или напрямую).
+        if (sc === ec && so === eo) {
+            let before = null, after = null;
+            if (sc.nodeType === 3) {
+                if (so === 0) before = this._significantSibling(sc, 'previousSibling');
+                if (so === sc.length) after = this._significantSibling(sc, 'nextSibling');
+                // каретка внутри текста (0<so<len) — к капсуле не примыкает
+            } else {
+                const rawBefore = sc.childNodes[so - 1] || null;
+                const rawAfter = sc.childNodes[so] || null;
+                before = this._isInsignificantText(rawBefore)
+                    ? this._significantSibling(rawBefore, 'previousSibling') : rawBefore;
+                after = this._isInsignificantText(rawAfter)
+                    ? this._significantSibling(rawAfter, 'nextSibling') : rawAfter;
+            }
+            if (this._isCapsule(before)) return { capsule: before, side: 'after' };  // капсула слева
+            if (this._isCapsule(after)) return { capsule: after, side: 'before' };   // капсула справа
+        }
+        return null;
+    },
+
+    /** @private Удаляет капсулу целиком вместе с её caret-guard'ами по бокам. */
+    _deleteCapsuleWhole(capsule) {
+        const guardChar = this.CAP_GUARD_CHAR;
+        const prev = capsule.previousSibling, next = capsule.nextSibling;
+        if (prev && prev.nodeType === 3 && prev.data === guardChar) prev.remove();
+        if (next && next.nodeType === 3 && next.data === guardChar) next.remove();
+        capsule.remove();
+    },
+
+    /** @private StaticRange → живой Range, расширенный за целые капсулы. */
+    _expandStaticRangeOutOfMarkers(staticRange, editor) {
+        const range = document.createRange();
+        range.setStart(staticRange.startContainer, staticRange.startOffset);
+        range.setEnd(staticRange.endContainer, staticRange.endOffset);
+        const ancestor = (node) => {
+            let el = node && node.nodeType === 3 ? node.parentElement : node;
+            while (el && el !== editor) {
+                if (this._isCapsule(el)) return el;
+                el = el.parentElement;
+            }
+            return null;
+        };
+        const sm = ancestor(range.startContainer);
+        if (sm) range.setStartBefore(sm);
+        const em = ancestor(range.endContainer);
+        if (em) range.setEndAfter(em);
+        return range;
+    },
 });

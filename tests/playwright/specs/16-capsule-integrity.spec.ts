@@ -145,6 +145,42 @@ test.describe('capsule-integrity: validateAndRepairCapsules', () => {
   });
 });
 
+test.describe('capsule-integrity: beforeinput-перехват', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('Backspace, когда каретка сразу за капсулой → капсула удаляется целиком', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page);
+    // каретку ставим сразу справа от капсулы (через клик по правой половине)
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      const cap = ed.querySelector('.text-link, .text-footnote');
+      (window as any).__capId = cap.getAttribute('data-link-id') || cap.getAttribute('data-footnote-id');
+      const r = document.createRange();
+      r.setStartAfter(cap); r.collapse(true);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Backspace');
+    const stillThere = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return !![...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
+        .find(s => (s.getAttribute('data-link-id') || s.getAttribute('data-footnote-id')) === (window as any).__capId);
+    });
+    expect(stillThere).toBe(false); // капсула удалена целиком, не «надкушена»
+  });
+
+  test('выделение через границу + Delete → нет клона, id уникальны', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page);
+    await selectAcrossCapsuleBoundary(page);
+    await page.keyboard.press('Delete');
+    const ids = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return [...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
+        .map(s => s.getAttribute('data-link-id') || s.getAttribute('data-footnote-id'));
+    });
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
 test.describe('capsule-integrity: атомарность при наших операциях', () => {
   test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
 

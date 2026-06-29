@@ -240,6 +240,7 @@ Object.assign(TextBlockManager.prototype, {
     attachEditorEvents(editor, textBlock) {
         editor.addEventListener('focus', () => this.handleEditorFocus(editor, textBlock));
         editor.addEventListener('blur', () => this.handleEditorBlur(editor, textBlock));
+        editor.addEventListener('beforeinput', (e) => this.handleEditorBeforeInput(e, editor, textBlock));
         editor.addEventListener('input', () => this.handleEditorInput(editor, textBlock));
         editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e, editor, textBlock));
         editor.addEventListener('paste', (e) => this.handleEditorPaste(e, editor, textBlock));
