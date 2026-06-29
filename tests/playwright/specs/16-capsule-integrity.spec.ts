@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+﻿﻿﻿﻿import { test, expect } from '@playwright/test';
 import { openAct, SEED_ACTS } from '../fixtures';
 
 // Прогоняет validateAndRepairCapsules в браузере на заданном HTML.
@@ -168,16 +168,35 @@ test.describe('capsule-integrity: beforeinput-перехват', () => {
     expect(stillThere).toBe(false); // капсула удалена целиком, не «надкушена»
   });
 
-  test('выделение через границу + Delete → нет клона, id уникальны', async ({ page }) => {
+  test('выделение через границу + Delete → нет клона, id уникальны, нет осиротевших guard-узлов', async ({ page }) => {
     await focusSeededTextblockWithCapsule(page);
     await selectAcrossCapsuleBoundary(page);
     await page.keyboard.press('Delete');
-    const ids = await page.evaluate(() => {
+    const result = await page.evaluate(() => {
       const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
-      return [...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
+      const ids = [...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
         .map(s => s.getAttribute('data-link-id') || s.getAttribute('data-footnote-id'));
+      // Ищем осиротевшие guard-узлы (U+FEFF без соседней капсулы).
+      const GUARD = '\uFEFF';
+      let orphanedGuards = 0;
+      const walk = (node: Node) => {
+        if (node.nodeType === 3 && (node as Text).data === GUARD) {
+          const prev = node.previousSibling as Element | null;
+          const next = node.nextSibling as Element | null;
+          const adjCapsule = (n: Element | null) =>
+            n && n.nodeType === 1 &&
+            (n.classList.contains('text-link') || n.classList.contains('text-footnote'));
+          if (!adjCapsule(prev) && !adjCapsule(next)) orphanedGuards++;
+        }
+        node.childNodes.forEach(walk);
+      };
+      walk(ed);
+      return { ids, orphanedGuards };
     });
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(new Set(result.ids).size).toBe(result.ids.length);
+    // Если Chromium обработал Delete нативно (inside-ветка не срабатывает) —
+    // orphanedGuards тоже 0, т.к. браузер удаляет весь диапазон корректно.
+    expect(result.orphanedGuards).toBe(0);
   });
 });
 

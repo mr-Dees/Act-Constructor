@@ -151,6 +151,7 @@ Object.assign(TextBlockManager.prototype, {
                 e.preventDefault();
                 const range = this._expandStaticRangeOutOfMarkers(r, editor);
                 range.deleteContents();
+                if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
                 const sel = window.getSelection();
                 if (sel) { sel.removeAllRanges(); sel.addRange(range); }
                 this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
@@ -203,6 +204,9 @@ Object.assign(TextBlockManager.prototype, {
         if (insStart || insEnd) return { capsule: insStart || insEnd, side: 'inside' };
 
         // Схлопнутая каретка примыкает к капсуле (через guard или напрямую).
+        // Защитная ветка: реальный Chromium при нажатии Backspace/Delete у капсулы
+        // возвращает НЕсхлопнутый getTargetRanges(), покрывающий всю capsule целиком,
+        // — этот блок срабатывает для не-Chromium браузеров и программного ввода.
         if (sc === ec && so === eo) {
             let before = null, after = null;
             if (sc.nodeType === 3) {
@@ -225,14 +229,13 @@ Object.assign(TextBlockManager.prototype, {
 
     /** @private Удаляет капсулу целиком вместе с её caret-guard'ами по бокам. */
     _deleteCapsuleWhole(capsule) {
-        const guardChar = this.CAP_GUARD_CHAR;
         const prev = capsule.previousSibling, next = capsule.nextSibling;
-        if (prev && prev.nodeType === 3 && prev.data === guardChar) prev.remove();
-        if (next && next.nodeType === 3 && next.data === guardChar) next.remove();
+        if (this._isGuardNode(prev)) prev.remove();
+        if (this._isGuardNode(next)) next.remove();
         capsule.remove();
     },
 
-    /** @private StaticRange → живой Range, расширенный за целые капсулы. */
+    /** @private StaticRange → живой Range, расширенный за целые капсулы и их guard'ы. */
     _expandStaticRangeOutOfMarkers(staticRange, editor) {
         const range = document.createRange();
         range.setStart(staticRange.startContainer, staticRange.startOffset);
@@ -246,9 +249,19 @@ Object.assign(TextBlockManager.prototype, {
             return null;
         };
         const sm = ancestor(range.startContainer);
-        if (sm) range.setStartBefore(sm);
+        if (sm) {
+            // Если перед капсулой стоит guard-узел — включаем и его.
+            const guardBefore = sm.previousSibling;
+            if (this._isGuardNode(guardBefore)) range.setStartBefore(guardBefore);
+            else range.setStartBefore(sm);
+        }
         const em = ancestor(range.endContainer);
-        if (em) range.setEndAfter(em);
+        if (em) {
+            // Если после капсулы стоит guard-узел — включаем и его.
+            const guardAfter = em.nextSibling;
+            if (this._isGuardNode(guardAfter)) range.setEndAfter(guardAfter);
+            else range.setEndAfter(em);
+        }
         return range;
     },
 });
