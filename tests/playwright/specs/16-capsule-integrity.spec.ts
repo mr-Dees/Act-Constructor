@@ -1,4 +1,4 @@
-﻿﻿﻿﻿import { test, expect } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { openAct, SEED_ACTS } from '../fixtures';
 
 // Прогоняет validateAndRepairCapsules в браузере на заданном HTML.
