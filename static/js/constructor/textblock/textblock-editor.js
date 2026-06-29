@@ -75,7 +75,7 @@ Object.assign(TextBlockManager.prototype, {
             editor.contentEditable = 'true';
             this.attachEditorEvents(editor, textBlock);
             // Слой 3: MutationObserver-страховка целостности капсул.
-            if (this.installCapsuleObserver) this.installCapsuleObserver(editor);
+            this.installCapsuleObserver(editor);
         }
 
         this.applyFormatting(editor, textBlock.formatting);

@@ -274,7 +274,7 @@ Object.assign(TextBlockManager.prototype, {
      * @param {HTMLElement} editor
      */
     _onCapsuleMutations(records, editor) {
-        if (this._healing) return;
+        if (editor.__healing) return;
         const guardChar = this.CAP_GUARD_CHAR;
         let needGuardRestore = false;
         const capsulesToFix = [];
@@ -303,7 +303,7 @@ Object.assign(TextBlockManager.prototype, {
 
         if (!guardNodeToRestore && !needGuardRestore && !capsulesToFix.length) return;
 
-        this._healing = true;
+        editor.__healing = true;
         try {
             // Текст в guard → вынести наружу, guard вернуть в U+FEFF.
             if (guardNodeToRestore && guardNodeToRestore.parentNode) {
@@ -319,9 +319,9 @@ Object.assign(TextBlockManager.prototype, {
             }
         } finally {
             // Сбрасываем очередь мутаций, порождённых нашими правками, чтобы
-            // не вызвать повторный обход после снятия _healing.
+            // не вызвать повторный обход после снятия __healing.
             if (editor.__capsuleObserver) editor.__capsuleObserver.takeRecords();
-            this._healing = false;
+            editor.__healing = false;
         }
     },
 
