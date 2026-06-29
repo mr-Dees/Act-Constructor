@@ -10,6 +10,57 @@ async function repair(page, html: string): Promise<string> {
   }, html);
 }
 
+// Редактор с сид-текстблоком
+const EDITOR_SEL = '.textblock-editor[data-text-block-id="txt-seed-1"]';
+
+/**
+ * Переходит на шаг 2 и вставляет в сид-редактор HTML с одной ссылкой-капсулой.
+ * activeEditor устанавливается кликом (через handleEditorFocus) и затем явно
+ * переподтверждается — на случай если фокус ушёл при setHTML.
+ */
+async function focusSeededTextblockWithCapsule(page) {
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await page.locator('.step[data-step="2"]').click();
+  await page.locator(EDITOR_SEL).waitFor({ state: 'visible', timeout: 5000 });
+  await page.locator(EDITOR_SEL).click();
+  await page.evaluate(() => {
+    const ed = document.querySelector(
+      '.textblock-editor[data-text-block-id="txt-seed-1"]',
+    ) as HTMLElement;
+    const tbm = (window as any).textBlockManager;
+    tbm.activeEditor = ed;
+    ed.innerHTML =
+      'до ' +
+      '<span class="text-link" data-link-id="cap1" data-link-url="https://a.ru"' +
+      ' contenteditable="false">ссылка</span>' +
+      ' после';
+    tbm.attachLinkFootnoteHandlers();
+  });
+}
+
+/**
+ * Ставит выделение: начало в первом текстовом узле (до капсулы, offset 1),
+ * конец — внутри текстового узла капсулы (offset 3). Range пересекает границу
+ * contenteditable=false капсулы — именно этот случай провоцирует клонирование
+ * при execCommand('bold') / range.deleteContents() без расширения выделения.
+ */
+async function selectAcrossCapsuleBoundary(page) {
+  await page.evaluate(() => {
+    const ed = document.querySelector(
+      '.textblock-editor[data-text-block-id="txt-seed-1"]',
+    ) as HTMLElement;
+    const beforeText = ed.firstChild as Text;
+    const capsule = ed.querySelector('.text-link')!;
+    const capsuleText = capsule.firstChild as Text;
+    const sel = window.getSelection()!;
+    const r = document.createRange();
+    r.setStart(beforeText, 1);
+    r.setEnd(capsuleText, 3);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  });
+}
+
 test.describe('capsule-integrity: validateAndRepairCapsules', () => {
   test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
 
@@ -91,5 +142,38 @@ test.describe('capsule-integrity: validateAndRepairCapsules', () => {
     const out = await repair(page, html);
     expect(out).not.toContain(guardChar);
     expect(out).not.toContain('contenteditable');
+  });
+});
+
+test.describe('capsule-integrity: атомарность при наших операциях', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('bold по выделению через границу капсулы → нет клона, id уникальны', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page);
+    await selectAcrossCapsuleBoundary(page);
+    await page.keyboard.press('Control+b');
+    const ids = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return [...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
+        .map(s => s.getAttribute('data-link-id') || s.getAttribute('data-footnote-id'));
+    });
+    expect(new Set(ids).size).toBe(ids.length); // нет дубль-id
+  });
+
+  test('paste по выделению через границу капсулы → нет клона', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page);
+    await selectAcrossCapsuleBoundary(page);
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', 'ВСТАВКА');
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    const ids = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return [...ed.querySelectorAll('[data-link-id],[data-footnote-id]')]
+        .map(s => s.getAttribute('data-link-id') || s.getAttribute('data-footnote-id'));
+    });
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

@@ -344,6 +344,11 @@ Object.assign(TextBlockManager.prototype, {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
+            // Атомарность: если выделение клипает капсулу, deleteContents клонирует
+            // её. Расширяем границы за целые капсулы перед удалением/вставкой.
+            if (typeof this._expandRangeOutOfMarkers === 'function') {
+                this._expandRangeOutOfMarkers(range);
+            }
             range.deleteContents();
             range.insertNode(fragment);
             range.collapse(false);

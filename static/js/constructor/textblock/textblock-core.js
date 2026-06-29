@@ -106,6 +106,21 @@ export class TextBlockManager {
 
         this.activeEditor.focus();
 
+        // Атомарность капсулы: inline-форматные команды по выделению, заходящему
+        // ВНУТРЬ тела маркера, иначе клонируют его (дубль ссылки). Расширяем
+        // выделение за целые капсулы (как уже делает applyFontSize). Блочные
+        // (justify*) и insert* не трогаем.
+        const FORMAT_CMDS = ['bold', 'italic', 'underline', 'strikeThrough'];
+        if (FORMAT_CMDS.includes(command) && typeof this._expandRangeOutOfMarkers === 'function') {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                const r = sel.getRangeAt(0);
+                this._expandRangeOutOfMarkers(r);
+                sel.removeAllRanges();
+                sel.addRange(r);
+            }
+        }
+
         const result = document.execCommand(command, false, value);
 
         if (result) {
