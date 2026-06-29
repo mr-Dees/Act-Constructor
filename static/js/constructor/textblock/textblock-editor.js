@@ -10,9 +10,21 @@ import { SafeHTML } from '../../shared/sanitize.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
-     * Создаёт DOM-элемент текстового блока с редактором
+     * Создаёт DOM-элемент текстового блока с редактором.
+     * Перед созданием отключает observer старого редактора (если он ещё в DOM),
+     * чтобы при replaceChild (ItemsRenderer.updateTextBlock) не осталось зависших
+     * observer'ов на detached-узлах — предотвращает утечки памяти.
      */
     createTextBlockElement(textBlock, node) {
+        // Teardown: если в DOM уже есть редактор с тем же id — отключаем его observer.
+        const oldEditor = document.querySelector(
+            `.textblock-editor[data-text-block-id="${textBlock.id}"]`,
+        );
+        if (oldEditor && oldEditor.__capsuleObserver) {
+            oldEditor.__capsuleObserver.disconnect();
+            oldEditor.__capsuleObserver = null;
+        }
+
         const section = document.createElement('div');
         section.className = RENDER_CLASSES.TEXTBLOCK_SECTION;
         section.dataset.textBlockId = textBlock.id;
@@ -62,6 +74,8 @@ Object.assign(TextBlockManager.prototype, {
         } else {
             editor.contentEditable = 'true';
             this.attachEditorEvents(editor, textBlock);
+            // Слой 3: MutationObserver-страховка целостности капсул.
+            if (this.installCapsuleObserver) this.installCapsuleObserver(editor);
         }
 
         this.applyFormatting(editor, textBlock.formatting);

@@ -235,6 +235,134 @@ Object.assign(TextBlockManager.prototype, {
         capsule.remove();
     },
 
+    // -------------------------------------------------------------------------
+    // Слой 3 (heal): MutationObserver-страховка целостности капсул.
+    // Чинит guard-узлы и contenteditable, если их убрало что-то вне наших слоёв
+    // (IME, браузерное расширение, script, paste не через наш обработчик).
+    // -------------------------------------------------------------------------
+
+    /**
+     * Устанавливает MutationObserver на editable-редактор. Идемпотентен:
+     * при повторном вызове на тот же элемент сначала отключает старый observer.
+     * Вызывается только из editable-ветки createEditor.
+     * @param {HTMLElement} editor
+     */
+    installCapsuleObserver(editor) {
+        if (editor.__capsuleObserver) editor.__capsuleObserver.disconnect();
+        const observer = new MutationObserver((records) => this._onCapsuleMutations(records, editor));
+        observer.observe(editor, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            characterDataOldValue: true,
+            attributes: true,
+            attributeFilter: ['contenteditable'],
+        });
+        editor.__capsuleObserver = observer;
+    },
+
+    /**
+     * @private Обработчик батча мутаций. Использует узкий триггер: реагирует
+     * только на реальные нарушения инвариантов (guard удалён, contenteditable
+     * сброшен, текст напечатан в guard), а НЕ на каждую структурную мутацию.
+     * Широкий запуск ensureCapsuleInvariants на каждый childList нарушал бы
+     * каретку при обычном вводе (normalizeMarkers пересоздаёт guard-узлы).
+     *
+     * Re-entrancy: флаг _healing (ранний return) + takeRecords() (сбрасываем
+     * очередь записей, порождённых нашими собственными правками) — паттерн CKEditor.
+     * @param {MutationRecord[]} records
+     * @param {HTMLElement} editor
+     */
+    _onCapsuleMutations(records, editor) {
+        if (this._healing) return;
+        const guardChar = this.CAP_GUARD_CHAR;
+        let needGuardRestore = false;
+        const capsulesToFix = [];
+        let guardNodeToRestore = null;
+
+        for (const rec of records) {
+            if (rec.type === 'characterData') {
+                // Текст напечатан в guard-узел (oldValue — чистый U+FEFF, стал длиннее).
+                const node = rec.target;
+                if (node.nodeType === 3 && rec.oldValue === guardChar && node.data !== guardChar) {
+                    guardNodeToRestore = node;
+                }
+            } else if (rec.type === 'childList') {
+                // Guard-узел удалён (имитация «пользователь стёр невидимый символ»).
+                rec.removedNodes.forEach(n => {
+                    if (n.nodeType === 3 && n.data === guardChar) needGuardRestore = true;
+                });
+            } else if (rec.type === 'attributes') {
+                // contenteditable сброшен с капсулы.
+                if (this._isCapsule(rec.target) &&
+                        rec.target.getAttribute('contenteditable') !== 'false') {
+                    capsulesToFix.push(rec.target);
+                }
+            }
+        }
+
+        if (!guardNodeToRestore && !needGuardRestore && !capsulesToFix.length) return;
+
+        this._healing = true;
+        try {
+            // Текст в guard → вынести наружу, guard вернуть в U+FEFF.
+            if (guardNodeToRestore && guardNodeToRestore.parentNode) {
+                this._restoreGuard(guardNodeToRestore, editor);
+            }
+            // Хирургически вернуть contenteditable на капсулы.
+            capsulesToFix.forEach(cap => {
+                if (this._isCapsule(cap)) cap.setAttribute('contenteditable', 'false');
+            });
+            // Восстановить guard'ы через нормализацию.
+            if (needGuardRestore) {
+                this.normalizeMarkers(editor);
+            }
+        } finally {
+            // Сбрасываем очередь мутаций, порождённых нашими правками, чтобы
+            // не вызвать повторный обход после снятия _healing.
+            if (editor.__capsuleObserver) editor.__capsuleObserver.takeRecords();
+            this._healing = false;
+        }
+    },
+
+    /**
+     * @private Текст напечатан в guard-узел → выносим символы наружу (после
+     * guard), возвращаем guard к чистому U+FEFF, ставим каретку за вынесенным
+     * текстом. Вызывается только внутри _onCapsuleMutations (_healing уже взведён).
+     * @param {Text} node — guard-текстовый-узел с «загрязнённым» содержимым
+     * @param {HTMLElement} editor
+     */
+    _restoreGuard(node, editor) {
+        const guardChar = this.CAP_GUARD_CHAR;
+        const typed = node.data.split(guardChar).join('');
+        node.data = guardChar;
+        if (typed) {
+            const textNode = document.createTextNode(typed);
+            node.parentNode.insertBefore(textNode, node.nextSibling);
+            const sel = window.getSelection();
+            if (sel) {
+                const range = document.createRange();
+                range.setStart(textNode, textNode.length);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+    },
+
+    /**
+     * Идемпотентная сверка всех инвариантов капсул на живом редакторе:
+     * дедуп/склейка (_repairCapsulesInRoot) + re-apply contenteditable и guard'ы
+     * (normalizeMarkers). Используется как «полная» починка; _onCapsuleMutations
+     * применяет её части хирургически для экономии каретки при обычном вводе.
+     * @param {HTMLElement} editor
+     */
+    ensureCapsuleInvariants(editor) {
+        this._repairCapsulesInRoot(editor);
+        this.normalizeMarkers(editor);
+    },
+
     /** @private StaticRange → живой Range, расширенный за целые капсулы и их guard'ы. */
     _expandStaticRangeOutOfMarkers(staticRange, editor) {
         const range = document.createRange();
