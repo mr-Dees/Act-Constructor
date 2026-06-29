@@ -164,7 +164,7 @@ Object.assign(TextBlockManager.prototype, {
             if (!ranges.length) return;
             const hit = this._staticRangeTouchesCapsule(ranges[0], editor);
             if (hit && hit.side === 'inside') {
-                // Ввод пришёлся в тело/guard капсулы → перенаправляем наружу.
+                // Ввод пришёлся в тело капсулы → перенаправляем наружу.
                 e.preventDefault();
                 this._placeCaretBesideMarker(hit.capsule, true); // каретка справа от капсулы
                 const sel = window.getSelection();
@@ -265,7 +265,7 @@ Object.assign(TextBlockManager.prototype, {
      * @private Обработчик батча мутаций. Использует узкий триггер: реагирует
      * только на реальные нарушения инвариантов (guard удалён, contenteditable
      * сброшен, текст напечатан в guard), а НЕ на каждую структурную мутацию.
-     * Широкий запуск ensureCapsuleInvariants на каждый childList нарушал бы
+     * Широкий запуск normalizeMarkers на каждый childList нарушал бы
      * каретку при обычном вводе (normalizeMarkers пересоздаёт guard-узлы).
      *
      * Re-entrancy: флаг _healing (ранний return) + takeRecords() (сбрасываем
@@ -349,18 +349,6 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
         this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-    },
-
-    /**
-     * Идемпотентная сверка всех инвариантов капсул на живом редакторе:
-     * дедуп/склейка (_repairCapsulesInRoot) + re-apply contenteditable и guard'ы
-     * (normalizeMarkers). Используется как «полная» починка; _onCapsuleMutations
-     * применяет её части хирургически для экономии каретки при обычном вводе.
-     * @param {HTMLElement} editor
-     */
-    ensureCapsuleInvariants(editor) {
-        this._repairCapsulesInRoot(editor);
-        this.normalizeMarkers(editor);
     },
 
     /** @private StaticRange → живой Range, расширенный за целые капсулы и их guard'ы. */

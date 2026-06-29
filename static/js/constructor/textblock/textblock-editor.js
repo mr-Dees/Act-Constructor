@@ -279,7 +279,8 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
-        textBlock.content = this._stripGuards(editor.innerHTML);
+        const s = this._stripGuards(editor.innerHTML);
+        textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
 
         // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
         // успеть сработать, и превью оставалось бы с устаревшим текстом до
@@ -320,7 +321,8 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         editor.saveTimeout = setTimeout(() => {
-            textBlock.content = this._stripGuards(editor.innerHTML);
+            const s = this._stripGuards(editor.innerHTML);
+            textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
 
             if (typeof ChangelogTracker !== 'undefined') {
                 ChangelogTracker._recordDebounced('modify_textblock', textBlock.id, '', {field: 'content'}, 5000);
