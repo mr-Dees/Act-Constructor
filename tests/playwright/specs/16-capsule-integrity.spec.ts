@@ -34,10 +34,45 @@ test.describe('capsule-integrity: validateAndRepairCapsules', () => {
     expect(out).toContain('>Ссылка<');
   });
 
+  test('расщеплённый клон (разделитель — guard-узел U+FEFF) → склейка', async ({ page }) => {
+    // _isInsignificantText: guard-char (U+FEFF) пропускается как незначимый;
+    // _areAdjacentSplit должна видеть капсулы «соседними» и склеить их.
+    const guard = '\uFEFF';
+    const html =
+      '<span class="text-link" data-link-id="L1" data-link-url="http://a">Час</span>' +
+      guard +
+      '<span class="text-link" data-link-id="L1" data-link-url="http://a">ть</span>';
+    const out = await repair(page, html);
+    const count = (out.match(/text-link/g) || []).length;
+    expect(count).toBe(1);
+    expect(out).toContain('>Часть<');
+    // guard-символ вычищен _cleanCapGuards в конце _repairCapsulesInRoot
+    expect(out).not.toContain(guard);
+  });
+
+  test('тот же id + реальный пробел между капсулами → не сливаются (свежий id)', async ({ page }) => {
+    // Обычный пробел — значимый текст; _areAdjacentSplit вернёт false.
+    const html =
+      '<span class="text-link" data-link-id="L1" data-link-url="http://a">A</span>' +
+      ' ' +
+      '<span class="text-link" data-link-id="L1" data-link-url="http://a">B</span>';
+    const out = await repair(page, html);
+    const ids = [...out.matchAll(/data-link-id="([^"]+)"/g)].map(m => m[1]);
+    expect(ids.length).toBe(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
   test('пустой data-footnote-text → разворот в plain-text', async ({ page }) => {
     const html = '<span class="text-footnote" data-footnote-id="F1" data-footnote-text="">слово</span>';
     const out = await repair(page, html);
     expect(out).not.toContain('text-footnote');
+    expect(out).toContain('слово');
+  });
+
+  test('пустой data-link-url → разворот в plain-text', async ({ page }) => {
+    const html = '<span class="text-link" data-link-id="L1" data-link-url="">слово</span>';
+    const out = await repair(page, html);
+    expect(out).not.toContain('text-link');
     expect(out).toContain('слово');
   });
 
@@ -51,7 +86,7 @@ test.describe('capsule-integrity: validateAndRepairCapsules', () => {
   });
 
   test('страховка: guard-символ и contenteditable вычищаются', async ({ page }) => {
-    const guardChar = '﻿';
+    const guardChar = '\uFEFF';
     const html = '<span class="text-link" data-link-id="L1" data-link-url="http://a" contenteditable="false">A' + guardChar + '</span>';
     const out = await repair(page, html);
     expect(out).not.toContain(guardChar);

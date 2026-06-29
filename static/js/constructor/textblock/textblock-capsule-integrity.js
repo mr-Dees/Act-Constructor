@@ -52,7 +52,7 @@ Object.assign(TextBlockManager.prototype, {
             const val = span.getAttribute(valAttr);
             if (!val || !val.trim()) {
                 const text = document.createTextNode(span.textContent || '');
-                span.parentNode.replaceChild(text, span);
+                if (span.parentNode) span.parentNode.replaceChild(text, span);
                 return;
             }
 
@@ -62,7 +62,7 @@ Object.assign(TextBlockManager.prototype, {
                 const first = seen.get(id);
                 if (this._areAdjacentSplit(first, span, valAttr)) {
                     first.textContent = (first.textContent || '') + (span.textContent || '');
-                    span.parentNode.removeChild(span);
+                    if (span.parentNode) span.parentNode.removeChild(span);
                     return;
                 }
                 const fresh = this._freshMarkerId();
@@ -99,6 +99,8 @@ Object.assign(TextBlockManager.prototype, {
      * @private Свежий id маркера.
      * Схема совпадает с createLinkMarker и _createOrEditInlineMarker:
      * prefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9).
+     * Префикс 'm_' (generic) — намеренно: де-дуплицируем и ссылки, и сноски,
+     * поэтому не 'link_'/'footnote_'.
      * @returns {string}
      */
     _freshMarkerId() {
