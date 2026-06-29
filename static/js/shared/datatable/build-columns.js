@@ -1,0 +1,75 @@
+/**
+ * Деривация колонок таблицы из конфигурации полей формы (доменно-агностично).
+ *
+ * @typedef {Object} ColumnDef
+ * @property {string} key
+ * @property {string} label
+ * @property {string} type
+ * @property {'left'|'right'|'center'} align
+ * @property {function(any, Object): string} [format]
+ * @property {number} width
+ * @property {boolean} longText
+ */
+
+/** Дефолтные ширины (px) по типу колонки. */
+export const DEFAULT_WIDTHS = {
+  id: 70, number: 110, date: 110, dictionary: 90, checkbox: 80,
+  text: 160, textarea: 240, 'readonly-text': 160, 'process-picker': 200,
+};
+
+function alignFor(type) {
+  if (type === 'number') return 'right';
+  if (type === 'checkbox') return 'center';
+  return 'left';
+}
+
+function toColumn(field) {
+  const type = field.type || 'text';
+  return {
+    key: field.key,
+    label: field.label,
+    type,
+    align: alignFor(type),
+    width: field.width != null ? field.width : (DEFAULT_WIDTHS[type] || DEFAULT_WIDTHS.text),
+    longText: type === 'textarea',
+  };
+}
+
+/**
+ * Построить плоский список колонок из конфигурации полей формы.
+ *
+ * @param {Array} fields массив полей; элемент может быть {row:[...]} или полем
+ * @param {Object} [opts] {extra, overrides, order}
+ * @param {Array} [opts.extra] read-only колонки, добавляемые впереди
+ * @param {Object} [opts.overrides] перекрытия по ключу колонки (label/align/format/...)
+ * @param {string[]} [opts.order] явный порядок колонок по ключам
+ * @returns {ColumnDef[]}
+ */
+export function buildColumns(fields, opts = {}) {
+  const flat = [];
+  for (const item of fields) {
+    if (item && Array.isArray(item.row)) flat.push(...item.row);
+    else if (item && item.key) flat.push(item);
+  }
+
+  const extraCols = (opts.extra || []).map(e => ({ ...toColumn(e), ...e }));
+  let cols = [...extraCols, ...flat.map(toColumn)];
+
+  const overrides = opts.overrides || {};
+  cols = cols.map(c => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));
+
+  if (Array.isArray(opts.order)) {
+    const idx = (k) => {
+      const i = opts.order.indexOf(k);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    cols = cols
+      .map((c, i) => [c, i])
+      .sort((a, b) => (idx(a[0].key) - idx(b[0].key)) || (a[1] - b[1]))
+      .map(p => p[0]);
+  }
+
+  return cols;
+}
+
+if (typeof window !== 'undefined') window.buildColumns = buildColumns;
