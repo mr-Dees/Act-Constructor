@@ -35,7 +35,7 @@ export class DataTable {
     this._page = 1;
     this._selectedId = null;
     this._debounce = null;
-    this._abort = null;
+    this._reqSeq = 0;
     this._tbody = null;
   }
 
@@ -133,21 +133,22 @@ export class DataTable {
       rows = pg.pageRows;
       totalPages = pg.totalPages;
     } else {
-      if (this._abort) this._abort.abort();
-      this._abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      // seq-guard: на гонке фильтров игнорируем устаревший ответ, чтобы он не
+      // перезатёр результат более позднего запроса.
+      const seq = ++this._reqSeq;
       try {
         const res = await this._ds.fetchServerPage({
           filters: this._filters,
           sortBy: this._sortKey,
           sortDir: this._sortDir,
           page: this._page,
-          signal: this._abort ? this._abort.signal : undefined,
         });
+        if (seq !== this._reqSeq) return;
         rows = res.items;
         total = res.total;
         totalPages = Math.max(1, Math.ceil(total / this._pageSize));
       } catch (e) {
-        if (e && e.name === 'AbortError') return; // отменён более новым запросом
+        if (seq !== this._reqSeq) return;
         rows = []; total = 0; totalPages = 1;
       }
     }

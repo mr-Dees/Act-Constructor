@@ -4,10 +4,14 @@
  * (включая статические перечисления assignment_formats, used_pm_options).
  */
 
+import { buildColumns } from '../../shared/datatable/build-columns.js';
+
 export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Фин.Рез.';
+    static storageKey = 'ck:ck-fin-res:view:v1';
+    static workingSetCap = 1000;
 
     static formatDate(val) {
         if (!val) return '';
@@ -27,16 +31,29 @@ export class CkFinResConfig {
         return t ? t.short_name : String(val);
     }
 
-    static columns = [
-        { key: 'id', label: 'ID', width: '60px' },
-        { key: 'neg_finder_tb_id', label: 'ТБ', width: '50px', format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts) },
-        { key: 'metric_code', label: 'Код метрики', width: '90px' },
-        { key: 'created_at', label: 'Создано', format: (v) => CkFinResConfig.formatDate(v) },
-        { key: 'metric_name', label: 'Метрика' },
-        { key: 'km_id', label: '№ КМ' },
-        { key: 'metric_amount_rubles', label: 'Сумма (руб.)', align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
-        { key: 'act_sub_number', label: '№ суб-акта' },
-    ];
+    /**
+     * Колонки таблицы выводятся из `fields` (один источник правды) + read-only
+     * display-колонки. Заголовки/форматтеры/выравнивание уточняются overrides.
+     */
+    static get columns() {
+        return buildColumns(this.fields, {
+            extra: [
+                { key: 'id', label: 'ID', type: 'id', width: 60 },
+                { key: 'created_at', label: 'Создано', type: 'date', format: (v) => CkFinResConfig.formatDate(v) },
+                { key: 'metric_name', label: 'Метрика', type: 'text' },
+                { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
+            ],
+            overrides: {
+                metric_code: { label: 'Код метрики', type: 'text' },
+                neg_finder_tb_id: { label: 'ТБ', format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts) },
+                metric_amount_rubles: { align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
+                dt_sz: { format: (v) => CkFinResConfig.formatDate(v) },
+                rev_start_dt: { format: (v) => CkFinResConfig.formatDate(v) },
+                rev_end_dt: { format: (v) => CkFinResConfig.formatDate(v) },
+                execution_deadline: { format: (v) => CkFinResConfig.formatDate(v) },
+            },
+        });
+    }
 
     static fields = [
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
