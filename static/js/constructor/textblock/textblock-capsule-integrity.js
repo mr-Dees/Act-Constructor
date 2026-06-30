@@ -308,6 +308,14 @@ Object.assign(TextBlockManager.prototype, {
             // Текст в guard → вынести наружу, guard вернуть в U+FEFF.
             if (guardNodeToRestore && guardNodeToRestore.parentNode) {
                 this._restoreGuard(guardNodeToRestore, editor);
+            } else if (guardNodeToRestore) {
+                // Guard опустошён И удалён в одном батче (реальный Backspace по
+                // zero-width узлу: characterData U+FEFF→'' затем childList-remove
+                // уже пустого узла; removedNode.data==='' — childList-ветка его не
+                // распознаёт, а здесь узел уже отвязан). Точечно чинить нечего —
+                // восстанавливаем расстановкой guard'ов. Без этого вертикальная
+                // навигация ломается до перезахода на вкладку.
+                needGuardRestore = true;
             }
             // Хирургически вернуть contenteditable на капсулы.
             capsulesToFix.forEach(cap => {
