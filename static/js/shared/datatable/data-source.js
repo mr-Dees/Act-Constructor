@@ -9,7 +9,7 @@
 export class DataSource {
   /**
    * @param {Object} opts
-   * @param {function} opts.fetchPage async ({filters,sortBy,sortDir,limit,offset,signal}) => {items, total}
+   * @param {function} opts.fetchPage async ({filters,sort,limit,offset,signal}) => {items, total}
    * @param {number} opts.pageSize размер страницы
    * @param {number} opts.workingSetCap граница загрузки в client-mode
    */
@@ -24,7 +24,7 @@ export class DataSource {
 
   async init() {
     const { items, total } = await this._fetchPage({
-      filters: {}, sortBy: null, sortDir: 'asc', limit: this._cap, offset: 0,
+      filters: {}, sort: [], limit: this._cap, offset: 0,
     });
     this._total = total;
     if (items.length >= total) {
@@ -40,9 +40,9 @@ export class DataSource {
   get total() { return this._total; }
   getAllRows() { return this._all; }
 
-  async fetchServerPage({ filters, sortBy, sortDir, page }) {
+  async fetchServerPage({ filters, sort, page }) {
     const offset = (Math.max(1, page) - 1) * this._pageSize;
-    const res = await this._fetchPage({ filters, sortBy, sortDir, limit: this._pageSize, offset });
+    const res = await this._fetchPage({ filters, sort, limit: this._pageSize, offset });
     this._total = res.total;
     return res;
   }

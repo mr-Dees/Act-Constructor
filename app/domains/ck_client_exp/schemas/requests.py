@@ -6,6 +6,13 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
+class SortSpec(BaseModel):
+    """Одна колонка многоколоночной сортировки (приоритет — порядок в списке)."""
+
+    by: str
+    dir: Literal["asc", "desc"] = "asc"
+
+
 class ValidationSearchRequest(BaseModel):
     """Параметры поиска записей CS-валидации."""
 
@@ -18,6 +25,9 @@ class ValidationSearchRequest(BaseModel):
     filters: dict[str, str] = Field(default_factory=dict)
     sort_by: Optional[str] = None
     sort_dir: Literal["asc", "desc"] = "asc"
+    # Многоколоночная сортировка по приоритету (перекрывает sort_by/sort_dir,
+    # если непустая). Имена колонок валидируются против whitelist в репозитории.
+    sort: list[SortSpec] = Field(default_factory=list)
     # Верхняя граница страницы определяется working_set_cap домена (сервис
     # клампит limit), поэтому жёсткого потолка в схеме нет.
     limit: int = Field(default=50, ge=1)

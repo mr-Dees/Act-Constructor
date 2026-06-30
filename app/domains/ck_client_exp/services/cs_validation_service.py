@@ -76,6 +76,7 @@ class CSValidationService:
         self,
         *,
         filters: dict[str, str] | None = None,
+        sort: list[tuple[str, str]] | None = None,
         sort_by: str | None = None,
         sort_dir: str = "asc",
         limit: int = 50,
@@ -83,13 +84,16 @@ class CSValidationService:
     ) -> dict:
         """Поиск по колоночным фильтрам с сортировкой и пагинацией.
 
-        Пробрасывает параметры в репозиторий; размер страницы ограничивается
-        ``working_set_cap`` домена. Возвращает {items, total, limit, offset}.
+        Пробрасывает параметры в репозиторий; ``sort`` — упорядоченный список
+        (колонка, направление) для многоколоночной сортировки. Размер страницы
+        ограничивается ``working_set_cap`` домена. Возвращает {items, total,
+        limit, offset}.
         """
         settings = get_domain_settings("ck_client_exp", CkClientExpSettings)
         capped_limit = min(limit, settings.working_set_cap)
         items, total = await self.cs_repo.search_filtered(
             filters=filters,
+            sort=sort,
             sort_by=sort_by,
             sort_dir=sort_dir,
             limit=capped_limit,

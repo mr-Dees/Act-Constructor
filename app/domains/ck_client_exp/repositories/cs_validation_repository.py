@@ -196,6 +196,7 @@ class CSValidationRepository(BaseRepository):
         self,
         *,
         filters: dict[str, str] | None = None,
+        sort: list[tuple[str, str]] | None = None,
         sort_by: str | None = None,
         sort_dir: str = "asc",
         limit: int = 50,
@@ -204,19 +205,30 @@ class CSValidationRepository(BaseRepository):
         """Поиск записей по колоночным фильтрам с сортировкой и подсчётом total.
 
         - Фильтры — ILIKE по whitelisted-колонкам (значения — bind-параметры).
-        - ``sort_by`` валидируется против ALLOWED_COLUMNS (иначе ValueError —
-          защита от инъекции в ORDER BY); направление — только ASC/DESC.
-          Без ``sort_by`` — стабильный ``ORDER BY id``.
+        - Сортировка: ``sort`` — упорядоченный список (колонка, направление) для
+          многоколоночного ORDER BY; если не задан — одиночные ``sort_by``/
+          ``sort_dir``. Каждая колонка валидируется против ALLOWED_COLUMNS (иначе
+          ValueError — защита от инъекции в ORDER BY); направление — только
+          ASC/DESC. Без сортировки — стабильный ``ORDER BY id``.
         - ``COUNT(*)`` считается отдельным запросом с теми же WHERE-параметрами.
 
         Возвращает (страница записей, общее количество). SQL — PG 9.4 / GP 6.x.
         """
-        if sort_by is not None and sort_by not in ALLOWED_COLUMNS:
-            raise ValueError(f"Недопустимая колонка сортировки: {sort_by}")
+        specs = list(sort) if sort else (
+            [(sort_by, sort_dir)] if sort_by is not None else []
+        )
+        order_parts: list[str] = []
+        for column, direction in specs:
+            if column not in ALLOWED_COLUMNS:
+                raise ValueError(f"Недопустимая колонка сортировки: {column}")
+            order_parts.append(
+                f"{column} {'DESC' if str(direction).lower() == 'desc' else 'ASC'}"
+            )
+        order_by = (
+            "ORDER BY " + ", ".join(order_parts) if order_parts else "ORDER BY id"
+        )
 
         where, params, idx = self._build_filter_where(filters)
-        direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
-        order_by = f"ORDER BY {sort_by} {direction}" if sort_by else "ORDER BY id"
 
         total = await self.conn.fetchval(
             f"SELECT COUNT(*) FROM {self.view}{where}",
@@ -229,8 +241,8 @@ class CSValidationRepository(BaseRepository):
         )
         rows = await self.conn.fetch(query, *params, limit, offset)
         logger.debug(
-            "Поиск CS-валидации (фильтры): %s условий, sort_by=%s",
-            len(params), sort_by,
+            "Поиск CS-валидации (фильтры): %s условий, сортировок=%s",
+            len(params), len(order_parts),
         )
         return [dict(r) for r in rows], int(total or 0)
 

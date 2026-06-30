@@ -1469,7 +1469,7 @@ export class APIClient {
     /**
      * Поиск записей ЦК с пагинацией/фильтрами/сортировкой — полный ответ.
      * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
-     * @param {Object} body - {filters, sort_by, sort_dir, limit, offset}
+     * @param {Object} body - {filters, sort: [{by, dir}], limit, offset}
      * @returns {Promise<{items: Array, total: number}>}
      */
     static async searchCkRecordsPage(prefix, body = {}) {

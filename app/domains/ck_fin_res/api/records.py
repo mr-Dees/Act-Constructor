@@ -45,6 +45,7 @@ async def search_records(
     """
     result = await service.search(
         filters=body.filters,
+        sort=[(s.by, s.dir) for s in body.sort] or None,
         sort_by=body.sort_by,
         sort_dir=body.sort_dir,
         limit=body.limit,

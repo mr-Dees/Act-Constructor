@@ -26,9 +26,10 @@ test('получено меньше total → server-mode', async () => {
   });
   await ds.init();
   assert.equal(ds.mode, 'server');
-  const page = await ds.fetchServerPage({ filters: { name: 'x' }, sortBy: 'id', sortDir: 'asc', page: 3 });
+  const page = await ds.fetchServerPage({ filters: { name: 'x' }, sort: [{ key: 'id', dir: 'asc' }], page: 3 });
   assert.equal(page.total, 5000);
   assert.equal(lastArgs.offset, 100); // (3-1)*50
   assert.equal(lastArgs.limit, 50);
   assert.deepEqual(lastArgs.filters, { name: 'x' });
+  assert.deepEqual(lastArgs.sort, [{ key: 'id', dir: 'asc' }]); // упорядоченный набор уходит на бэк
 });

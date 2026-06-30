@@ -37,15 +37,39 @@ export function filterRows(rows, columns, filterMap, dicts) {
   return rows.filter(r => rowMatchesFilters(r, columns, filterMap, dicts));
 }
 
-export function sortRows(rows, column, dir) {
+/**
+ * Сравнение двух записей по ОДНОЙ колонке с учётом типа и направления.
+ * @returns {number} <0 / 0 / >0
+ */
+export function compareBy(a, b, column, dir) {
   const sign = dir === 'desc' ? -1 : 1;
   const isNum = column.type === 'number';
+  const va = a[column.key] ?? (isNum ? 0 : '');
+  const vb = b[column.key] ?? (isNum ? 0 : '');
+  if (isNum) return (Number(va) - Number(vb)) * sign;
+  return String(va).localeCompare(String(vb), 'ru') * sign;
+}
+
+/**
+ * Многоколоночная сортировка: `specs` — упорядоченный по приоритету список
+ * `{column, dir}`. Сравнение идёт по колонкам слева направо: следующая колонка
+ * учитывается только при равенстве по предыдущим (как ORDER BY c1, c2, …).
+ */
+export function sortRowsMulti(rows, specs) {
+  const list = (specs || []).filter(s => s && s.column);
+  if (!list.length) return rows.slice();
   return rows.slice().sort((a, b) => {
-    const va = a[column.key] ?? (isNum ? 0 : '');
-    const vb = b[column.key] ?? (isNum ? 0 : '');
-    if (isNum) return (Number(va) - Number(vb)) * sign;
-    return String(va).localeCompare(String(vb), 'ru') * sign;
+    for (const { column, dir } of list) {
+      const c = compareBy(a, b, column, dir);
+      if (c !== 0) return c;
+    }
+    return 0;
   });
+}
+
+/** Одноколоночная сортировка (обёртка над sortRowsMulti). */
+export function sortRows(rows, column, dir) {
+  return sortRowsMulti(rows, [{ column, dir }]);
 }
 
 export function paginate(rows, page, pageSize) {
@@ -57,5 +81,5 @@ export function paginate(rows, page, pageSize) {
 }
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, { rowMatchesFilters, filterRows, sortRows, paginate });
+  Object.assign(window, { rowMatchesFilters, filterRows, compareBy, sortRows, sortRowsMulti, paginate });
 }

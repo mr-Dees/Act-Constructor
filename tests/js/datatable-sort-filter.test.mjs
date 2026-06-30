@@ -16,42 +16,57 @@ function makeTable() {
   });
 }
 
-test('3-позиционная сортировка по клику: норм → возр → убыв → норм', () => {
+test('одиночная сортировка по клику: норм → возр → убыв → норм', () => {
   const dt = makeTable();
-  assert.equal(dt._sortKey, null); // исходно — без сортировки
+  assert.deepEqual(dt._sort, []); // исходно — без сортировки
   dt.setSort('name');
-  assert.equal(dt._sortKey, 'name');
-  assert.equal(dt._sortDir, 'asc');
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }]);
   dt.setSort('name');
-  assert.equal(dt._sortKey, 'name');
-  assert.equal(dt._sortDir, 'desc');
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'desc' }]);
   dt.setSort('name'); // третий клик — возврат к исходному порядку
-  assert.equal(dt._sortKey, null);
-  assert.equal(dt._sortDir, 'asc');
+  assert.deepEqual(dt._sort, []);
 });
 
 test('переключение на другую колонку всегда начинает с возрастания', () => {
   const dt = makeTable();
   dt.setSort('name');
   dt.setSort('name'); // desc
-  dt.setSort('id'); // другая колонка → asc
-  assert.equal(dt._sortKey, 'id');
-  assert.equal(dt._sortDir, 'asc');
+  dt.setSort('id'); // другая колонка → одиночная asc (сбрасывает остальные)
+  assert.deepEqual(dt._sort, [{ key: 'id', dir: 'asc' }]);
+});
+
+test('мультисортировка: Shift-добавление вторичной колонки, цикл asc → desc → убрать', () => {
+  const dt = makeTable();
+  dt.setSort('name'); // [name asc]
+  dt.setSort('id', true); // append → [name asc, id asc]
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }, { key: 'id', dir: 'asc' }]);
+  dt.setSort('id', true); // id asc → desc
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }, { key: 'id', dir: 'desc' }]);
+  dt.setSort('id', true); // id desc → убрать из набора (остальные сохраняют порядок)
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }]);
+});
+
+test('обычный клик при мультисортировке сбрасывает набор к одной колонке', () => {
+  const dt = makeTable();
+  dt.setSort('name');
+  dt.setSort('id', true); // [name, id]
+  dt.setSort('name'); // обычный клик → одиночная сортировка по name (asc)
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }]);
 });
 
 test('сброс фильтров обнуляет и сортировку', () => {
   const dt = makeTable();
   dt.setFilter('name', 'abc');
   dt.setSort('id');
-  assert.equal(dt._sortKey, 'id');
+  dt.setSort('name', true); // мультисортировка активна
   dt.clearFilters();
   assert.deepEqual(dt._filters, {});
-  assert.equal(dt._sortKey, null);
-  assert.equal(dt._sortDir, 'asc');
+  assert.deepEqual(dt._sort, []);
 });
 
 // Перехватываем setAttribute на создаваемой th, чтобы проверить aria-sort
-// (на реальном DOM это th[aria-sort="…"] → CSS-подсветка отсортированной колонки).
+// (на реальном DOM это th[aria-sort="…"]; визуальная подсветка идёт через
+// класс .dt-th--sorted, а aria-sort — только на ведущей колонке набора).
 function buildHeaderThAttrs(dt, col) {
   const attrs = {};
   const origCreate = document.createElement;
@@ -64,11 +79,13 @@ function buildHeaderThAttrs(dt, col) {
   return attrs;
 }
 
-test('_buildHeaderCell помечает aria-sort только на активной колонке', () => {
+test('_buildHeaderCell: aria-sort только на ведущей колонке набора сортировки', () => {
   const dt = makeTable();
-  dt._sortKey = 'name';
-  dt._sortDir = 'desc';
+  dt._sort = [{ key: 'name', dir: 'desc' }, { key: 'id', dir: 'asc' }];
+  // ведущая (приоритет 1) — aria-sort соответствует направлению
   assert.equal(buildHeaderThAttrs(dt, { key: 'name', label: 'Имя' })['aria-sort'], 'descending');
-  // другая (неотсортированная) колонка aria-sort не получает
+  // вторичная колонка набора — без aria-sort (по ARIA-спеке атрибут на одной колонке)
   assert.equal(buildHeaderThAttrs(dt, { key: 'id', label: 'ID' })['aria-sort'], undefined);
+  // колонка вне набора — без aria-sort
+  assert.equal(buildHeaderThAttrs(dt, { key: 'other', label: 'Другое' })['aria-sort'], undefined);
 });

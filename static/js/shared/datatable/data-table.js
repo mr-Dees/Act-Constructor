@@ -1,11 +1,11 @@
 /**
  * Оркестратор generic-таблицы: рендер только ВИДИМЫХ колонок, фильтр прямо в
- * заголовке-поле (имя колонки всплывает мини-меткой при вводе), 3-позиционная
- * сортировка по клику (норм. → возр. → убыв. → норм.) с подсветкой колонки,
- * ресайз колонок, обрезка+поповер, выделение строки, пагинация.
- * Источник данных — DataSource (client/server).
+ * заголовке-поле (имя колонки всплывает мини-меткой при вводе), сортировка по
+ * клику (норм. → возр. → убыв. → норм.) с подсветкой колонки и мультисортировкой
+ * по Shift/Ctrl+клик (приоритет показан номером), ресайз колонок, обрезка+поповер,
+ * выделение строки, пагинация. Источник данных — DataSource (client/server).
  */
-import { filterRows, sortRows, paginate } from './datatable-logic.js';
+import { filterRows, sortRowsMulti, paginate } from './datatable-logic.js';
 import { attachColumnResize } from './column-resize.js';
 import { showCellPopover, isTruncated } from './cell-popover.js';
 
@@ -31,8 +31,7 @@ export class DataTable {
     this._pageSize = pageSize || 50;
     this._onRowSelect = onRowSelect;
     this._filters = {};
-    this._sortKey = null;
-    this._sortDir = 'asc';
+    this._sort = []; // упорядоченный по приоритету список {key, dir} (мультисортировка)
     this._page = 1;
     this._selectedId = null;
     this._debounce = null;
@@ -90,18 +89,30 @@ export class DataTable {
     const sortBtn = document.createElement('button');
     sortBtn.type = 'button';
     sortBtn.className = 'dt-th-sort';
-    sortBtn.title = 'Сортировка';
+    sortBtn.title = 'Клик — сортировка; Shift/Ctrl+клик — добавить колонку к сортировке';
     sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
-    sortBtn.addEventListener('click', () => this.setSort(col.key));
+    // Обычный клик — одиночная сортировка; Shift/Ctrl/⌘+клик — мультисортировка.
+    sortBtn.addEventListener('click', (e) => this.setSort(col.key, e.shiftKey || e.ctrlKey || e.metaKey));
 
-    // 3-позиционная сортировка: нейтраль ↕ / возрастание ↑ / убывание ↓.
-    // aria-sort — только на активной колонке (единый источник для подсветки).
-    const dir = this._sortKey === col.key ? this._sortDir : null;
+    // Позиция колонки в наборе сортировки (−1 — не участвует) и её направление.
+    const si = this._sort.findIndex(s => s.key === col.key);
+    const dir = si >= 0 ? this._sort[si].dir : null;
     if (dir) {
-      th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+      th.classList.add('dt-th--sorted'); // подсветка всех колонок набора
       sortBtn.classList.add('active');
+      // aria-sort — только на ВЕДУЩЕЙ колонке набора (по ARIA-спеке — одна).
+      if (si === 0) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
     }
     sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+
+    // Номер приоритета показываем только при мультисортировке (≥2 колонок).
+    let priorityEl = null;
+    if (si >= 0 && this._sort.length >= 2) {
+      priorityEl = document.createElement('span');
+      priorityEl.className = 'dt-th-priority';
+      priorityEl.textContent = String(si + 1);
+      priorityEl.setAttribute('aria-hidden', 'true');
+    }
 
     // Имя колонки «всплывает», как только в фильтре появляется текст.
     const syncFilter = () => {
@@ -127,6 +138,7 @@ export class DataTable {
     cell.appendChild(field);
     cell.appendChild(clearBtn);
     cell.appendChild(sortBtn);
+    if (priorityEl) cell.appendChild(priorityEl);
     th.appendChild(cell);
 
     syncFilter();
@@ -171,19 +183,23 @@ export class DataTable {
     this._scheduleBody();
   }
 
-  // 3-позиционный цикл по клику: нормальный → возрастание → убывание → нормальный.
-  // Порядок asc-first — де-факто стандарт data-grid (AG-Grid/MUI).
-  setSort(key) {
-    if (this._sortKey === key) {
-      if (this._sortDir === 'asc') {
-        this._sortDir = 'desc';
-      } else {
-        this._sortKey = null; // убывание → возврат к исходному порядку
-        this._sortDir = 'asc';
-      }
+  // Обычный клик — одиночная сортировка по колонке (сбрасывает остальные),
+  // цикл нормальный → возр. → убыв. → нормальный. Shift/Ctrl+клик — добавление
+  // колонки к набору; на уже входящей в набор колонке цикл возр. → убыв. → убрать.
+  // Порядок asc-first и Shift как модификатор — де-факто стандарт data-grid
+  // (AG-Grid/TanStack/MUI).
+  setSort(key, append = false) {
+    const i = this._sort.findIndex(s => s.key === key);
+    if (append) {
+      if (i === -1) this._sort.push({ key, dir: 'asc' });
+      else if (this._sort[i].dir === 'asc') this._sort[i].dir = 'desc';
+      else this._sort.splice(i, 1);
+    } else if (this._sort.length === 1 && i === 0) {
+      // та же единственная колонка: продолжаем 3-позиционный цикл
+      if (this._sort[0].dir === 'asc') this._sort = [{ key, dir: 'desc' }];
+      else this._sort = [];
     } else {
-      this._sortKey = key;
-      this._sortDir = 'asc';
+      this._sort = [{ key, dir: 'asc' }];
     }
     this._page = 1;
     this.render();
@@ -194,8 +210,7 @@ export class DataTable {
   // Сброс фильтров обнуляет и сортировку (возврат к исходному порядку).
   clearFilters() {
     this._filters = {};
-    this._sortKey = null;
-    this._sortDir = 'asc';
+    this._sort = [];
     this._page = 1;
     this.render();
   }
@@ -213,9 +228,11 @@ export class DataTable {
 
     if (this._ds.mode === 'client') {
       let data = filterRows(this._ds.getAllRows(), cols, this._filters, this._dicts);
-      if (this._sortKey) {
-        const col = this._columns.find(c => c.key === this._sortKey);
-        if (col) data = sortRows(data, col, this._sortDir);
+      if (this._sort.length) {
+        const specs = this._sort
+          .map(s => ({ column: this._columns.find(c => c.key === s.key), dir: s.dir }))
+          .filter(s => s.column);
+        data = sortRowsMulti(data, specs);
       }
       total = data.length;
       const pg = paginate(data, this._page, this._pageSize);
@@ -228,8 +245,7 @@ export class DataTable {
       try {
         const res = await this._ds.fetchServerPage({
           filters: this._filters,
-          sortBy: this._sortKey,
-          sortDir: this._sortDir,
+          sort: this._sort,
           page: this._page,
         });
         if (seq !== this._reqSeq) return;
@@ -272,7 +288,6 @@ export class DataTable {
         td.style.width = `${this._view.getWidth(col.key)}px`;
         if (col.align === 'right') td.classList.add('align-right');
         if (col.align === 'center') td.classList.add('align-center');
-        if (col.key === this._sortKey) td.classList.add('dt-col--sorted'); // подсветка колонки сортировки
         if (col.longText) {
           td.classList.add('dt-clickable');
           td.addEventListener('click', (e) => {

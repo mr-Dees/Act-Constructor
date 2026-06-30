@@ -52,11 +52,10 @@ export class CkFinResPage {
         this._dataSource = new DataSource({
             pageSize: 50,
             workingSetCap: cfg.workingSetCap,
-            fetchPage: ({ filters, sortBy, sortDir, limit, offset }) =>
+            fetchPage: ({ filters, sort, limit, offset }) =>
                 APIClient.searchCkRecordsPage(cfg.apiPrefix, {
                     filters: filters || {},
-                    sort_by: sortBy,
-                    sort_dir: sortDir,
+                    sort: (sort || []).map(s => ({ by: s.key, dir: s.dir })),
                     limit,
                     offset,
                 }),

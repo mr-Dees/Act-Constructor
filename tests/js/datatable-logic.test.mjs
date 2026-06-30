@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterRows, sortRows, paginate } from '../../static/js/shared/datatable/datatable-logic.js';
+import { filterRows, sortRows, sortRowsMulti, paginate } from '../../static/js/shared/datatable/datatable-logic.js';
 
 const columns = [
   { key: 'tb', type: 'dictionary', format: (v, d) => (d.tb || {})[v] || String(v) },
@@ -35,6 +35,28 @@ test('сортировка чисел по убыванию', () => {
 
 test('сортировка текста по-русски', () => {
   assert.deepEqual(sortRows(rows, columns[2], 'asc').map(r => r.id), [1, 2]);
+});
+
+test('мультисортировка: вторичный ключ разрешает равенство по первичному', () => {
+  const data = [
+    { id: 1, grp: 1, name: 'Б' },
+    { id: 2, grp: 1, name: 'А' },
+    { id: 3, grp: 2, name: 'В' },
+  ];
+  const cols = { grp: { key: 'grp', type: 'number' }, name: { key: 'name', type: 'text' } };
+  // grp по возрастанию; внутри grp=1 — name по возрастанию (А раньше Б) → 2,1; затем grp=2 → 3
+  const out = sortRowsMulti(data, [
+    { column: cols.grp, dir: 'asc' },
+    { column: cols.name, dir: 'asc' },
+  ]).map(r => r.id);
+  assert.deepEqual(out, [2, 1, 3]);
+});
+
+test('sortRowsMulti без спецификаций — копия в исходном порядке', () => {
+  const data = [{ id: 3 }, { id: 1 }];
+  const out = sortRowsMulti(data, []);
+  assert.deepEqual(out.map(r => r.id), [3, 1]);
+  assert.notEqual(out, data);
 });
 
 test('paginate отдаёт страницу и число страниц', () => {

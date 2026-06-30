@@ -30,3 +30,22 @@ def test_bad_sort_dir_rejected():
     """Недопустимое значение sort_dir отклоняется валидацией."""
     with pytest.raises(ValidationError):
         ValidationSearchRequest(sort_dir="sideways")
+
+
+def test_sort_list_default_empty():
+    """По умолчанию многоколоночный sort пуст."""
+    assert ValidationSearchRequest().sort == []
+
+
+def test_sort_list_parsed():
+    """sort принимает список {by, dir} с приоритетом по порядку."""
+    r = ValidationSearchRequest(
+        sort=[{"by": "metric_code", "dir": "asc"}, {"by": "id", "dir": "desc"}]
+    )
+    assert [(s.by, s.dir) for s in r.sort] == [("metric_code", "asc"), ("id", "desc")]
+
+
+def test_sort_list_bad_dir_rejected():
+    """Недопустимое направление в элементе sort отклоняется валидацией."""
+    with pytest.raises(ValidationError):
+        ValidationSearchRequest(sort=[{"by": "id", "dir": "sideways"}])

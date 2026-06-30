@@ -161,3 +161,46 @@ class TestSearchFiltered:
 
         # порядок: %FR% (фильтр), затем limit, offset
         assert mock_conn.fetch.call_args[0][1:] == ("%FR%", 25, 75)
+
+    async def test_multi_sort_builds_ordered_order_by(self, repo, mock_conn):
+        """sort — упорядоченный список (колонка, направление) → ORDER BY c1 d1, c2 d2."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={},
+            sort=[("metric_code", "asc"), ("metric_amount_rubles", "desc")],
+            limit=10,
+            offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "ORDER BY metric_code ASC, metric_amount_rubles DESC" in sql
+
+    async def test_multi_sort_validates_each_column(self, repo, mock_conn):
+        """Любая колонка sort не из whitelist → ValueError (защита ORDER BY)."""
+        with pytest.raises(ValueError):
+            await repo.search_filtered(
+                filters={},
+                sort=[("metric_code", "asc"), ("evil; DROP TABLE x", "desc")],
+                limit=10,
+                offset=0,
+            )
+
+    async def test_sort_list_overrides_single_sort_by(self, repo, mock_conn):
+        """При непустом sort одиночные sort_by/sort_dir игнорируются."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={},
+            sort=[("metric_code", "asc")],
+            sort_by="id",
+            sort_dir="desc",
+            limit=10,
+            offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "ORDER BY metric_code ASC" in sql
+        assert "id DESC" not in sql
