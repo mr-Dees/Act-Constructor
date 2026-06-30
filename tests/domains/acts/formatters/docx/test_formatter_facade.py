@@ -305,3 +305,25 @@ def test_update_fields_enabled():
     update = doc.settings.element.find(qn("w:updateFields"))
     assert update is not None
     assert update.get(qn("w:val")) == "true"
+
+
+def test_shift_return_expansion_disabled():
+    """Строки с мягким переносом (<w:br> из Enter) не раздуваются под «по ширине».
+
+    Без <w:doNotExpandShiftReturn/> Word растягивает короткую строку с ручным
+    переносом на всю ширину абзаца, и единственная щель на ней (стык
+    «слово-якорь ↔ номер сноски») баллонит. Естественно переносимый текст
+    остаётся justified.
+    """
+    fmt = DocxFormatter()
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": []})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    compat = doc.settings.element.find(qn("w:compat"))
+    assert compat is not None
+    el = compat.find(qn("w:doNotExpandShiftReturn"))
+    assert el is not None
+    # CT_Compat: булевы опции идут ПЕРЕД <w:compatSetting> — проверяем порядок.
+    first_setting = compat.find(qn("w:compatSetting"))
+    if first_setting is not None:
+        children = list(compat)
+        assert children.index(el) < children.index(first_setting)

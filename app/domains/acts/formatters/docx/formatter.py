@@ -64,6 +64,7 @@ class DocxFormatter:
         self._render_tree(doc, ctx, num_id)
         build_signature(doc, ctx.metadata)
         _enable_update_fields(doc)
+        _disable_shift_return_expansion(doc)
         return doc
 
     def _render_tree(self, doc, ctx: ExportContext, num_id: int) -> None:
@@ -230,3 +231,32 @@ def _enable_update_fields(doc) -> None:
         anchor.addprevious(el)
     else:
         settings.append(el)
+
+
+def _disable_shift_return_expansion(doc) -> None:
+    """Отключает раздувание строк с мягким переносом под «по ширине»
+    (`<w:doNotExpandShiftReturn/>` в `<w:compat>`).
+
+    Enter в редакторе текстблоков превращается в `<w:br>` (мягкий перенос),
+    поэтому абзац акта — это один `<w:p>` с несколькими строками. Без этой
+    настройки Word силой растягивает КОРОТКУЮ такую строку на всю ширину
+    абзаца, и единственная щель на ней (например стык «слово-якорь ↔ номер
+    сноски») баллонит. Настройка касается ТОЛЬКО строк с явным переносом —
+    естественно переносимый (word-wrap) текст остаётся выровненным по ширине.
+
+    Булевы опции по схеме CT_Compat идут ПЕРЕД `<w:compatSetting>` — вставляем
+    в правильную позицию, иначе Word может счесть settings.xml некорректным.
+    """
+    settings = doc.settings.element
+    compat = settings.find(qn("w:compat"))
+    if compat is None:
+        compat = OxmlElement("w:compat")
+        settings.append(compat)
+    if compat.find(qn("w:doNotExpandShiftReturn")) is not None:
+        return
+    el = OxmlElement("w:doNotExpandShiftReturn")
+    first_setting = compat.find(qn("w:compatSetting"))
+    if first_setting is not None:
+        first_setting.addprevious(el)
+    else:
+        compat.append(el)
