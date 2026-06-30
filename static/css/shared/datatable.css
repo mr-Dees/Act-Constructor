@@ -46,16 +46,19 @@
     border-bottom: 1px solid var(--border);
 }
 
-/* Подсветка колонки под активной сортировкой (источник истины — aria-sort):
-   акцентное подчёркивание заголовка + лёгкая заливка ячеек всей колонки —
-   чтобы пользователь сразу видел, по какой колонке идёт сортировка. */
-.dt-head-row th[aria-sort] {
-    background: var(--primary-subtle);
-    box-shadow: inset 0 -2px 0 var(--primary);
+/* Единый «спокойный» язык активной колонки: и фильтр, и сортировка дают мягкую
+   пастельную подсветку ЗАГОЛОВКА (≈8% акцента), различаясь элементом —
+   сортировка добавляет тонкую нижнюю полосу + стрелку/номер, фильтр — акцент на
+   поле ввода. Тело колонки НЕ заливаем (как и при фильтрации) — это убирает
+   основной визуальный шум. Класс .dt-th--sorted висит на ВСЕХ колонках набора
+   мультисортировки (aria-sort — только на ведущей, для скринридеров). */
+.dt-head-row th.dt-th--sorted,
+.dt-head-row th.dt-th--filtered {
+    background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
 }
 
-.dt-body td.dt-col--sorted {
-    background: var(--primary-subtle);
+.dt-head-row th.dt-th--sorted {
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--primary) 60%, transparent);
 }
 
 .dt-table td.align-right { text-align: right; }
@@ -122,14 +125,22 @@
     opacity: 1; /* имя колонки читается как заголовок, пока поле пустое */
 }
 
+/* При фокусе (поле активно под ввод) имя-колонки-плейсхолдер делаем
+   полупрозрачным — видно, что курсор именно здесь и ожидается ввод. */
+.dt-th-filter:focus::placeholder {
+    opacity: 0.4;
+    font-weight: 400;
+}
+
 .dt-th-filter:focus {
     border-color: var(--primary);
 }
 
-/* Сигнал активного фильтра по колонке */
+/* Сигнал активного фильтра по колонке — пастельный акцент на самом поле
+   (мягче, чем сплошная заливка): спокойная рамка + чуть тёплый фон. */
 .dt-th--filtered .dt-th-filter {
-    border-color: var(--primary);
-    background: var(--primary-subtle);
+    border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+    background: color-mix(in srgb, var(--primary) 7%, var(--bg-primary));
 }
 
 .dt-th-sort,
@@ -155,6 +166,18 @@
 
 .dt-th-clear:hover {
     color: var(--error);
+}
+
+/* Порядковый номер колонки в мультисортировке. Показывается ТОЛЬКО когда
+   активны ≥2 колонок; маленький и приглушённый — читается как метаданные. */
+.dt-th-priority {
+    flex-shrink: 0;
+    margin-left: -2px;
+    font-size: 9px;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--primary);
+    opacity: 0.8;
 }
 
 @media (prefers-reduced-motion: reduce) {
