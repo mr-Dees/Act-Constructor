@@ -4,7 +4,6 @@
  * выделение строки, пагинация. Источник данных — DataSource (client/server).
  */
 import { filterRows, sortRows, paginate } from './datatable-logic.js';
-import { renderFilterRow } from './column-filters.js';
 import { attachColumnResize } from './column-resize.js';
 import { showCellPopover, isTruncated } from './cell-popover.js';
 
@@ -46,6 +45,69 @@ export class DataTable {
 
   getVisibleColumns() { return this._visibleColumns(); }
 
+  /**
+   * Ячейка заголовка = поле поиска по колонке (placeholder — имя колонки) +
+   * каретка сортировки + крестик очистки. Отдельной строки фильтров больше нет.
+   * Активный фильтр подсвечивается классом `dt-th--filtered` и показывает «✕».
+   */
+  _buildHeaderCell(col) {
+    const th = document.createElement('th');
+    th.dataset.key = col.key;
+    th.style.width = `${this._view.getWidth(col.key)}px`;
+
+    const cell = document.createElement('div');
+    cell.className = 'dt-th-cell';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'dt-th-filter';
+    input.placeholder = col.label;
+    input.title = col.label;
+    input.value = this._filters[col.key] || '';
+    input.setAttribute('aria-label', `Фильтр по колонке: ${col.label}`);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'dt-th-clear';
+    clearBtn.textContent = '✕';
+    clearBtn.title = 'Очистить фильтр';
+    clearBtn.setAttribute('aria-label', `Очистить фильтр: ${col.label}`);
+
+    const sortBtn = document.createElement('button');
+    sortBtn.type = 'button';
+    sortBtn.className = 'dt-th-sort';
+    const sorted = this._sortKey === col.key;
+    if (sorted) sortBtn.classList.add('active');
+    sortBtn.textContent = sorted ? (this._sortDir === 'asc' ? '↑' : '↓') : '↕';
+    sortBtn.title = 'Сортировка';
+    sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
+    sortBtn.addEventListener('click', () => this.setSort(col.key));
+
+    const applyActive = (active) => {
+      th.classList.toggle('dt-th--filtered', active);
+      clearBtn.style.display = active ? '' : 'none';
+    };
+
+    input.addEventListener('input', () => {
+      this.setFilter(col.key, input.value);
+      applyActive(!!input.value.trim());
+    });
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      this.setFilter(col.key, '');
+      applyActive(false);
+      input.focus();
+    });
+
+    cell.appendChild(input);
+    cell.appendChild(clearBtn);
+    cell.appendChild(sortBtn);
+    th.appendChild(cell);
+
+    applyActive(!!(this._filters[col.key] || '').trim());
+    return th;
+  }
+
   async render() {
     const cols = this._visibleColumns();
     this._mount.innerHTML = '';
@@ -58,25 +120,8 @@ export class DataTable {
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
     headRow.className = 'dt-head-row';
-    for (const col of cols) {
-      const th = document.createElement('th');
-      th.dataset.key = col.key;
-      th.style.width = `${this._view.getWidth(col.key)}px`;
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'dt-th-label';
-      labelSpan.textContent = col.label + (this._sortKey === col.key ? (this._sortDir === 'asc' ? ' ▲' : ' ▼') : '');
-      labelSpan.addEventListener('click', () => this.setSort(col.key));
-      th.appendChild(labelSpan);
-      headRow.appendChild(th);
-    }
+    for (const col of cols) headRow.appendChild(this._buildHeaderCell(col));
     thead.appendChild(headRow);
-
-    renderFilterRow({
-      theadEl: thead,
-      columns: cols,
-      getValue: (k) => this._filters[k] || '',
-      onInput: (k, v) => this.setFilter(k, v),
-    });
 
     table.appendChild(thead);
 

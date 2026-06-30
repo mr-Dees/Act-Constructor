@@ -16,7 +16,7 @@ async def open_ck_fin_res_page_handler() -> str:
         "type": "client_action",
         "action": ACTION_OPEN_URL,
         "params": {"url": _CK_FIN_RES_URL},
-        "label": "ЦК Фин.Рез.",
+        "label": "ЦК Финансовый Результат",
         "block_id": str(uuid.uuid4()),
     }
     return json.dumps(block, ensure_ascii=False)

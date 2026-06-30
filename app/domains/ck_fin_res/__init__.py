@@ -23,7 +23,7 @@ def _build_domain():
         chat_tools=get_chat_tools(),
         nav_items=[
             NavItem(
-                label="ЦК Фин.Рез.",
+                label="ЦК Финансовый Результат",
                 url="/ck-fin-res",
                 icon_svg=(
                     '<path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 '

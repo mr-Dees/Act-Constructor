@@ -43,7 +43,7 @@
         </div>
         {% endif %}
         {% for item in group.nav_items %}
-        <a href="{{ item.url }}" class="sidebar-nav-item {{ 'active' if active_page == item.active_page else '' }}" data-domain="{{ item.chat_domains[0] if item.chat_domains else '' }}">
+        <a href="{{ item.url }}" class="sidebar-nav-item {{ 'active' if active_page == item.active_page else '' }}" title="{{ item.label }}" data-domain="{{ item.chat_domains[0] if item.chat_domains else '' }}">
             <svg class="sidebar-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
                 {{ item.icon_svg|safe }}
             </svg>

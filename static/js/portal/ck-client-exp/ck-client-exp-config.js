@@ -48,6 +48,15 @@ export class CkClientExpConfig {
                 metric_amount_rubles: { align: 'right', format: (v) => CkClientExpConfig.formatNumber(v) },
                 dt_sz: { format: (v) => CkClientExpConfig.formatDate(v) },
             },
+            // Логический порядок: идентификаторы и метрика впереди (код метрики
+            // вплотную к названию), затем показатели/процесс; системные — в конце.
+            order: [
+                'id', 'metric_code', 'metric_name', 'km_id', 'act_sub_number', 'act_item_number',
+                'neg_finder_tb_id', 'num_sz', 'dt_sz',
+                'metric_unic_clients', 'metric_element_counts', 'metric_amount_rubles', 'is_sent_to_top_brass',
+                'process_number', 'block_owner', 'department_owner',
+                'ck_comment', 'reestr_metric_id', 'created_at',
+            ],
         });
     }
 

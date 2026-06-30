@@ -1,16 +1,12 @@
 import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderFilterRow } from '../../static/js/shared/datatable/column-filters.js';
 import { attachColumnResize } from '../../static/js/shared/datatable/column-resize.js';
 import { ColumnVisibility } from '../../static/js/shared/datatable/column-visibility.js';
 import { DataTable } from '../../static/js/shared/datatable/data-table.js';
 
 test('UI-экспорты доступны и не падают на стаб-DOM', () => {
   const thead = document.createElement('thead');
-  assert.doesNotThrow(() => renderFilterRow({
-    theadEl: thead, columns: [{ key: 'a', label: 'A' }], getValue: () => '', onInput: () => {},
-  }));
   assert.doesNotThrow(() => attachColumnResize({
     theadEl: thead, columns: [{ key: 'a' }], viewState: { getWidth: () => 100, setWidth() {} },
   }));
@@ -34,4 +30,17 @@ test('DataTable.render не падает в client-mode (стаб-DOM)', async (
   });
   await assert.doesNotReject(async () => dt.render());
   assert.equal(dt.getVisibleColumns().length, 2);
+});
+
+test('_buildHeaderCell (заголовок-поле) строится без отдельной строки фильтров', () => {
+  const view = { getWidth: () => 120 };
+  const dt = new DataTable({
+    mountEl: document.createElement('div'),
+    columns: [{ key: 'code', label: 'Код метрики', type: 'text' }],
+    viewState: view, dataSource: { mode: 'client', total: 0, getAllRows: () => [] },
+    dicts: {}, pageSize: 50,
+  });
+  // На стаб-DOM проверяем, что построение ячейки-заголовка не бросает
+  // (инпут поиска + каретка сортировки + крестик внутри одной th).
+  assert.doesNotThrow(() => dt._buildHeaderCell({ key: 'code', label: 'Код метрики' }));
 });

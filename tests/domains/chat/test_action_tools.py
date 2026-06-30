@@ -147,7 +147,7 @@ async def test_ck_fin_res_open_page_emits_client_action():
     assert block["type"] == "client_action"
     assert block["action"] == "open_url"
     assert block["params"]["url"] == "/ck-fin-res"
-    assert block["label"] == "ЦК Фин.Рез."
+    assert block["label"] == "ЦК Финансовый Результат"
 
 
 async def test_ck_client_exp_open_page_emits_client_action():

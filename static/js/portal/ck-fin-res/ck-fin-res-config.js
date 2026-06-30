@@ -9,7 +9,7 @@ import { buildColumns } from '../../shared/datatable/build-columns.js';
 export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
-    static pageTitle = 'ЦК Фин.Рез.';
+    static pageTitle = 'ЦК Финансовый Результат';
     static storageKey = 'ck:ck-fin-res:view:v1';
     static workingSetCap = 1000;
 
@@ -52,6 +52,19 @@ export class CkFinResConfig {
                 rev_end_dt: { format: (v) => CkFinResConfig.formatDate(v) },
                 execution_deadline: { format: (v) => CkFinResConfig.formatDate(v) },
             },
+            // Логический порядок: идентификаторы и метрика впереди (код метрики
+            // вплотную к названию), затем суммы/риск, процесс, описания отклонения,
+            // поручения; системные поля — в конце.
+            order: [
+                'id', 'metric_code', 'metric_name', 'km_id', 'act_sub_number', 'act_item_number',
+                'neg_finder_tb_id', 'num_sz', 'dt_sz',
+                'metric_element_counts', 'metric_amount_rubles', 'real_loss', 'is_sent_to_top_brass', 'risk',
+                'process_number', 'block_owner', 'department_owner', 'pocket',
+                'deviation_description', 'deviation_reason', 'deviation_consequence',
+                'rev_start_dt', 'rev_end_dt', 'inspection_name', 'sberdocs_ctrl_assgn_number',
+                'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
+                'used_pm_lib', 'ck_comment', 'reestr_metric_id', 'created_at',
+            ],
         });
     }
 

@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CkClientExpConfig } from '../../static/js/portal/ck-client-exp/ck-client-exp-config.js';
 
-test('колонки выводятся из fields + extra впереди', () => {
+test('логический порядок: id первым, «Код метрики» вплотную к «Метрике»', () => {
   const keys = CkClientExpConfig.columns.map(c => c.key);
-  assert.deepEqual(keys.slice(0, 4), ['id', 'created_at', 'metric_name', 'act_sub_number']);
-  for (const k of ['metric_code', 'km_id', 'metric_amount_rubles', 'metric_unic_clients', 'num_sz']) {
+  assert.equal(keys[0], 'id');
+  const ci = keys.indexOf('metric_code');
+  assert.equal(keys[ci + 1], 'metric_name'); // код метрики идёт сразу перед названием
+  for (const k of ['km_id', 'metric_amount_rubles', 'metric_unic_clients', 'num_sz', 'created_at']) {
     assert.ok(keys.includes(k), `нет колонки ${k}`);
   }
 });

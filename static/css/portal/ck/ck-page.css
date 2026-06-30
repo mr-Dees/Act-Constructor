@@ -3,7 +3,8 @@
 .ck-page {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 64px); /* минус topbar портала */
+    flex: 1;
+    min-height: 0; /* заполняет main под topbar ровно → линия футера совпадает с линией футера сайдбара */
     background: var(--bg-secondary);
 }
 
@@ -18,69 +19,7 @@
     flex-shrink: 0;
 }
 
-/* 2. Sub-header */
-.ck-subheader {
-    display: flex;
-    align-items: center;
-    height: 48px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-primary);
-    flex-shrink: 0;
-}
-
-.ck-subheader__left {
-    flex: 1;
-    padding: 0 12px;
-    border-right: 2px solid var(--gray-200);
-    height: 100%;
-    display: flex;
-    align-items: center;
-}
-
-.ck-subheader__right {
-    width: 400px;
-    flex-shrink: 0;
-    padding: 0 16px;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.ck-subheader__record-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    white-space: nowrap;
-}
-
-.ck-subheader__record-meta {
-    font-size: 11px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-
-.ck-search-input {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-    color: var(--text-primary);
-    background: var(--bg-primary);
-    flex: 1;
-    outline: none;
-}
-
-.ck-search-input::placeholder {
-    color: var(--text-tertiary);
-}
-
-.ck-search-input:focus {
-    border-color: var(--primary);
-    box-shadow: var(--input-focus-shadow);
-}
-
-/* 3. Content area */
+/* 2. Content area */
 .ck-content {
     display: flex;
     flex: 1;
@@ -99,12 +38,44 @@
 .ck-content__form-panel {
     width: 400px;
     flex-shrink: 0;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: var(--bg-primary);
+}
+
+/* Шапка панели формы: заголовок записи + мета (перенесено из прежнего sub-header) */
+.ck-form-header {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
+}
+
+.ck-form-header__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ck-form-header__meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.ck-form-mount {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     padding: 16px;
 }
 
-/* 4. Footer */
+/* 3. Footer */
 .ck-footer {
     display: flex;
     align-items: center;

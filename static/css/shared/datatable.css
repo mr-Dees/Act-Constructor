@@ -30,6 +30,7 @@
 
 .dt-head-row th {
     position: relative;
+    padding: 5px 6px;
     background: var(--bg-secondary);
     text-align: left;
     font-weight: 600;
@@ -38,27 +39,21 @@
     border-bottom: 1px solid var(--border);
 }
 
-.dt-th-label {
-    cursor: pointer;
-    user-select: none;
-}
-
-.dt-th-label:hover {
-    color: var(--primary);
-}
-
 .dt-table td.align-right { text-align: right; }
 .dt-table td.align-center { text-align: center; }
 
-/* Строка фильтров */
-.dt-filter-row th {
-    padding: 4px 6px;
-    background: var(--bg-primary);
-    border-bottom: 1px solid var(--border);
+/* Заголовок-поле: инпут поиска + крестик + каретка сортировки в одной ячейке.
+   Отдельной строки фильтров под шапкой больше нет. */
+.dt-th-cell {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-right: 6px; /* зазор под ручку ресайза справа */
 }
 
-.dt-filter-input {
-    width: 100%;
+.dt-th-filter {
+    flex: 1;
+    min-width: 0;
     box-sizing: border-box;
     font-size: 12px;
     padding: 3px 6px;
@@ -69,8 +64,45 @@
     outline: none;
 }
 
-.dt-filter-input:focus {
+.dt-th-filter::placeholder {
+    color: var(--text-secondary);
+    font-weight: 600;
+    opacity: 1; /* имя колонки читается как заголовок, пока поле пустое */
+}
+
+.dt-th-filter:focus {
     border-color: var(--primary);
+}
+
+/* Сигнал активного фильтра по колонке */
+.dt-th--filtered .dt-th-filter {
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+}
+
+.dt-th-sort,
+.dt-th-clear {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--text-secondary);
+}
+
+.dt-th-sort:hover,
+.dt-th-sort.active {
+    color: var(--primary);
+}
+
+.dt-th-clear {
+    font-size: 12px;
+}
+
+.dt-th-clear:hover {
+    color: var(--error);
 }
 
 /* Ресайз колонок */
