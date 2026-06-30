@@ -118,3 +118,74 @@
     color: var(--error);
     margin-top: 2px;
 }
+
+/* Сворачиваемые секции формы (disclosure). Шеврон/состояние выводятся из
+   aria-expanded на кнопке-заголовке — единый источник истины. */
+.ck-form__section {
+    margin-bottom: 10px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.ck-form__section-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border: none;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.ck-form__section-header:hover {
+    background: var(--gray-50);
+}
+
+.ck-form__section-chevron {
+    flex-shrink: 0;
+    width: 12px;
+    color: var(--text-secondary);
+    transition: transform var(--duration-fast) ease;
+}
+
+.ck-form__section-chevron::before {
+    content: '▸';
+}
+
+.ck-form__section-header[aria-expanded="true"] .ck-form__section-chevron {
+    transform: rotate(90deg);
+}
+
+.ck-form__section-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.ck-form__section-body {
+    padding: 12px 10px;
+}
+
+.ck-form__section-body > :last-child {
+    margin-bottom: 0;
+}
+
+/* display:none убирает поля свёрнутой секции из tab-порядка */
+.ck-form__section--collapsed .ck-form__section-body {
+    display: none;
+}
+
+.ck-form__section--collapsed .ck-form__section-header {
+    border-bottom: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ck-form__section-chevron { transition: none; }
+}

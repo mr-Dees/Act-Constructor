@@ -10,6 +10,7 @@ export class CkClientExpConfig {
     static domainName = 'ck_client_exp';
     static pageTitle = 'ЦК Клиентский опыт';
     static storageKey = 'ck:ck-client-exp:view:v1';
+    static sectionStateKey = 'ck:ck-client-exp:form-sections:v1';
     static workingSetCap = 1000;
 
     static formatDate(val) {
@@ -60,34 +61,44 @@ export class CkClientExpConfig {
         });
     }
 
+    // Поля сгруппированы в сворачиваемые секции (см. CkForm). flattenFields в
+    // build-columns раскрывает секции → колонки строятся из того же источника.
     static fields = [
-        { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-        { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
-        { row: [
-            { key: 'num_sz', label: '№ с/з', type: 'text', required: true,
-              pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
-            { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
+        { section: 'Идентификация', key: 'ident', fields: [
+            { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
+            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
+            { row: [
+                { key: 'num_sz', label: '№ с/з', type: 'text', required: true,
+                  pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
+                { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
+            ]},
+            { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
+            { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
         ]},
-        { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
-        { row: [
-            { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
-            { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
+        { section: 'Показатели метрики', key: 'metric', fields: [
+            { row: [
+                { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
+                { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
+            ]},
+            { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
+            { row: [
+                { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
+                { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
+            ]},
         ]},
-        { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
-        { row: [
-            { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
-            { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
+        { section: 'Процесс и владельцы', key: 'process', fields: [
+            { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
+                { key: 'block_owner', source: 'block_owner' },
+                { key: 'department_owner', source: 'department_owner' },
+            ]},
+            { row: [
+                { key: 'block_owner', label: 'Блок', type: 'readonly-text' },
+                { key: 'department_owner', label: 'Подразделение', type: 'readonly-text' },
+            ]},
         ]},
-        { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
-        { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
-            { key: 'block_owner', source: 'block_owner' },
-            { key: 'department_owner', source: 'department_owner' },
+        { section: 'Системное', key: 'system', fields: [
+            { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
         ]},
-        { row: [
-            { key: 'block_owner', label: 'Блок', type: 'readonly-text' },
-            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text' },
-        ]},
-        { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];
 
     static dictNames = ['metrics', 'terbanks', 'processes'];

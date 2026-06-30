@@ -36,9 +36,26 @@ function toColumn(field) {
 }
 
 /**
+ * Раскрывает конфиг полей в плоский список (учитывает секции и row-группы).
+ * Элемент может быть секцией `{section, fields:[...]}`, строкой `{row:[...]}`
+ * или самим полем `{key,...}`. Секции — только верхний уровень (без вложения).
+ */
+export function flattenFields(fields) {
+  const flat = [];
+  const collect = (item) => {
+    if (!item) return;
+    if (Array.isArray(item.fields)) item.fields.forEach(collect); // секция
+    else if (Array.isArray(item.row)) flat.push(...item.row);
+    else if (item.key) flat.push(item);
+  };
+  for (const item of fields) collect(item);
+  return flat;
+}
+
+/**
  * Построить плоский список колонок из конфигурации полей формы.
  *
- * @param {Array} fields массив полей; элемент может быть {row:[...]} или полем
+ * @param {Array} fields массив полей; элемент — секция {section,fields}, {row:[...]} или поле
  * @param {Object} [opts] {extra, overrides, order}
  * @param {Array} [opts.extra] read-only колонки, добавляемые впереди
  * @param {Object} [opts.overrides] перекрытия по ключу колонки (label/align/format/...)
@@ -46,11 +63,7 @@ function toColumn(field) {
  * @returns {ColumnDef[]}
  */
 export function buildColumns(fields, opts = {}) {
-  const flat = [];
-  for (const item of fields) {
-    if (item && Array.isArray(item.row)) flat.push(...item.row);
-    else if (item && item.key) flat.push(item);
-  }
+  const flat = flattenFields(fields);
 
   const extraCols = (opts.extra || []).map(e => ({ ...toColumn(e), ...e }));
   let cols = [...extraCols, ...flat.map(toColumn)];
@@ -72,4 +85,7 @@ export function buildColumns(fields, opts = {}) {
   return cols;
 }
 
-if (typeof window !== 'undefined') window.buildColumns = buildColumns;
+if (typeof window !== 'undefined') {
+  window.buildColumns = buildColumns;
+  window.flattenFields = flattenFields;
+}

@@ -91,6 +91,7 @@ export class CkClientExpPage {
             dictionaries: this._dictionaries,
             containerEl: document.getElementById('ckFormPanel'),
             onProcessPick: (field) => this._openProcessPicker(field),
+            sectionStateKey: cfg.sectionStateKey,
         });
 
         // Toolbar кнопки
