@@ -60,57 +60,62 @@ WHERE cs.is_actual = true;
 -- ТЕСТОВЫЕ ДАННЫЕ
 -- ============================================================================
 
+-- 1. Несоблюдение лимитов кредитования (п. 5.1.1, суб-акт ЦА 36-мо0255)
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
-    NULL, NULL, '14', '101', 25, 30, 500000.00, true,
-    'КМ-09-41726', 'ЦА 36-мо0255', '2026-01-15', '3.1.1',
-    '3119', 'Работа с обратной связью клиентов', 'Розничный бизнес', 'Клиентский сервис', 'Комментарий', '22494524'
+    (SELECT id FROM t_db_oarb_ua_sub_number WHERE act_sub_number = 'ЦА 36-мо0255' LIMIT 1), NULL, '14', '1001', 25, 30, 500000.00, true,
+    'КМ-09-41726', '255', '2026-01-15', '5.1.1',
+    'П6152', 'Кредитование юридических лиц', 'Кредитование', 'Департамент кредитования ЮЛ', 'Превышение лимитов кредитования по портфелю ЮЛ', '22494524'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
+-- 2. Нарушение порядка оценки залога (п. 5.2.3, суб-акт МСК 12-мо0100)
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
-    NULL, NULL, '7', '102', 10, 15, 200000.50, false,
-    'КМ-07-30001', 'МСК 12-мо0100', '2026-02-10', '2.2.3',
-    '5010', 'Осуществление переводов', 'Транзакционный бизнес', 'Платежи и переводы', '', '22501001'
+    (SELECT id FROM t_db_oarb_ua_sub_number WHERE act_sub_number = 'МСК 12-мо0100' LIMIT 1), NULL, '7', '1002', 10, 15, 200000.50, false,
+    'КМ-07-30001', '100', '2026-02-10', '5.2.3',
+    'П6152', 'Кредитование юридических лиц', 'Кредитование', 'Департамент кредитования ЮЛ', '', '22501001'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
+-- 3. Некорректное определение категории качества (п. 5.1, суб-акт ЦА 50-мо0300)
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
-    NULL, NULL, '4', '103', 50, 75, 1500000.00, true,
-    'КМ-14-50001', 'ЦА 50-мо0300', '2026-03-01', '4.1.1',
-    '2014', 'Программа лояльности', 'Розничный бизнес', 'Маркетинг', 'Требует внимания', '22501002'
+    (SELECT id FROM t_db_oarb_ua_sub_number WHERE act_sub_number = 'ЦА 50-мо0300' LIMIT 1), NULL, '14', '1003', 50, 75, 1500000.00, true,
+    'КМ-14-50001', '300', '2026-03-01', '5.1',
+    'П6401', 'Управление рисками', 'Риски', 'Управление рисками', 'Требует внимания', '22501002'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
+-- 4. Нарушение порядка формирования резервов (п. 5.3.2, суб-акт ЦА 36-мо0255)
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
-    NULL, NULL, '14', '17', 5, 8, 0, false,
-    'КМ-09-41726', 'ЦА 36-мо0255', '2025-11-20', '1.3.2',
-    '1010', 'Управление операционным риском', 'Риски', 'Управление операционных рисков', '', '22494524'
+    (SELECT id FROM t_db_oarb_ua_sub_number WHERE act_sub_number = 'ЦА 36-мо0255' LIMIT 1), NULL, '14', '1004', 5, 8, 0, false,
+    'КМ-09-41726', '255', '2025-11-20', '5.3.2',
+    'П6802', 'Внутренний контроль', 'Риски', 'Департамент внутреннего контроля', '', '22494524'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
+-- 5. Несоблюдение лимитов кредитования (п. 5.2.1, суб-акт МСК 12-мо0100)
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
-    NULL, NULL, '8', '19', 15, 20, 350000.25, false,
-    'КМ-07-30001', 'МСК 12-мо0100', '2025-12-05', '5.2.1',
-    '7010', 'Ведение кредитных сделок', 'Кредитование', 'Департамент кредитования ЮЛ', 'Рекомендация выдана', '22501003'
+    (SELECT id FROM t_db_oarb_ua_sub_number WHERE act_sub_number = 'МСК 12-мо0100' LIMIT 1), NULL, '8', '1001', 15, 20, 350000.25, false,
+    'КМ-07-30001', '100', '2025-12-05', '5.2.1',
+    'П6401', 'Управление рисками', 'Риски', 'Управление рисками', 'Рекомендация выдана', '22501001'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
