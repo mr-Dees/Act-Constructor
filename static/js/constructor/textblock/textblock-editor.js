@@ -124,6 +124,11 @@ Object.assign(TextBlockManager.prototype, {
         return !!(node && node.nodeType === Node.TEXT_NODE && node.data === this.CAP_GUARD_CHAR);
     },
 
+    /** @private Узел — элемент переноса строки <br>? */
+    _isBreak(node) {
+        return !!(node && node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR');
+    },
+
     /** @private Текстовый узел незначим (пустой ИЛИ caret-guard U+FEFF). */
     _isInsignificantText(n) {
         return n && n.nodeType === Node.TEXT_NODE &&
@@ -137,15 +142,10 @@ Object.assign(TextBlockManager.prototype, {
         return n;
     },
 
-    /** @private Первый/последний значимый ребёнок (пропускает пустые/guard'ы). */
+    /** @private Первый значимый ребёнок (пропускает пустые/guard'ы). */
     _firstSignificantChild(editor) {
         let n = editor.firstChild;
         while (this._isInsignificantText(n)) n = n.nextSibling;
-        return n;
-    },
-    _lastSignificantChild(editor) {
-        let n = editor.lastChild;
-        while (this._isInsignificantText(n)) n = n.previousSibling;
         return n;
     },
 
@@ -178,19 +178,33 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * @private Ставит caret-guard'ы у трёх проблемных границ капсул: перед
-     * ведущей, после хвостовой и между двумя смежными. Где с одной стороны есть
-     * обычный текст — guard не нужен (каретка ставится штатно). Зовётся ПОСЛЕ
-     * _cleanCapGuards (в DOM нет старых guard'ов).
+     * @private Ставит caret-guard'ы у проблемных границ капсул — там, где каретке
+     * иначе негде приземлиться вплотную к contenteditable=false-атому: нет
+     * обычного текста, а есть КРАЙ блока (начало/конец родителя), ПЕРЕНОС <br>
+     * или другая капсула. Где сбоку обычный текст — guard НЕ ставим (каретка
+     * встаёт штатно; guard'ы вокруг каждой капсулы ломали бы обычный ввод).
+     * Зовётся ПОСЛЕ _cleanCapGuards (в DOM нет старых guard'ов).
+     *
+     * Ведущий guard важен и для капсулы в начале ВИЗУАЛЬНОЙ строки (первый
+     * значимый ребёнок блока ИЛИ сразу после <br>): без него нативная Up/Down-
+     * навигация Chromium проскакивает строку-капсулу, а после переноса перед
+     * капсулой нельзя встать с клавиатуры (раньше покрывались только капсулы у
+     * краёв самого редактора и пары смежных капсул).
      */
     _placeCapGuards(editor) {
         const g = () => document.createTextNode(this.CAP_GUARD_CHAR);
-        const first = this._firstSignificantChild(editor);
-        if (this._isCapsule(first)) editor.insertBefore(g(), first);
-        const last = this._lastSignificantChild(editor);
-        if (this._isCapsule(last)) editor.insertBefore(g(), last.nextSibling); // null ref → append
         editor.querySelectorAll('.text-link, .text-footnote').forEach(m => {
-            if (this._isCapsule(this._significantSibling(m, 'nextSibling'))) {
+            // Ведущий guard: слева нет обычного текста — край блока (null),
+            // перенос (<br>) или капсула.
+            const prev = this._significantSibling(m, 'previousSibling');
+            if (prev === null || this._isBreak(prev) || this._isCapsule(prev)) {
+                m.parentNode.insertBefore(g(), m);
+            }
+            // Хвостовой guard — только у края блока (null) или переноса (<br>):
+            // между двумя смежными капсулами guard уже поставлен как ВЕДУЩИЙ у
+            // правой, второй там не нужен.
+            const next = this._significantSibling(m, 'nextSibling');
+            if (next === null || this._isBreak(next)) {
                 m.parentNode.insertBefore(g(), m.nextSibling);
             }
         });
@@ -560,11 +574,21 @@ Object.assign(TextBlockManager.prototype, {
                     e.preventDefault();
                     const br = document.createElement('br');
                     range.insertNode(br);
-                    const caret = document.createRange();
-                    caret.setStartAfter(br);
-                    caret.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(caret);
+                    if (after) {
+                        // Капсула уходит в начало новой строки. Ставим стойкий
+                        // caret-guard перед ней и каретку в нём — той же ленивой
+                        // установкой, что делает клик мышью; иначе перед
+                        // капсулой-в-начале-строки клавиатурой не встать
+                        // (эфемерная setStartAfter(br)-позиция не закреплена в
+                        // узле, а normalizeMarkers тут не зовётся).
+                        this._placeCaretBesideMarker(after, false);
+                    } else {
+                        const caret = document.createRange();
+                        caret.setStartAfter(br);
+                        caret.collapse(true);
+                        sel.removeAllRanges();
+                        sel.addRange(caret);
+                    }
                     this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
                     this.renumberEditorFootnotes();
                     this._toggleEmptyClass(editor);
