@@ -156,7 +156,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-2xl); /* чуть у́же по высоте → ближе к кнопке AI-ассистента */
+    padding: var(--spacing) var(--spacing-2xl); /* немного шире по высоте: между прежним md и зажатым sm */
     color: var(--text-secondary);
     text-decoration: none;
     transition: all var(--duration-fast);
@@ -236,7 +236,7 @@
 
 .sidebar-footer {
     flex-shrink: 0;
-    height: 44px;                /* совпадает с .ck-footer домена → линии на одной горизонтали; вровень с пунктами навигации */
+    height: 48px;                /* совпадает с .ck-footer домена → линии на одной горизонтали; по высоте вровень с пунктами навигации */
     display: flex;
     align-items: stretch;
     padding: 0;
@@ -244,13 +244,13 @@
 }
 
 /* Кнопка AI-Ассистента визуально совпадает с пунктами навигации (.sidebar-nav-item):
-   те же отступы, типографика и hover. Высота 100% заполняет 44px-футер, поэтому
+   те же отступы, типографика и hover. Высота 100% заполняет 48px-футер, поэтому
    верхняя линия футера лежит на той же горизонтали, что и линия футера ЦК-страницы. */
 .sidebar-chat-btn {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing-md) var(--spacing-2xl);
+    padding: var(--spacing) var(--spacing-2xl);
     height: 100%;
     width: 100%;
     box-sizing: border-box;

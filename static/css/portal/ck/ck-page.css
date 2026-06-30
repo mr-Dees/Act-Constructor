@@ -94,7 +94,7 @@
 .ck-footer {
     display: flex;
     align-items: center;
-    height: 44px; /* вровень с футером сайдбара (кнопка AI-ассистента) */
+    height: 48px; /* вровень с футером сайдбара (кнопка AI-ассистента) */
     border-top: 1px solid var(--border);
     background: var(--bg-secondary);
     flex-shrink: 0;
