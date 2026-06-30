@@ -189,3 +189,65 @@ test.describe('observer-самозалечивание ведущего guard у
     }, GUARD, { timeout: 1000 });
   });
 });
+
+test.describe('смена размера шрифта не ломает caret-guard у капсулы', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('размер на каретке перед капсулой → ведущий guard сохраняется (U+200B-якорь не блокирует)', async ({ page }) => {
+    await setupEditor(page, 'строка1<br>' + FOOTNOTE() + '<br>строка3');
+    const r = await page.evaluate((guard) => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.normalizeMarkers(ed);
+      // Каретка в ведущий guard перед капсулой, затем меняем размер.
+      const cap = ed.querySelector('.text-footnote')!;
+      const g = cap.previousSibling as Text;
+      const rng = document.createRange(); rng.setStart(g, g.length); rng.collapse(true);
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(rng);
+      tbm.applyFontSize(20);   // вставит <span style="font-size"><U+200B></span> перед капсулой
+      const cap2 = ed.querySelector('.text-footnote')!;
+      return {
+        leading: !!(cap2.previousSibling && cap2.previousSibling.nodeType === 3 &&
+          (cap2.previousSibling as Text).data === guard),
+        hasZwsp: ed.innerHTML.indexOf('\u200B') !== -1,   // якорь размера на месте
+      };
+    }, GUARD);
+    expect(r.leading).toBe(true);  // guard поставлен НЕСМОТРЯ на U+200B-span рядом
+    expect(r.hasZwsp).toBe(true);  // якорь размера не выпилен
+  });
+
+  test('после смены размера (с U+200B в сохранённом контенте) reload восстанавливает guard', async ({ page }) => {
+    const reloadedLeading = await page.evaluate((guard) => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      // Сохранённый контент с U+200B-якорем размера ВПЛОТНУЮ к капсуле (U+FEFF
+      // стрипается при save, U+200B — нет), как после смены размера + reload.
+      ed.innerHTML = 'строка1<br><span style="font-size: 20px;">\u200B</span>' +
+        '<span class="text-footnote" data-footnote-id="F1" data-footnote-text="прим">сноска</span>' +
+        '<br>строка3';
+      tbm.normalizeMarkers(ed);   // именно это выполняется на createEditor (reload)
+      const cap = ed.querySelector('.text-footnote')!;
+      return !!(cap.previousSibling && cap.previousSibling.nodeType === 3 &&
+        (cap.previousSibling as Text).data === guard);
+    }, GUARD);
+    expect(reloadedLeading).toBe(true);  // раньше reload НЕ чинил — теперь чинит
+  });
+
+  test('размер по выделению капсулы → guard с обеих сторон сохраняется', async ({ page }) => {
+    await setupEditor(page, 'строка1<br>' + FOOTNOTE() + '<br>строка3');
+    const r = await page.evaluate((guard) => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.normalizeMarkers(ed);
+      const cap = ed.querySelector('.text-footnote')!;
+      const rng = document.createRange(); rng.selectNode(cap);
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(rng);
+      tbm.applyFontSize(20);   // обернёт капсулу в <span style="font-size">
+      const cap2 = ed.querySelector('.text-footnote')!;
+      const isG = (n: any) => !!(n && n.nodeType === 3 && n.data === guard);
+      return { leading: isG(cap2.previousSibling), trailing: isG(cap2.nextSibling) };
+    }, GUARD);
+    expect(r.leading).toBe(true);
+    expect(r.trailing).toBe(true);
+  });
+});

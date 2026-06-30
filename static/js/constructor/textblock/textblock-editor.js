@@ -129,6 +129,38 @@ Object.assign(TextBlockManager.prototype, {
         return !!(node && node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR');
     },
 
+    /**
+     * @private Узел НЕ даёт каретке видимой точки опоры рядом с капсулой:
+     * пустой/zero-width текст (включая U+FEFF-guard и U+200B-якорь размера) ЛИБО
+     * инлайн-элемент, состоящий ТОЛЬКО из zero-width-символов (например
+     * span-якорь размера со вставленным U+200B из applyFontSize). Капсулы, <br>,
+     * <img> и пустые элементы — НЕ zero-width (значимые границы/атомы).
+     */
+    _isZeroWidthNode(n) {
+        if (!n) return false;
+        if (n.nodeType === Node.TEXT_NODE) {
+            return /^[\uFEFF\u200B]*$/.test(n.data);            // '' или только FEFF/ZWSP
+        }
+        if (n.nodeType === Node.ELEMENT_NODE && !this._isCapsule(n) && n.tagName !== 'BR') {
+            const t = n.textContent || '';
+            return t.length > 0 && /^[\uFEFF\u200B]+$/.test(t); // span ТОЛЬКО из zero-width (не <img>/пустой)
+        }
+        return false;
+    },
+
+    /**
+     * @private Ближайший сосед, дающий каретке видимую точку опоры: пропускает
+     * zero-width-узлы (_isZeroWidthNode) — иначе якорь размера (U+200B-span),
+     * прилёгший к капсуле, маскировал бы границу строки и блокировал расстановку
+     * guard'а (ломая вертикальную навигацию после смены размера). Возвращает
+     * null / <br> / капсулу / значимый узел.
+     */
+    _caretHomeSibling(node, dir) {
+        let n = node[dir];
+        while (this._isZeroWidthNode(n)) n = n[dir];
+        return n;
+    },
+
     /** @private Текстовый узел незначим (пустой ИЛИ caret-guard U+FEFF). */
     _isInsignificantText(n) {
         return n && n.nodeType === Node.TEXT_NODE &&
@@ -194,16 +226,18 @@ Object.assign(TextBlockManager.prototype, {
     _placeCapGuards(editor) {
         const g = () => document.createTextNode(this.CAP_GUARD_CHAR);
         editor.querySelectorAll('.text-link, .text-footnote').forEach(m => {
-            // Ведущий guard: слева нет обычного текста — край блока (null),
-            // перенос (<br>) или капсула.
-            const prev = this._significantSibling(m, 'previousSibling');
+            // Ведущий guard: слева нет видимой точки опоры — край блока (null),
+            // перенос (<br>) или капсула. _caretHomeSibling пропускает и
+            // zero-width-якоря размера (U+200B-span), иначе они блокировали бы
+            // guard и ломали вертикальную навигацию после смены размера.
+            const prev = this._caretHomeSibling(m, 'previousSibling');
             if (prev === null || this._isBreak(prev) || this._isCapsule(prev)) {
                 m.parentNode.insertBefore(g(), m);
             }
             // Хвостовой guard — только у края блока (null) или переноса (<br>):
             // между двумя смежными капсулами guard уже поставлен как ВЕДУЩИЙ у
             // правой, второй там не нужен.
-            const next = this._significantSibling(m, 'nextSibling');
+            const next = this._caretHomeSibling(m, 'nextSibling');
             if (next === null || this._isBreak(next)) {
                 m.parentNode.insertBefore(g(), m.nextSibling);
             }
