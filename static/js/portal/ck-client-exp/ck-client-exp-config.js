@@ -10,7 +10,7 @@ export class CkClientExpConfig {
     static domainName = 'ck_client_exp';
     static pageTitle = 'ЦК Клиентский опыт';
     static storageKey = 'ck:ck-client-exp:view:v1';
-    static sectionStateKey = 'ck:ck-client-exp:form-sections:v1';
+    static sectionStateKey = 'ck:ck-client-exp:form-sections:v2';
     static workingSetCap = 1000;
 
     static formatDate(val) {
@@ -49,14 +49,15 @@ export class CkClientExpConfig {
                 metric_amount_rubles: { align: 'right', format: (v) => CkClientExpConfig.formatNumber(v) },
                 dt_sz: { format: (v) => CkClientExpConfig.formatDate(v) },
             },
-            // Логический порядок: идентификаторы и метрика впереди (код метрики
-            // вплотную к названию), затем показатели/процесс; системные — в конце.
+            // Порядок колонок повторяет порядок секций формы (без группировки в
+            // таблице): идентификация → процесс → метрика (код метрики вплотную
+            // к названию) → системное.
             order: [
-                'id', 'metric_code', 'metric_name', 'km_id', 'act_sub_number', 'act_item_number',
-                'neg_finder_tb_id', 'num_sz', 'dt_sz',
-                'metric_unic_clients', 'metric_element_counts', 'metric_amount_rubles', 'is_sent_to_top_brass',
+                'id',
+                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'neg_finder_tb_id', 'act_item_number',
                 'process_number', 'block_owner', 'department_owner',
-                'ck_comment', 'reestr_metric_id', 'created_at',
+                'metric_code', 'metric_name', 'metric_unic_clients', 'metric_element_counts', 'metric_amount_rubles', 'is_sent_to_top_brass', 'ck_comment',
+                'reestr_metric_id', 'created_at',
             ],
         });
     }
@@ -64,28 +65,20 @@ export class CkClientExpConfig {
     // Поля сгруппированы в сворачиваемые секции (см. CkForm). flattenFields в
     // build-columns раскрывает секции → колонки строятся из того же источника.
     static fields = [
+        // Группировка по аналогии с ЦКФР (у ЦККС нет блоков «Отклонение» и
+        // «Поручения»): идентификация → процесс → метрика → системное.
+        // 1. Идентификация — где и когда выявлено отклонение.
         { section: 'Идентификация', key: 'ident', fields: [
-            { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
+            { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
             { row: [
                 { key: 'num_sz', label: '№ с/з', type: 'text', required: true,
                   pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
                 { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
             ]},
-            { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
+            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
             { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
         ]},
-        { section: 'Показатели метрики', key: 'metric', fields: [
-            { row: [
-                { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
-                { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
-            ]},
-            { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
-            { row: [
-                { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
-                { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
-            ]},
-        ]},
+        // 2. Процесс и владельцы.
         { section: 'Процесс и владельцы', key: 'process', fields: [
             { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
                 { key: 'block_owner', source: 'block_owner' },
@@ -96,6 +89,20 @@ export class CkClientExpConfig {
                 { key: 'department_owner', label: 'Подразделение', type: 'readonly-text' },
             ]},
         ]},
+        // 3. Метрика — показатели + код метрики и её название.
+        { section: 'Метрика', key: 'metric', fields: [
+            { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
+            { row: [
+                { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
+                { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
+            ]},
+            { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
+            { row: [
+                { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
+                { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
+            ]},
+        ]},
+        // 4. Системное.
         { section: 'Системное', key: 'system', fields: [
             { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
         ]},
