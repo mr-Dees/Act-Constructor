@@ -8,15 +8,54 @@
     background: var(--bg-secondary);
 }
 
-/* 1. Toolbar */
+/* Заголовок домена в topbar прижат влево вровень с тулбаром ЦК (16px), а не по
+   стандартному порталу (--spacing-3xl). Скоупим через :has(.ck-page), чтобы
+   landing/admin/acts остались с обычным отступом. */
+.sidebar-layout-main:has(.ck-page) .landing-topbar {
+    padding-left: 16px;
+}
+
+/* 1. Toolbar: слева кнопки над таблицей, справа мета записи над панелью формы.
+   Ширина правой части (400px) и вертикальный разделитель совпадают с раскладкой
+   content/footer ниже → линии идут единым отчерком сверху вниз. */
 .ck-toolbar {
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.ck-toolbar__left {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    background: var(--bg-primary);
-    border-bottom: 1px solid var(--border);
+    border-right: 2px solid var(--gray-200);
+}
+
+.ck-toolbar__right {
+    width: 400px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 8px 16px;
+    box-sizing: border-box;
+}
+
+.ck-record-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ck-record-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
 }
 
 /* 2. Content area */
@@ -44,30 +83,6 @@
     background: var(--bg-primary);
 }
 
-/* Шапка панели формы: заголовок записи + мета (перенесено из прежнего sub-header) */
-.ck-form-header {
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 2px;
-    min-height: 48px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    box-sizing: border-box;
-}
-
-.ck-form-header__title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.ck-form-header__meta {
-    font-size: 11px;
-    color: var(--text-secondary);
-}
-
 .ck-form-mount {
     flex: 1;
     min-height: 0;
@@ -79,7 +94,7 @@
 .ck-footer {
     display: flex;
     align-items: center;
-    height: 42px;
+    height: 44px; /* вровень с футером сайдбара (кнопка AI-ассистента) */
     border-top: 1px solid var(--border);
     background: var(--bg-secondary);
     flex-shrink: 0;

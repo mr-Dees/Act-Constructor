@@ -4,21 +4,24 @@
 
 {% block content %}
 <div class="ck-page">
-    <!-- 1. Toolbar -->
+    <!-- 1. Toolbar: слева кнопки (над таблицей), справа мета записи (над панелью
+         формы, в одной полосе-отчерке вровень с тулбаром — см. п.7) -->
     <div class="ck-toolbar">
-        <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
-        <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
-        <button class="btn btn-secondary" id="ckColvisBtn" title="Настройка колонок">Колонки</button>
+        <div class="ck-toolbar__left">
+            <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
+            <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
+            <button class="btn btn-secondary" id="ckColvisBtn" title="Настройка колонок">Колонки</button>
+        </div>
+        <div class="ck-toolbar__right">
+            <span class="ck-record-title" id="ckRecordTitle"></span>
+            <span class="ck-record-meta" id="ckRecordMeta"></span>
+        </div>
     </div>
 
     <!-- 2. Content -->
     <div class="ck-content">
         <div class="ck-content__table-panel" id="ckTablePanel"></div>
         <div class="ck-content__form-panel">
-            <div class="ck-form-header">
-                <span class="ck-form-header__title" id="ckRecordTitle"></span>
-                <span class="ck-form-header__meta" id="ckRecordMeta"></span>
-            </div>
             <div class="ck-form-mount" id="ckFormPanel"></div>
         </div>
     </div>
