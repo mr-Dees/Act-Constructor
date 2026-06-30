@@ -1,7 +1,9 @@
 /**
- * Оркестратор generic-таблицы: рендер только ВИДИМЫХ колонок, строка фильтров
- * под заголовками, сортировка по клику, ресайз колонок, обрезка+поповер,
- * выделение строки, пагинация. Источник данных — DataSource (client/server).
+ * Оркестратор generic-таблицы: рендер только ВИДИМЫХ колонок, фильтр прямо в
+ * заголовке-поле (имя колонки всплывает мини-меткой при вводе), 3-позиционная
+ * сортировка по клику (норм. → возр. → убыв. → норм.) с подсветкой колонки,
+ * ресайз колонок, обрезка+поповер, выделение строки, пагинация.
+ * Источник данных — DataSource (client/server).
  */
 import { filterRows, sortRows, paginate } from './datatable-logic.js';
 import { attachColumnResize } from './column-resize.js';
@@ -46,9 +48,12 @@ export class DataTable {
   getVisibleColumns() { return this._visibleColumns(); }
 
   /**
-   * Ячейка заголовка = поле поиска по колонке (placeholder — имя колонки) +
-   * каретка сортировки + крестик очистки. Отдельной строки фильтров больше нет.
-   * Активный фильтр подсвечивается классом `dt-th--filtered` и показывает «✕».
+   * Ячейка заголовка = поле поиска по колонке + каретка 3-позиционной
+   * сортировки + крестик очистки. Имя колонки видно как placeholder, пока
+   * фильтр пуст; как только в нём есть текст — имя «всплывает» мини-меткой
+   * над полем (`.dt-th-field--float`), а ячейка подсвечивается
+   * (`.dt-th--filtered`). Активная сортировка помечается `aria-sort` на самой
+   * `th` — с него же берётся CSS-подсветка отсортированной колонки.
    */
   _buildHeaderCell(col) {
     const th = document.createElement('th');
@@ -58,10 +63,19 @@ export class DataTable {
     const cell = document.createElement('div');
     cell.className = 'dt-th-cell';
 
+    // Поле фильтра + всплывающая мини-метка имени колонки.
+    const field = document.createElement('div');
+    field.className = 'dt-th-field';
+
+    const floatLabel = document.createElement('span');
+    floatLabel.className = 'dt-th-floatlabel';
+    floatLabel.textContent = col.label;
+    floatLabel.setAttribute('aria-hidden', 'true');
+
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'dt-th-filter';
-    input.placeholder = col.label;
+    input.placeholder = col.label; // имя колонки видно, пока поле пустое
     input.title = col.label;
     input.value = this._filters[col.key] || '';
     input.setAttribute('aria-label', `Фильтр по колонке: ${col.label}`);
@@ -76,35 +90,46 @@ export class DataTable {
     const sortBtn = document.createElement('button');
     sortBtn.type = 'button';
     sortBtn.className = 'dt-th-sort';
-    const sorted = this._sortKey === col.key;
-    if (sorted) sortBtn.classList.add('active');
-    sortBtn.textContent = sorted ? (this._sortDir === 'asc' ? '↑' : '↓') : '↕';
     sortBtn.title = 'Сортировка';
     sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
     sortBtn.addEventListener('click', () => this.setSort(col.key));
 
-    const applyActive = (active) => {
-      th.classList.toggle('dt-th--filtered', active);
-      clearBtn.style.display = active ? '' : 'none';
+    // 3-позиционная сортировка: нейтраль ↕ / возрастание ↑ / убывание ↓.
+    // aria-sort — только на активной колонке (единый источник для подсветки).
+    const dir = this._sortKey === col.key ? this._sortDir : null;
+    if (dir) {
+      th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+      sortBtn.classList.add('active');
+    }
+    sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+
+    // Имя колонки «всплывает», как только в фильтре появляется текст.
+    const syncFilter = () => {
+      const filled = !!input.value.trim();
+      field.classList.toggle('dt-th-field--float', filled);
+      th.classList.toggle('dt-th--filtered', filled);
+      clearBtn.style.display = filled ? '' : 'none';
     };
 
     input.addEventListener('input', () => {
       this.setFilter(col.key, input.value);
-      applyActive(!!input.value.trim());
+      syncFilter();
     });
     clearBtn.addEventListener('click', () => {
       input.value = '';
       this.setFilter(col.key, '');
-      applyActive(false);
+      syncFilter();
       input.focus();
     });
 
-    cell.appendChild(input);
+    field.appendChild(floatLabel);
+    field.appendChild(input);
+    cell.appendChild(field);
     cell.appendChild(clearBtn);
     cell.appendChild(sortBtn);
     th.appendChild(cell);
 
-    applyActive(!!(this._filters[col.key] || '').trim());
+    syncFilter();
     return th;
   }
 
@@ -146,16 +171,34 @@ export class DataTable {
     this._scheduleBody();
   }
 
+  // 3-позиционный цикл по клику: нормальный → возрастание → убывание → нормальный.
+  // Порядок asc-first — де-факто стандарт data-grid (AG-Grid/MUI).
   setSort(key) {
-    if (this._sortKey === key) this._sortDir = this._sortDir === 'asc' ? 'desc' : 'asc';
-    else { this._sortKey = key; this._sortDir = 'asc'; }
+    if (this._sortKey === key) {
+      if (this._sortDir === 'asc') {
+        this._sortDir = 'desc';
+      } else {
+        this._sortKey = null; // убывание → возврат к исходному порядку
+        this._sortDir = 'asc';
+      }
+    } else {
+      this._sortKey = key;
+      this._sortDir = 'asc';
+    }
     this._page = 1;
     this.render();
   }
 
   setPage(page) { this._page = page; this._renderBody(); }
 
-  clearFilters() { this._filters = {}; this._page = 1; this.render(); }
+  // Сброс фильтров обнуляет и сортировку (возврат к исходному порядку).
+  clearFilters() {
+    this._filters = {};
+    this._sortKey = null;
+    this._sortDir = 'asc';
+    this._page = 1;
+    this.render();
+  }
 
   _scheduleBody() {
     clearTimeout(this._debounce);
@@ -229,6 +272,7 @@ export class DataTable {
         td.style.width = `${this._view.getWidth(col.key)}px`;
         if (col.align === 'right') td.classList.add('align-right');
         if (col.align === 'center') td.classList.add('align-center');
+        if (col.key === this._sortKey) td.classList.add('dt-col--sorted'); // подсветка колонки сортировки
         if (col.longText) {
           td.classList.add('dt-clickable');
           td.addEventListener('click', (e) => {

@@ -1,8 +1,9 @@
 /*
  * Generic-таблица (datatable toolkit). Доменно-агностичные стили:
- * фиксированная раскладка с управляемыми ширинами, строка фильтров под
- * заголовками, ресайз-хендлы, обрезка ячеек, поповер полного текста,
- * панель видимости колонок, пагинация.
+ * фиксированная раскладка с управляемыми ширинами, фильтр прямо в заголовке-поле
+ * (имя колонки всплывает мини-меткой при вводе), вертикальные разделители колонок,
+ * 3-позиционная сортировка с подсветкой колонки, ресайз-хендлы, обрезка ячеек,
+ * поповер полного текста, панель видимости колонок, пагинация.
  */
 
 .dt-wrapper {
@@ -23,14 +24,20 @@
     box-sizing: border-box;
     padding: 7px 10px;
     border-bottom: 1px solid var(--border-light);
+    border-right: 1px solid var(--border-light); /* вертикальные разделители колонок */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+.dt-table th:last-child,
+.dt-table td:last-child {
+    border-right: none;
+}
+
 .dt-head-row th {
     position: relative;
-    padding: 5px 6px;
+    padding: 14px 6px 5px; /* запас сверху под всплывающую мини-метку имени колонки */
     background: var(--bg-secondary);
     text-align: left;
     font-weight: 600;
@@ -39,16 +46,61 @@
     border-bottom: 1px solid var(--border);
 }
 
+/* Подсветка колонки под активной сортировкой (источник истины — aria-sort):
+   акцентное подчёркивание заголовка + лёгкая заливка ячеек всей колонки —
+   чтобы пользователь сразу видел, по какой колонке идёт сортировка. */
+.dt-head-row th[aria-sort] {
+    background: var(--primary-subtle);
+    box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+.dt-body td.dt-col--sorted {
+    background: var(--primary-subtle);
+}
+
 .dt-table td.align-right { text-align: right; }
 .dt-table td.align-center { text-align: center; }
 
-/* Заголовок-поле: инпут поиска + крестик + каретка сортировки в одной ячейке.
-   Отдельной строки фильтров под шапкой больше нет. */
+/* Заголовок-поле: имя колонки как placeholder; при вводе оно «всплывает»
+   мини-меткой над полем. Отдельной строки фильтров под шапкой нет. */
 .dt-th-cell {
     display: flex;
     align-items: center;
     gap: 2px;
     padding-right: 6px; /* зазор под ручку ресайза справа */
+}
+
+.dt-th-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+}
+
+/* Всплывающая мини-метка имени колонки: лежит в запасе сверху над полем.
+   Анимируется ТОЛЬКО transform/opacity — без reflow в скролл-таблице. */
+.dt-th-floatlabel {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: -10px;
+    font-size: 10px;
+    line-height: 11px;
+    font-weight: 700;
+    color: var(--primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(3px);
+    transform-origin: left top;
+    transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.dt-th-field--float .dt-th-floatlabel {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .dt-th-filter {
@@ -103,6 +155,10 @@
 
 .dt-th-clear:hover {
     color: var(--error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dt-th-floatlabel { transition: none; }
 }
 
 /* Ресайз колонок */
