@@ -245,12 +245,19 @@ class FRValidationRepository(BaseRepository):
             [(sort_by, sort_dir)] if sort_by is not None else []
         )
         order_parts: list[str] = []
+        sort_cols: list[str] = []
         for column, direction in specs:
             if column not in ALLOWED_COLUMNS:
                 raise ValueError(f"Недопустимая колонка сортировки: {column}")
+            sort_cols.append(column)
             order_parts.append(
                 f"{column} {'DESC' if str(direction).lower() == 'desc' else 'ASC'}"
             )
+        # Завершающий стабильный ключ id — детерминированный порядок равных строк
+        # между запросами COUNT/страниц в server-mode (LIMIT/OFFSET). Без него
+        # ничьи по неуникальным колонкам могли бы «прыгать» на границах страниц.
+        if order_parts and "id" not in sort_cols:
+            order_parts.append("id ASC")
         order_by = (
             "ORDER BY " + ", ".join(order_parts) if order_parts else "ORDER BY id"
         )

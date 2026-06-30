@@ -204,3 +204,34 @@ class TestSearchFiltered:
         sql = mock_conn.fetch.call_args[0][0]
         assert "ORDER BY metric_code ASC" in sql
         assert "id DESC" not in sql
+
+    async def test_order_by_appends_stable_id_tiebreak(self, repo, mock_conn):
+        """К ORDER BY добавляется завершающий id ASC — детерминированная пагинация."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={},
+            sort=[("metric_code", "desc")],
+            limit=10,
+            offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "ORDER BY metric_code DESC, id ASC" in sql
+
+    async def test_id_tiebreak_not_duplicated_when_already_sorted(self, repo, mock_conn):
+        """Если id уже в наборе сортировки — повторный id ASC не добавляется."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={},
+            sort=[("id", "desc")],
+            limit=10,
+            offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "ORDER BY id DESC" in sql
+        assert "id ASC" not in sql
