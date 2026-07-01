@@ -58,7 +58,7 @@ export class CkFinResConfig {
             // (код метрики вплотную к названию) → поручения → системное.
             order: [
                 'id',
-                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'neg_finder_tb_id', 'pocket', 'rev_start_dt', 'rev_end_dt', 'inspection_name',
+                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'neg_finder_tb_id',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
                 'metric_code', 'metric_name', 'metric_element_counts', 'metric_amount_rubles', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
@@ -79,13 +79,13 @@ export class CkFinResConfig {
                   pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
                 { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
             ]},
-            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
+            { key: 'inspection_name', label: 'Наименование проверки', type: 'text' },
             { key: 'pocket', label: 'Карман', type: 'text' },
             { row: [
                 { key: 'rev_start_dt', label: 'Начало ревизуемого периода', type: 'date' },
                 { key: 'rev_end_dt', label: 'Конец ревизуемого периода', type: 'date' },
             ]},
-            { key: 'inspection_name', label: 'Наименование проверки', type: 'text' },
+            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         ]},
         // 2. Процесс и владельцы — без «Кармана» и «Вида риска».
         { section: 'Процесс и владельцы', key: 'process', fields: [
