@@ -1,9 +1,9 @@
 /**
  * Оркестратор generic-таблицы: рендер только ВИДИМЫХ колонок, фильтр прямо в
- * заголовке-поле (имя колонки всплывает мини-меткой при вводе), сортировка по
- * клику (норм. → возр. → убыв. → норм.) с подсветкой колонки и мультисортировкой
- * по Shift/Ctrl+клик (приоритет показан номером), ресайз колонок, обрезка+поповер,
- * выделение строки, пагинация. Источник данных — DataSource (client/server).
+ * заголовке-поле (имя колонки всплывает мини-меткой при вводе), НАКАПЛИВАЮЩАЯ
+ * мультисортировка по клику (каждый клик добавляет колонку в набор; цикл колонки
+ * возр. → убыв. → убрать; приоритет показан номером), подсветка колонки, ресайз,
+ * обрезка+поповер, выделение строки, пагинация. Источник — DataSource (client/server).
  */
 import { filterRows, sortRowsMulti, paginate } from './datatable-logic.js';
 import { attachColumnResize } from './column-resize.js';
@@ -89,10 +89,10 @@ export class DataTable {
     const sortBtn = document.createElement('button');
     sortBtn.type = 'button';
     sortBtn.className = 'dt-th-sort';
-    sortBtn.title = 'Клик — сортировка; Shift/Ctrl+клик — добавить колонку к сортировке';
+    sortBtn.title = 'Клик добавляет колонку к сортировке (клики накапливаются)';
     sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
-    // Обычный клик — одиночная сортировка; Shift/Ctrl/⌘+клик — мультисортировка.
-    sortBtn.addEventListener('click', (e) => this.setSort(col.key, e.shiftKey || e.ctrlKey || e.metaKey));
+    // Клик накапливает колонки в наборе сортировки (без модификаторов).
+    sortBtn.addEventListener('click', () => this.setSort(col.key));
 
     // Позиция колонки в наборе сортировки (−1 — не участвует) и её направление.
     const si = this._sort.findIndex(s => s.key === col.key);
@@ -183,24 +183,16 @@ export class DataTable {
     this._scheduleBody();
   }
 
-  // Обычный клик — одиночная сортировка по колонке (сбрасывает остальные),
-  // цикл нормальный → возр. → убыв. → нормальный. Shift/Ctrl+клик — добавление
-  // колонки к набору; на уже входящей в набор колонке цикл возр. → убыв. → убрать.
-  // Порядок asc-first и Shift как модификатор — де-факто стандарт data-grid
-  // (AG-Grid/TanStack/MUI).
-  setSort(key, append = false) {
+  // Клик по сортировке НАКАПЛИВАЕТ колонки: новая колонка добавляется в конец
+  // набора (её приоритет — порядок кликов), повторные клики по уже входящей
+  // колонке крутят её цикл возр. → убыв. → убрать. Модификаторы не нужны —
+  // «нажал одну, затем вторую» даёт составную сортировку (напр. по ID, затем по
+  // дате). Полный сброс набора — через «Очистить фильтры» (clearFilters).
+  setSort(key) {
     const i = this._sort.findIndex(s => s.key === key);
-    if (append) {
-      if (i === -1) this._sort.push({ key, dir: 'asc' });
-      else if (this._sort[i].dir === 'asc') this._sort[i].dir = 'desc';
-      else this._sort.splice(i, 1);
-    } else if (this._sort.length === 1 && i === 0) {
-      // та же единственная колонка: продолжаем 3-позиционный цикл
-      if (this._sort[0].dir === 'asc') this._sort = [{ key, dir: 'desc' }];
-      else this._sort = [];
-    } else {
-      this._sort = [{ key, dir: 'asc' }];
-    }
+    if (i === -1) this._sort.push({ key, dir: 'asc' });              // добавить колонку в набор
+    else if (this._sort[i].dir === 'asc') this._sort[i].dir = 'desc'; // возр. → убыв.
+    else this._sort.splice(i, 1);                                     // убыв. → убрать из набора
     this._page = 1;
     this.render();
   }

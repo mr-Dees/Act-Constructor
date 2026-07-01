@@ -27,30 +27,28 @@ test('одиночная сортировка по клику: норм → во
   assert.deepEqual(dt._sort, []);
 });
 
-test('переключение на другую колонку всегда начинает с возрастания', () => {
-  const dt = makeTable();
-  dt.setSort('name');
-  dt.setSort('name'); // desc
-  dt.setSort('id'); // другая колонка → одиночная asc (сбрасывает остальные)
-  assert.deepEqual(dt._sort, [{ key: 'id', dir: 'asc' }]);
-});
-
-test('мультисортировка: Shift-добавление вторичной колонки, цикл asc → desc → убрать', () => {
+test('клик по второй колонке НАКАПЛИВАЕТ её в наборе (без модификаторов)', () => {
   const dt = makeTable();
   dt.setSort('name'); // [name asc]
-  dt.setSort('id', true); // append → [name asc, id asc]
+  dt.setSort('id');   // + id → [name asc, id asc]
   assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }, { key: 'id', dir: 'asc' }]);
-  dt.setSort('id', true); // id asc → desc
-  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }, { key: 'id', dir: 'desc' }]);
-  dt.setSort('id', true); // id desc → убрать из набора (остальные сохраняют порядок)
-  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }]);
 });
 
-test('обычный клик при мультисортировке сбрасывает набор к одной колонке', () => {
+test('смена направления ведущей колонки сохраняет накопленный набор и порядок', () => {
   const dt = makeTable();
-  dt.setSort('name');
-  dt.setSort('id', true); // [name, id]
-  dt.setSort('name'); // обычный клик → одиночная сортировка по name (asc)
+  dt.setSort('name'); // [name asc]
+  dt.setSort('id');   // [name asc, id asc]
+  dt.setSort('name'); // name asc → desc, id и порядок сохраняются
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'desc' }, { key: 'id', dir: 'asc' }]);
+});
+
+test('колонка проходит цикл возр → убыв → убрать; остальные держат порядок', () => {
+  const dt = makeTable();
+  dt.setSort('name'); // [name asc]
+  dt.setSort('id');   // [name asc, id asc]
+  dt.setSort('id');   // id asc → desc
+  assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }, { key: 'id', dir: 'desc' }]);
+  dt.setSort('id');   // id desc → убрать из набора
   assert.deepEqual(dt._sort, [{ key: 'name', dir: 'asc' }]);
 });
 
@@ -58,7 +56,7 @@ test('сброс фильтров обнуляет и сортировку', () 
   const dt = makeTable();
   dt.setFilter('name', 'abc');
   dt.setSort('id');
-  dt.setSort('name', true); // мультисортировка активна
+  dt.setSort('name'); // накопленный набор [id, name]
   dt.clearFilters();
   assert.deepEqual(dt._filters, {});
   assert.deepEqual(dt._sort, []);
