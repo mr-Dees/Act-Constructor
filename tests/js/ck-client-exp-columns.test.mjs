@@ -32,6 +32,16 @@ test('metric_unic_clients присутствует как колонка с alig
   assert.equal(col.align, 'right');
 });
 
+test('служебные колонки ID/Создано/Изменено скрыты по умолчанию; Изменено присутствует', () => {
+  const cols = CkClientExpConfig.columns;
+  const upd = cols.find(c => c.key === 'updated_at');
+  assert.ok(upd, 'нет колонки updated_at');
+  assert.equal(upd.label, 'Изменено');
+  for (const k of ['id', 'created_at', 'updated_at']) {
+    assert.equal(cols.find(c => c.key === k).hidden, true, `${k} должна быть hidden по умолчанию`);
+  }
+});
+
 test('ТБ форматируется через terbanks', () => {
   const tb = CkClientExpConfig.columns.find(c => c.key === 'neg_finder_tb_id');
   assert.equal(tb.label, 'ТБ');

@@ -10,7 +10,7 @@ export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Финансовый Результат';
-    static storageKey = 'ck:ck-fin-res:view:v1';
+    static storageKey = 'ck:ck-fin-res:view:v2';
     static sectionStateKey = 'ck:ck-fin-res:form-sections:v2';
     static workingSetCap = 1000;
 
@@ -39,8 +39,10 @@ export class CkFinResConfig {
     static get columns() {
         return buildColumns(this.fields, {
             extra: [
-                { key: 'id', label: 'ID', type: 'id', width: 60 },
-                { key: 'created_at', label: 'Создано', type: 'date', format: (v) => CkFinResConfig.formatDate(v) },
+                // Служебные колонки скрыты по умолчанию (hidden) — включаются из панели видимости.
+                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true },
+                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
+                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
             ],
@@ -63,7 +65,7 @@ export class CkFinResConfig {
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
                 'metric_code', 'metric_name', 'metric_element_counts', 'metric_amount_rubles', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
-                'reestr_metric_id', 'created_at',
+                'reestr_metric_id', 'created_at', 'updated_at',
             ],
         });
     }
@@ -114,7 +116,8 @@ export class CkFinResConfig {
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
             { row: [
                 { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
-                { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
+                { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0,
+                  description: 'Сумма выявленных возможностей финансового результата банка' },
             ]},
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },

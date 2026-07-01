@@ -7,7 +7,7 @@ export class TableViewState {
   /**
    * @param {Object} opts
    * @param {string} opts.storageKey ключ localStorage (включает версию схемы)
-   * @param {Array} opts.columns массив колонок {key, width}
+   * @param {Array} opts.columns массив колонок {key, width, hidden?}
    * @param {Object} [opts.storage] хранилище (по умолчанию window.localStorage)
    */
   constructor({ storageKey, columns, storage }) {
@@ -15,7 +15,10 @@ export class TableViewState {
     this._order = columns.map(c => c.key);
     this._defaultWidth = Object.fromEntries(columns.map(c => [c.key, c.width]));
     this._storage = storage || (typeof window !== 'undefined' ? window.localStorage : null);
-    this._hidden = new Set();
+    // Колонки с флагом hidden:true скрыты по умолчанию (напр. служебные ID/Создано/Изменено);
+    // пользователь может включить их через панель видимости, состояние тогда осядет в localStorage.
+    this._defaultHidden = new Set(columns.filter(c => c.hidden).map(c => c.key));
+    this._hidden = new Set(this._defaultHidden);
     this._widths = {};
     this._load();
   }
@@ -68,7 +71,7 @@ export class TableViewState {
   getWidth(key) { return this._widths[key] != null ? this._widths[key] : this._defaultWidth[key]; }
   setWidth(key, px) { this._widths[key] = Math.round(px); this._save(); }
 
-  resetToDefault() { this._hidden = new Set(); this._widths = {}; this._save(); }
+  resetToDefault() { this._hidden = new Set(this._defaultHidden); this._widths = {}; this._save(); }
 }
 
 if (typeof window !== 'undefined') window.TableViewState = TableViewState;

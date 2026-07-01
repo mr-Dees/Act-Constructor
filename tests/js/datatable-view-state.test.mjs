@@ -64,3 +64,20 @@ test('resetToDefault сбрасывает видимость и ширины', (
   assert.deepEqual(s.getVisibleKeys(), ['a', 'b', 'c']);
   assert.equal(s.getWidth('b'), 100);
 });
+
+test('колонка с hidden:true скрыта по умолчанию; включается вручную', () => {
+  const cols = [{ key: 'a', width: 100 }, { key: 'b', width: 100, hidden: true }, { key: 'c', width: 100 }];
+  const s = new TableViewState({ storageKey: 'ck:test:view:hid', columns: cols, storage: fakeStorage() });
+  assert.deepEqual(s.getVisibleKeys(), ['a', 'c']); // b скрыта по умолчанию
+  s.setVisible('b', true);
+  assert.deepEqual(s.getVisibleKeys(), ['a', 'b', 'c']);
+});
+
+test('resetToDefault возвращает hidden-по-умолчанию, а не «всё видимо»', () => {
+  const cols = [{ key: 'a', width: 100 }, { key: 'b', width: 100, hidden: true }];
+  const s = new TableViewState({ storageKey: 'ck:test:view:hid2', columns: cols, storage: fakeStorage() });
+  s.setVisible('b', true);
+  assert.deepEqual(s.getVisibleKeys(), ['a', 'b']);
+  s.resetToDefault();
+  assert.deepEqual(s.getVisibleKeys(), ['a']); // b снова скрыта
+});
