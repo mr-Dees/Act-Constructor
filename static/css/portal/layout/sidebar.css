@@ -156,7 +156,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing) var(--spacing-2xl); /* немного шире по высоте: между прежним md и зажатым sm */
+    padding: 12px var(--spacing-2xl); /* высота пункта ≈ высоте футера (кнопка AI-ассистента) */
     color: var(--text-secondary);
     text-decoration: none;
     transition: all var(--duration-fast);
@@ -250,7 +250,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing) var(--spacing-2xl);
+    padding: 12px var(--spacing-2xl); /* тот же паддинг, что у пунктов навигации */
     height: 100%;
     width: 100%;
     box-sizing: border-box;
