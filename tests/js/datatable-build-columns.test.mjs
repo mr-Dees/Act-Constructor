@@ -43,6 +43,11 @@ test('order переупорядочивает колонки', () => {
   assert.equal(cols[1].key, 'metric_code');
 });
 
+test('description поля пробрасывается в колонку (для tooltip)', () => {
+  const cols = buildColumns([{ key: 'x', label: 'X', type: 'number', description: 'Полное описание X' }]);
+  assert.equal(cols.find(c => c.key === 'x').description, 'Полное описание X');
+});
+
 test('ширина по типу из DEFAULT_WIDTHS, поле.width перекрывает', () => {
   const cols = buildColumns([
     { key: 'd', label: 'D', type: 'date' },

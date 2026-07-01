@@ -32,6 +32,7 @@ function toColumn(field) {
     align: alignFor(type),
     width: field.width != null ? field.width : (DEFAULT_WIDTHS[type] || DEFAULT_WIDTHS.text),
     longText: type === 'textarea',
+    description: field.description, // полное описание для tooltip (undefined — нет)
   };
 }
 

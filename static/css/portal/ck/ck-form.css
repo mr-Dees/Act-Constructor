@@ -45,6 +45,13 @@
     color: var(--error);
 }
 
+/* Поле с расширенным описанием: подсказка по наведению (title) + визуальный намёк. */
+.ck-form__label--described {
+    cursor: help;
+    text-decoration: underline dotted var(--text-tertiary);
+    text-underline-offset: 2px;
+}
+
 .ck-form__input,
 .ck-form__select,
 .ck-form__textarea {

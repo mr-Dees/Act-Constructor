@@ -275,6 +275,10 @@ export class CkForm {
         const label = document.createElement('label');
         label.className = 'ck-form__label';
         label.textContent = field.label;
+        if (field.description) {
+            label.title = field.description; // подсказка по наведению — полное описание поля
+            label.classList.add('ck-form__label--described');
+        }
         if (field.required) {
             const req = document.createElement('span');
             req.className = 'required';

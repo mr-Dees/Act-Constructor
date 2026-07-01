@@ -69,13 +69,14 @@ export class DataTable {
     const floatLabel = document.createElement('span');
     floatLabel.className = 'dt-th-floatlabel';
     floatLabel.textContent = col.label;
+    floatLabel.title = col.description || col.label;
     floatLabel.setAttribute('aria-hidden', 'true');
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'dt-th-filter';
     input.placeholder = col.label; // имя колонки видно, пока поле пустое
-    input.title = col.label;
+    input.title = col.description || col.label; // hover по заголовку — полное описание, если задано
     input.value = this._filters[col.key] || '';
     input.setAttribute('aria-label', `Фильтр по колонке: ${col.label}`);
 
