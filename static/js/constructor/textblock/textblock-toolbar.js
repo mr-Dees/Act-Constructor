@@ -525,12 +525,15 @@ export function normalizeFontSizes(textBlocks, palette) {
         Math.abs(cur - px) < Math.abs(best - px) ? cur : best);
     let changed = false;
     let count = 0;
-    const tmp = document.createElement('div');
+    // #3: инертный <template> — тело парсится без загрузки ресурсов, поэтому
+    // сохранённый ранее <img onerror> из content НЕ исполняется (stored-XSS в
+    // обход DOMPurify). Живой div.innerHTML запустил бы onerror сразу.
+    const tmp = document.createElement('template');
     for (const tb of Object.values(textBlocks)) {
         if (!tb || typeof tb.content !== 'string' || !tb.content) continue;
         tmp.innerHTML = tb.content;
         let blockChanged = false;
-        tmp.querySelectorAll('[style*="font-size"]').forEach(el => {
+        tmp.content.querySelectorAll('[style*="font-size"]').forEach(el => {
             const raw = el.style.fontSize;
             const px = parseFloat(raw);
             // Нормализуем только px; em/%/pt оставляем как есть.
