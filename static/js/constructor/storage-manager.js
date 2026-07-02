@@ -160,6 +160,17 @@ export class StorageManager {
     static _quotaEscalationInFlight = false;
 
     /**
+     * #5: «об эскалации quota→БД уже уведомили» — постоянный флаг, гасит спам
+     * success-тостов при СЕРИИ переполнений (каждая правка крупного акта снова
+     * переполняет LS → снова эскалация). Сбрасывается, когда обычная запись
+     * снимка в localStorage снова проходит (вернулись в норму) — тогда будущее
+     * переполнение уведомит заново.
+     * @private
+     * @type {boolean}
+     */
+    static _quotaEscalationNotified = false;
+
+    /**
      * Инициализация менеджера хранилища
      *
      * НЕ восстанавливает состояние автоматически.
@@ -616,6 +627,9 @@ export class StorageManager {
             // Сохранение данных + чистка снимков других актов и legacy-ключей
             localStorage.setItem(this._snapshotKey(actId), stateJson);
             this._purgeForeignSnapshots(actId);
+            // #5: запись снимка прошла — вернулись в норму, «взводим» право на
+            // повторное уведомление о будущей эскалации.
+            this._quotaEscalationNotified = false;
 
             // 🔧При сохранении в localStorage меняем ТОЛЬКО флаг несохраненных изменений
             // Флаг синхронизации с БД НЕ трогаем
@@ -691,9 +705,10 @@ export class StorageManager {
     /**
      * B-3: аварийная эскалация при переполнении localStorage (паттерн
      * server-fallback + eviction). Снимок в LS записать не удалось → форс-PUT
-     * текущего акта в БД (надёжный носитель, в обход _saveInFlight) →
-     * removeSnapshot освобождает LS. При неудаче БД — critical + предложение
-     * экспортировать акт. fire-and-forget: не блокирует синхронный saveState
+     * текущего акта в БД (надёжный носитель; #11: сериализован с периодическим
+     * PUT через _saveInFlight) → removeSnapshot освобождает LS. При неудаче БД —
+     * critical + предложение экспортировать акт. #5: success-тост — один раз на
+     * серию переполнений. fire-and-forget: не блокирует синхронный saveState
      * (его зовёт и beforeunload).
      * @private
      */
@@ -708,9 +723,15 @@ export class StorageManager {
         APIClient.forceSaveToDb(actId)
             .then(() => {
                 this.removeSnapshot(actId); // eviction: освободить LS
-                Notifications.success(
-                    'Локальное хранилище переполнено — изменения сохранены в базу данных.'
-                );
+                // #5: тост только один раз на серию переполнений — иначе крупный
+                // акт спамил бы «сохранено в БД» на каждую правку. Флаг сбросится,
+                // когда обычная запись снимка в LS снова пройдёт (вернулись в норму).
+                if (!this._quotaEscalationNotified) {
+                    this._quotaEscalationNotified = true;
+                    Notifications.success(
+                        'Локальное хранилище переполнено — изменения сохранены в базу данных.'
+                    );
+                }
             })
             .catch((err) => {
                 console.error('B-3: аварийное сохранение в БД не удалось:', err);
