@@ -605,13 +605,16 @@ export function footnoteOffsetForBlock(textBlockId) {
     };
     walk(state.treeData);
     let offset = 0;
-    const tmp = document.createElement('div');
+    // #3: инертный <template> — сохранённый в content <img onerror> не грузится
+    // и не исполняется (stored-XSS в обход DOMPurify). Живой div.innerHTML
+    // запустил бы onerror прямо при подсчёте офсета сносок.
+    const tmp = document.createElement('template');
     for (const id of order) {
         if (id === textBlockId) break;
         const tb = state.textBlocks[id];
         if (!tb || typeof tb.content !== 'string') continue;
         tmp.innerHTML = tb.content;
-        tmp.querySelectorAll('.text-footnote').forEach((el) => {
+        tmp.content.querySelectorAll('.text-footnote').forEach((el) => {
             const t = el.getAttribute('data-footnote-text');
             if (t && t.trim()) offset += 1;
         });
@@ -646,24 +649,34 @@ export function validateLinkUrl(raw) {
         return { ok: true, url: value };
     }
     const schemeMatch = value.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
-    if (!schemeMatch) {
-        // Схемы нет — частый кейс «www.example.com», подставляем https://.
-        return { ok: true, url: 'https://' + value };
+    // #9: одно двоеточие ещё не схема. 'example.com:8443' / 'localhost:8080' —
+    // это host:port, а не URL-схема (regex ловит '.'/'-' в имени схемы). Считаем
+    // схемой, только если за ':' идёт '//' (authority) ЛИБО это известная схема
+    // (в т.ч. без '//': mailto/tel/file, а также опасные — их важно опознать и
+    // заблокировать). Иначе трактуем как schemeless и подставляем https://.
+    if (schemeMatch) {
+        const scheme = schemeMatch[1].toLowerCase();
+        const hasAuthority = value.slice(schemeMatch[0].length).startsWith('//');
+        const isKnown = ALLOWED_LINK_SCHEMES.has(scheme) || DANGEROUS_LINK_SCHEMES.has(scheme);
+        if (hasAuthority || isKnown) {
+            if (DANGEROUS_LINK_SCHEMES.has(scheme)) {
+                return {
+                    ok: false,
+                    message: 'Недопустимая схема ссылки (javascript/data/vbscript заблокированы)',
+                };
+            }
+            if (ALLOWED_LINK_SCHEMES.has(scheme)) {
+                return { ok: true, url: value };
+            }
+            return {
+                ok: false,
+                message: `Схема «${scheme}:» не поддерживается. Разрешены http, https, mailto, tel, ftp, file и якоря «#…».`,
+            };
+        }
     }
-    const scheme = schemeMatch[1].toLowerCase();
-    if (DANGEROUS_LINK_SCHEMES.has(scheme)) {
-        return {
-            ok: false,
-            message: 'Недопустимая схема ссылки (javascript/data/vbscript заблокированы)',
-        };
-    }
-    if (ALLOWED_LINK_SCHEMES.has(scheme)) {
-        return { ok: true, url: value };
-    }
-    return {
-        ok: false,
-        message: `Схема «${scheme}:» не поддерживается. Разрешены http, https, mailto, tel, ftp, file и якоря «#…».`,
-    };
+    // Схемы нет (или это host:port) — частый кейс «www.example.com»/«host:8080»,
+    // подставляем https://.
+    return { ok: true, url: 'https://' + value };
 }
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.
