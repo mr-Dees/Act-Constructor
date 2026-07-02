@@ -9,6 +9,22 @@ from fastapi import FastAPI
 logger = logging.getLogger("audit_workstation.domains.acts.lifecycle")
 
 
+async def _clear_font_bounds_cache(app: FastAPI) -> None:
+    """Сбрасывает @lru_cache границ размера шрифта текстблока (B-35, #2).
+
+    Кэш мог заполниться ФОЛБЭК-дефолтами (8..72) ещё на импорте формата: схема
+    TextBlockFormattingSchema инстанцируется в ``_build_domain`` ДО регистрации
+    ActsSettings в реестре, а её валидатор дёргает ``_textblock_font_bounds``.
+    Startup-хуки исполняются уже после заполнения settings_registry — сбрасываем
+    кэш, чтобы валидатор перечитал реальные ACTS__TEXTBLOCKS__FONT_SIZE_*.
+    Без этого env-границы игнорировались бы (UI разрешал бы размер, а PUT
+    /content отклонял его по устаревшим дефолтам).
+    """
+    from app.domains.acts.schemas.act_content import _textblock_font_bounds
+    _textblock_font_bounds.cache_clear()
+    logger.info("Кэш границ размера шрифта текстблока сброшен на старте")
+
+
 def register_lifespan_hooks() -> None:
     """
     Регистрирует startup/shutdown hooks домена актов в общем реестре.
@@ -91,6 +107,9 @@ def register_lifespan_hooks() -> None:
 
     register_startup_hook("acts.expired_locks_cleanup", _start_expired_locks_cleanup)
     register_shutdown_hook("acts.expired_locks_cleanup", _stop_expired_locks_cleanup)
+
+    # #2: сброс кэша границ размера шрифта — после регистрации ActsSettings.
+    register_startup_hook("acts.font_bounds_cache_clear", _clear_font_bounds_cache)
 
 
 def get_executor() -> ThreadPoolExecutor:
