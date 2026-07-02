@@ -40,9 +40,12 @@ export class DataSource {
   get total() { return this._total; }
   getAllRows() { return this._all; }
 
-  async fetchServerPage({ filters, sort, page }) {
-    const offset = (Math.max(1, page) - 1) * this._pageSize;
-    const res = await this._fetchPage({ filters, sort, limit: this._pageSize, offset });
+  async fetchServerPage({ filters, sort, page, pageSize }) {
+    // Единый источник размера страницы — DataTable (передаёт свой pageSize).
+    // Ctor-значение остаётся fallback'ом, чтобы offset/limit не расходились.
+    const size = pageSize || this._pageSize || this._cap;
+    const offset = (Math.max(1, page) - 1) * size;
+    const res = await this._fetchPage({ filters, sort, limit: size, offset });
     this._total = res.total;
     return res;
   }

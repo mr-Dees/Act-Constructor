@@ -141,6 +141,26 @@
     background: color-mix(in srgb, var(--primary) 7%, var(--bg-primary));
 }
 
+/* Диапазон дат в заголовке — два компактных инпута «от/до» друг под другом
+   (в узкой ячейке горизонтально не помещаются). */
+.dt-th-range {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.dt-th-range .dt-th-filter {
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+/* Select-фильтр для checkbox-колонки (Все/Да/Нет). */
+.dt-th-select {
+    cursor: pointer;
+}
+
 .dt-th-sort,
 .dt-th-clear {
     flex-shrink: 0;

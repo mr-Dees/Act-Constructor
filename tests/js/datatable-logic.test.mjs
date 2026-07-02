@@ -1,32 +1,89 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterRows, sortRows, sortRowsMulti, paginate } from '../../static/js/shared/datatable/datatable-logic.js';
+import {
+  filterRows, sortRows, sortRowsMulti, paginate, specMatches, compareBy,
+} from '../../static/js/shared/datatable/datatable-logic.js';
 
+// Канон фильтра — СЫРЬЁ. filterMap = dict[colKey → FilterSpec].
 const columns = [
-  { key: 'tb', type: 'dictionary', format: (v, d) => (d.tb || {})[v] || String(v) },
-  { key: 'sum', type: 'number', format: v => Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2 }) },
+  { key: 'tb', type: 'dictionary' },   // сырое — id (число/строка)
+  { key: 'sum', type: 'number' },      // сырое — число
   { key: 'name', type: 'text' },
+  { key: 'dt', type: 'date' },
 ];
-const dicts = { tb: { 1: 'ВВБ', 2: 'ЦА' } };
 const rows = [
-  { id: 1, tb: 1, sum: 1234.5, name: 'Альфа' },
-  { id: 2, tb: 2, sum: 98000, name: 'Бета' },
+  { id: 1, tb: 1, sum: 1234.5, name: 'Альфа', dt: '2025-02-01' },
+  { id: 2, tb: 2, sum: 98000, name: 'Бета', dt: '2025-05-10' },
 ];
 
-test('фильтр по отображаемому значению справочника', () => {
-  assert.deepEqual(filterRows(rows, columns, { tb: 'ввб' }, dicts).map(r => r.id), [1]);
+test('specMatches contains — по сырому тексту', () => {
+  assert.equal(specMatches('Альфа', { op: 'contains', value: 'льф' }), true);
+  assert.equal(specMatches('Альфа', { op: 'contains', value: 'бет' }), false);
+  assert.equal(specMatches('x', { op: 'contains', value: '' }), true); // пустой — не режет
 });
 
-test('фильтр по форматированному числу', () => {
-  assert.deepEqual(filterRows(rows, columns, { sum: '1 234' }, dicts).map(r => r.id), [1]);
+test('specMatches eq — точное равенство', () => {
+  assert.equal(specMatches(true, { op: 'eq', value: 'true' }), true);
+  assert.equal(specMatches(false, { op: 'eq', value: 'true' }), false);
+  assert.equal(specMatches('a', { op: 'eq', value: '' }), true); // пустой — не режет
 });
 
-test('несколько фильтров комбинируются по И', () => {
-  assert.deepEqual(filterRows(rows, columns, { tb: 'ц', name: 'бет' }, dicts).map(r => r.id), [2]);
+test('specMatches in — членство по сырому id; пустой массив → совпадений нет', () => {
+  assert.equal(specMatches(1, { op: 'in', values: ['1', '14'] }), true);
+  assert.equal(specMatches(2, { op: 'in', values: ['1', '14'] }), false);
+  assert.equal(specMatches(1, { op: 'in', values: [] }), false); // in:[] → ничего не совпадает
 });
 
-test('пустой фильтр не режет', () => {
-  assert.equal(filterRows(rows, columns, { name: '' }, dicts).length, 2);
+test('specMatches range date — включительно от/до', () => {
+  const s = { op: 'range', cast: 'date', from: '2025-03-01', to: '2025-06-01' };
+  assert.equal(specMatches('2025-05-10', s), true);
+  assert.equal(specMatches('2025-02-01', s), false);
+  assert.equal(specMatches('2025-06-01', { op: 'range', cast: 'date', to: '2025-06-01' }), true);
+});
+
+test('specMatches range numeric — только нижняя граница', () => {
+  const s = { op: 'range', cast: 'numeric', from: '1000' };
+  assert.equal(specMatches(1234.5, s), true);
+  assert.equal(specMatches(500, s), false);
+});
+
+test('filterRows: словарь по сырому id (op in)', () => {
+  assert.deepEqual(filterRows(rows, columns, { tb: { op: 'in', values: ['1'] } }).map(r => r.id), [1]);
+});
+
+test('filterRows: число по подстроке сырого значения', () => {
+  assert.deepEqual(filterRows(rows, columns, { sum: { op: 'contains', value: '1234' } }).map(r => r.id), [1]);
+});
+
+test('filterRows: дата-диапазон', () => {
+  const out = filterRows(rows, columns, { dt: { op: 'range', cast: 'date', from: '2025-04-01', to: '2025-12-31' } });
+  assert.deepEqual(out.map(r => r.id), [2]);
+});
+
+test('filterRows: несколько фильтров комбинируются по И', () => {
+  const out = filterRows(rows, columns, {
+    tb: { op: 'in', values: ['2'] },
+    name: { op: 'contains', value: 'бет' },
+  });
+  assert.deepEqual(out.map(r => r.id), [2]);
+});
+
+test('filterRows: пустой набор/пустые спеки не режут', () => {
+  assert.equal(filterRows(rows, columns, { name: { op: 'contains', value: '' } }).length, 2);
+  assert.equal(filterRows(rows, columns, {}).length, 2);
+});
+
+test('compareBy: id сортируется ЧИСЛЕННО (не 1,10,2)', () => {
+  const data = [{ id: 2 }, { id: 10 }, { id: 1 }];
+  const col = { key: 'id', type: 'id' };
+  const out = data.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
+  assert.deepEqual(out, [1, 2, 10]);
+});
+
+test('compareBy: дата — хронологически', () => {
+  const col = { key: 'dt', type: 'date' };
+  const out = rows.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
+  assert.deepEqual(out, [1, 2]); // 2025-02-01 < 2025-05-10
 });
 
 test('сортировка чисел по убыванию', () => {
@@ -44,7 +101,6 @@ test('мультисортировка: вторичный ключ разреш
     { id: 3, grp: 2, name: 'В' },
   ];
   const cols = { grp: { key: 'grp', type: 'number' }, name: { key: 'name', type: 'text' } };
-  // grp по возрастанию; внутри grp=1 — name по возрастанию (А раньше Б) → 2,1; затем grp=2 → 3
   const out = sortRowsMulti(data, [
     { column: cols.grp, dir: 'asc' },
     { column: cols.name, dir: 'asc' },
