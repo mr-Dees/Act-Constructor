@@ -23,6 +23,16 @@ function alignFor(type) {
   return 'left';
 }
 
+/**
+ * Приводит ширину поля к числу (px). Строковые значения вида '140px' парсятся;
+ * при невалидном/отсутствующем значении — дефолт по типу колонки.
+ * Так строковые ширины из конфига не долетают до колонки (форма читает сырой field.width отдельно).
+ */
+function toNum(width, type) {
+  const n = typeof width === 'number' ? width : parseInt(width, 10);
+  return Number.isNaN(n) ? (DEFAULT_WIDTHS[type] || DEFAULT_WIDTHS.text) : n;
+}
+
 function toColumn(field) {
   const type = field.type || 'text';
   return {
@@ -30,7 +40,7 @@ function toColumn(field) {
     label: field.label,
     type,
     align: alignFor(type),
-    width: field.width != null ? field.width : (DEFAULT_WIDTHS[type] || DEFAULT_WIDTHS.text),
+    width: toNum(field.width, type),
     longText: type === 'textarea',
     description: field.description, // полное описание для tooltip (undefined — нет)
   };
@@ -59,7 +69,8 @@ export function flattenFields(fields) {
  * @param {Array} fields массив полей; элемент — секция {section,fields}, {row:[...]} или поле
  * @param {Object} [opts] {extra, overrides, order}
  * @param {Array} [opts.extra] read-only колонки, добавляемые впереди
- * @param {Object} [opts.overrides] перекрытия по ключу колонки (label/align/format/...)
+ * @param {Object} [opts.overrides] перекрытия по ключу колонки (label/align/format/filterResolve/...).
+ *   Любое поле override спредится в колонку — так словарный `filterResolve` из конфига долетает как и `format`.
  * @param {string[]} [opts.order] явный порядок колонок по ключам
  * @returns {ColumnDef[]}
  */

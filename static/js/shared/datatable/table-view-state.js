@@ -28,10 +28,23 @@ export class TableViewState {
       const raw = this._storage && this._storage.getItem(this._key);
       if (!raw) return;
       const data = JSON.parse(raw);
-      if (!data || data.v !== 1) return;
-      if (Array.isArray(data.visible)) {
-        const vis = new Set(data.visible);
-        this._hidden = new Set(this._order.filter(k => !vis.has(k)));
+      if (!data || data.v !== 2) return; // старое (v1) / битое состояние — остаёмся на дефолте
+      if (Array.isArray(data.hidden) && Array.isArray(data.known)) {
+        // Персист хранит СКРЫТЫЕ ключи + снимок всех известных ключей (`known`) на момент сохранения.
+        // Для колонок, что были в снимке, уважаем сохранённое решение (скрыта ↔ в `hidden`).
+        // Для новых колонок (которых в снимке не было) берём их дефолт из `_defaultHidden`:
+        // так новая default-visible колонка показывается, а новая hidden:true — прячется.
+        const savedHidden = new Set(data.hidden);
+        const known = new Set(data.known);
+        const hidden = new Set();
+        for (const k of this._order) {
+          if (known.has(k)) {
+            if (savedHidden.has(k)) hidden.add(k);
+          } else if (this._defaultHidden.has(k)) {
+            hidden.add(k);
+          }
+        }
+        this._hidden = hidden;
       }
       if (data.widths && typeof data.widths === 'object') this._widths = { ...data.widths };
     } catch {
@@ -41,9 +54,12 @@ export class TableViewState {
 
   _save() {
     if (!this._storage) return;
-    const visible = this._order.filter(k => !this._hidden.has(k));
+    const hidden = this._order.filter(k => this._hidden.has(k));
     try {
-      this._storage.setItem(this._key, JSON.stringify({ v: 1, visible, widths: this._widths }));
+      this._storage.setItem(
+        this._key,
+        JSON.stringify({ v: 2, hidden, known: [...this._order], widths: this._widths }),
+      );
     } catch {
       /* переполнение квоты — игнорируем */
     }
@@ -63,8 +79,13 @@ export class TableViewState {
   }
 
   setAllVisible(on) {
-    if (on) this._hidden = new Set();
-    else this._hidden = new Set(this._order.slice(1)); // оставить первую колонку
+    if (on) {
+      this._hidden = new Set();
+    } else {
+      // Оставляем первую ВИДИМУЮ-ПО-УМОЛЧАНИЮ колонку (не служебную hidden:true).
+      const keep = this._order.find(k => !this._defaultHidden.has(k)) ?? this._order[0];
+      this._hidden = new Set(this._order.filter(k => k !== keep));
+    }
     this._save();
   }
 

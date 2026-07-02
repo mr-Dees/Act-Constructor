@@ -56,3 +56,33 @@ test('ширина по типу из DEFAULT_WIDTHS, поле.width перек�
   assert.equal(cols[0].width, DEFAULT_WIDTHS.date);
   assert.equal(cols[1].width, 333);
 });
+
+test('#1 строковая ширина «140px» приводится к числу', () => {
+  const cols = buildColumns([{ key: 's', label: 'S', type: 'text', width: '140px' }]);
+  const c = cols.find(x => x.key === 's');
+  assert.strictEqual(c.width, 140);
+  assert.equal(typeof c.width, 'number');
+});
+
+test('#1 невалидная/битая ширина → дефолт по типу', () => {
+  const cols = buildColumns([
+    { key: 'x', label: 'X', type: 'date', width: 'abc' },
+    { key: 'y', label: 'Y', type: 'number', width: undefined },
+  ]);
+  assert.equal(cols.find(c => c.key === 'x').width, DEFAULT_WIDTHS.date);
+  assert.equal(cols.find(c => c.key === 'y').width, DEFAULT_WIDTHS.number);
+});
+
+test('#2 filterResolve пробрасывается в колонку через overrides (как format)', () => {
+  const resolve = (q) => [String(q)];
+  const cols = buildColumns(fields, { overrides: { metric_code: { filterResolve: resolve } } });
+  const c = cols.find(x => x.key === 'metric_code');
+  assert.equal(typeof c.filterResolve, 'function');
+  assert.deepEqual(c.filterResolve('7', {}), ['7']);
+});
+
+test('#2 filterResolve пробрасывается на extra-колонке', () => {
+  const resolve = () => ['x'];
+  const cols = buildColumns(fields, { extra: [{ key: 'id', label: 'ID', type: 'id', filterResolve: resolve }] });
+  assert.equal(typeof cols.find(c => c.key === 'id').filterResolve, 'function');
+});
