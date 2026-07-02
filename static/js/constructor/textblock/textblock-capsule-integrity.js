@@ -293,8 +293,13 @@ Object.assign(TextBlockManager.prototype, {
                     if (n.nodeType === 3 && n.data === guardChar) needGuardRestore = true;
                 });
             } else if (rec.type === 'attributes') {
-                // contenteditable сброшен с капсулы.
+                // contenteditable сброшен с капсулы → чиним. НО пропускаем
+                // капсулу в режиме inline-правки (#1): enableInlineEditing по
+                // двойному клику НАМЕРЕННО ставит contenteditable='true' + класс
+                // 'editing-mode'; откат на 'false' убил бы правку текста
+                // ссылки/сноски (focus попадал бы в уже не редактируемый span).
                 if (this._isCapsule(rec.target) &&
+                        !rec.target.classList.contains('editing-mode') &&
                         rec.target.getAttribute('contenteditable') !== 'false') {
                     capsulesToFix.push(rec.target);
                 }
