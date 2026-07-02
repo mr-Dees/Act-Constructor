@@ -18,6 +18,13 @@ function normNumeric(s) {
   return String(s).replace(/\s+/g, '').replace(',', '.');
 }
 
+/** ISO 'YYYY-MM-DD' → 'DD.MM.YYYY' (без Date — без TZ-сюрпризов). */
+function fmtDate(iso) {
+  if (!iso) return '';
+  const p = String(iso).split('-');
+  return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : String(iso);
+}
+
 export class DataTable {
   /**
    * @param {Object} opts
@@ -47,6 +54,7 @@ export class DataTable {
     this._debounce = null;
     this._reqSeq = 0;
     this._tbody = null;
+    this._openDatePopover = null; // открытый попап фильтра даты (оверлей на body)
   }
 
   _visibleColumns() {
@@ -82,6 +90,12 @@ export class DataTable {
     const t = (to || '').trim();
     if (!f && !t) return null;
     return { op: 'range', cast: 'date', from: f || null, to: t || null };
+  }
+
+  /** FilterSpec точной даты (Дата СЗ). null → нет фильтра. */
+  _specFromSingleDate(v) {
+    const s = (v || '').trim();
+    return s ? { op: 'eq', value: s } : null;
   }
 
   _setFilterSpec(key, spec) {
@@ -126,8 +140,9 @@ export class DataTable {
     const built = this._buildFilterControl(col);
     const { control } = built;
 
-    // date/checkbox не имеют внятного placeholder — имя колонки показываем всегда.
-    const floatAlways = col.type === 'date' || col.type === 'checkbox';
+    // checkbox не имеет внятного placeholder — имя колонки показываем всегда.
+    // date показывает имя прямо в триггере, пока фильтр пуст (floatAlways не нужен).
+    const floatAlways = col.type === 'checkbox';
     const syncFilter = () => {
       const filled = built.isFilled();
       field.classList.toggle('dt-th-field--float', filled || floatAlways);
@@ -186,31 +201,50 @@ export class DataTable {
     const box = { onChange: () => {} };
 
     if (col.type === 'date') {
-      const wrap = document.createElement('div');
-      wrap.className = 'dt-th-range';
-      const from = document.createElement('input');
-      from.type = 'date';
-      from.className = 'dt-th-filter dt-th-range-from';
-      from.setAttribute('aria-label', `Фильтр от: ${col.label}`);
-      const to = document.createElement('input');
-      to.type = 'date';
-      to.className = 'dt-th-filter dt-th-range-to';
-      to.setAttribute('aria-label', `Фильтр до: ${col.label}`);
-      const st = this._filterText[col.key] || {};
-      from.value = st.from || '';
-      to.value = st.to || '';
-      const onInput = () => {
-        this._filterText[col.key] = { from: from.value, to: to.value };
-        this._setFilterSpec(col.key, this._specFromRange(from.value, to.value));
-        box.onChange();
+      // Компактный триггер в одну строку (шапка не растягивается); клик открывает
+      // маленький попап-оверлей. Одно поле «Дата» для dateFilter:'single' (Дата СЗ)
+      // либо «С»/«По» для диапазона. Активный фильтр показан фразой в триггере.
+      const single = col.dateFilter === 'single';
+      const container = document.createElement('div');
+      container.className = 'dt-th-datewrap';
+
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'dt-th-filter dt-th-datebtn';
+      trigger.setAttribute('aria-haspopup', 'dialog');
+      trigger.setAttribute('aria-label', `Фильтр по дате: ${col.label}`);
+
+      const updateTrigger = () => {
+        const st = this._filterText[col.key];
+        let phrase = '';
+        if (single) {
+          phrase = typeof st === 'string' && st ? fmtDate(st) : '';
+        } else if (st && (st.from || st.to)) {
+          if (st.from && st.to) phrase = `${fmtDate(st.from)} – ${fmtDate(st.to)}`;
+          else if (st.from) phrase = `от ${fmtDate(st.from)}`;
+          else phrase = `до ${fmtDate(st.to)}`;
+        }
+        trigger.textContent = phrase || col.label;
+        trigger.classList.toggle('dt-th-datebtn--empty', !phrase);
       };
-      from.addEventListener('input', onInput);
-      to.addEventListener('input', onInput);
-      wrap.appendChild(from);
-      wrap.appendChild(to);
-      box.control = wrap;
-      box.isFilled = () => { const s = this._filterText[col.key] || {}; return !!(s.from || s.to); };
-      box.clearControl = () => { from.value = ''; to.value = ''; this._filterText[col.key] = { from: '', to: '' }; };
+      updateTrigger();
+
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openDateFilter(col, trigger, box, updateTrigger, single);
+      });
+
+      container.appendChild(trigger);
+      box.control = container;
+      box.isFilled = () => {
+        const st = this._filterText[col.key];
+        return single ? !!(typeof st === 'string' && st) : !!(st && (st.from || st.to));
+      };
+      box.clearControl = () => {
+        this._filterText[col.key] = single ? '' : { from: '', to: '' };
+        updateTrigger();
+        this._closeDateFilter();
+      };
       return box;
     }
 
@@ -255,8 +289,128 @@ export class DataTable {
     return box;
   }
 
+  /**
+   * Открывает попап фильтра даты под триггером (оверлей на body — не растягивает
+   * шапку и не обрезается overflow'ом таблицы). single → одно поле «Дата» (eq),
+   * иначе «С»/«По» (range). Применение — по вводу; закрытие — клик вне / Escape.
+   */
+  _openDateFilter(col, anchor, box, updateTrigger, single) {
+    this._closeDateFilter();
+    const pop = document.createElement('div');
+    pop.className = 'dt-date-popover';
+    pop.setAttribute('role', 'dialog');
+
+    const st = this._filterText[col.key];
+    const mkRow = (labelText, value) => {
+      const row = document.createElement('div');
+      row.className = 'dt-date-row';
+      const lab = document.createElement('label');
+      lab.textContent = labelText;
+      const inp = document.createElement('input');
+      inp.type = 'date';
+      inp.className = 'dt-date-input';
+      inp.value = value || '';
+      row.appendChild(lab);
+      row.appendChild(inp);
+      pop.appendChild(row);
+      return inp;
+    };
+
+    let firstInput;
+    if (single) {
+      const inp = mkRow('Дата', typeof st === 'string' ? st : '');
+      firstInput = inp;
+      const apply = () => {
+        this._filterText[col.key] = inp.value;
+        this._setFilterSpec(col.key, this._specFromSingleDate(inp.value));
+        updateTrigger();
+        box.onChange();
+      };
+      inp.addEventListener('input', apply);
+      inp.addEventListener('change', apply);
+    } else {
+      const s = st || {};
+      const fromInp = mkRow('С', s.from);
+      const toInp = mkRow('По', s.to);
+      firstInput = fromInp;
+      const apply = () => {
+        this._filterText[col.key] = { from: fromInp.value, to: toInp.value };
+        this._setFilterSpec(col.key, this._specFromRange(fromInp.value, toInp.value));
+        updateTrigger();
+        box.onChange();
+      };
+      for (const el of [fromInp, toInp]) {
+        el.addEventListener('input', apply);
+        el.addEventListener('change', apply);
+      }
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'dt-date-actions';
+    const clr = document.createElement('button');
+    clr.type = 'button';
+    clr.className = 'dt-date-clear';
+    clr.textContent = 'Очистить';
+    clr.addEventListener('click', () => {
+      this._filterText[col.key] = single ? '' : { from: '', to: '' };
+      this._setFilterSpec(col.key, null);
+      updateTrigger();
+      box.onChange();
+      this._closeDateFilter();
+    });
+    actions.appendChild(clr);
+    pop.appendChild(actions);
+
+    document.body.appendChild(pop);
+    // Позиционирование под триггером (fixed — без учёта скролла) с зажатием в вьюпорт.
+    const rect = anchor.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.top = `${rect.bottom + 2}px`;
+    pop.style.left = `${rect.left}px`;
+    const margin = 8;
+    const pr = pop.getBoundingClientRect();
+    if (pr.right > window.innerWidth - margin) { // не вылезать за правый край
+      pop.style.left = `${Math.max(margin, window.innerWidth - margin - pr.width)}px`;
+    }
+    if (pr.bottom > window.innerHeight - margin && rect.top - pr.height - 2 > 0) {
+      pop.style.top = `${rect.top - pr.height - 2}px`; // не помещается снизу — флип вверх
+    }
+
+    const onDocMouseDown = (e) => {
+      if (pop.contains(e.target) || anchor.contains(e.target)) return;
+      this._closeDateFilter();
+    };
+    const onKeydown = (e) => { if (e.key === 'Escape') this._closeDateFilter(); };
+    // Скролл/ресайз уводят триггер от fixed-попапа — просто закрываем (надёжнее
+    // репозиционирования). Capture:true ловит скролл и внутренних контейнеров (.dt-wrapper).
+    const onScrollResize = () => this._closeDateFilter();
+    // Отложенная подписка, чтобы текущий клик по триггеру не закрыл попап сразу.
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', onDocMouseDown, true);
+      document.addEventListener('keydown', onKeydown, true);
+      window.addEventListener('scroll', onScrollResize, true);
+      window.addEventListener('resize', onScrollResize, true);
+      if (firstInput && firstInput.focus) firstInput.focus();
+    }, 0);
+
+    this._openDatePopover = { el: pop, onDocMouseDown, onKeydown, onScrollResize, timer };
+  }
+
+  _closeDateFilter() {
+    const p = this._openDatePopover;
+    if (!p) return;
+    clearTimeout(p.timer); // снять отложенную подписку, если закрылись до её срабатывания
+    document.removeEventListener('mousedown', p.onDocMouseDown, true);
+    document.removeEventListener('keydown', p.onKeydown, true);
+    window.removeEventListener('scroll', p.onScrollResize, true);
+    window.removeEventListener('resize', p.onScrollResize, true);
+    if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+    this._openDatePopover = null;
+  }
+
   async render() {
     clearTimeout(this._debounce); // #14: снять отложенный _renderBody, чтобы он не выстрелил после
+    this._closeDateFilter();      // перестройка шапки осиротила бы попап-оверлей даты
     const cols = this._visibleColumns();
     this._mount.innerHTML = '';
 

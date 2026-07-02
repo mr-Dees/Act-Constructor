@@ -57,7 +57,7 @@ export class CkFinResConfig {
                         .map(t => String(t.tb_id)),
                 },
                 metric_amount_rubles: { align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
-                dt_sz: { format: (v) => CkFinResConfig.formatDate(v) },
+                dt_sz: { format: (v) => CkFinResConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
                 rev_start_dt: { format: (v) => CkFinResConfig.formatDate(v) },
                 rev_end_dt: { format: (v) => CkFinResConfig.formatDate(v) },
                 execution_deadline: { format: (v) => CkFinResConfig.formatDate(v) },

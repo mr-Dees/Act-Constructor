@@ -56,7 +56,7 @@ export class CkClientExpConfig {
                         .map(t => String(t.tb_id)),
                 },
                 metric_amount_rubles: { align: 'right', format: (v) => CkClientExpConfig.formatNumber(v) },
-                dt_sz: { format: (v) => CkClientExpConfig.formatDate(v) },
+                dt_sz: { format: (v) => CkClientExpConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
             },
             // Порядок колонок повторяет порядок секций формы (без группировки в
             // таблице): идентификация → процесс → метрика (код метрики вплотную

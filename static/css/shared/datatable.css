@@ -141,18 +141,76 @@
     background: color-mix(in srgb, var(--primary) 7%, var(--bg-primary));
 }
 
-/* Диапазон дат в заголовке — два компактных инпута «от/до» друг под другом
-   (в узкой ячейке горизонтально не помещаются). */
-.dt-th-range {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+/* Датовый фильтр — компактный триггер в одну строку (шапка НЕ растягивается);
+   клик открывает попап-оверлей с полями дат. */
+.dt-th-datewrap {
     flex: 1;
     min-width: 0;
 }
 
-.dt-th-range .dt-th-filter {
-    font-size: 11px;
+.dt-th-datebtn {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dt-th-datebtn--empty {
+    color: var(--text-secondary);
+    font-weight: 600; /* имя колонки читается как заголовок, пока фильтр пуст */
+}
+
+/* Попап дат — оверлей на body (position:fixed выставляется из JS под триггером). */
+.dt-date-popover {
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 190px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.dt-date-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dt-date-row label {
+    width: 32px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.dt-date-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.dt-date-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.dt-date-clear {
+    border: none;
+    background: transparent;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 12px;
     padding: 2px 4px;
 }
 
