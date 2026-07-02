@@ -2,6 +2,8 @@
  * Компонент формы редактирования записи ЦК.
  * Рендерит поля по декларативному конфигу.
  */
+import { flattenFields } from '../../shared/datatable/build-columns.js';
+
 export class CkForm {
     static _config = null;
     static _currentRecord = null;
@@ -54,7 +56,7 @@ export class CkForm {
 
     static collectData() {
         const data = {};
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const field of fields) {
             // computed-поля приходят из VIEW JOIN на бэке — не отправляем в payload
             if (field.computed) continue;
@@ -87,22 +89,9 @@ export class CkForm {
         return data;
     }
 
-    /** Возвращает плоский список всех полей с учётом секций и row-групп. */
-    static _flattenFields() {
-        const result = [];
-        const collect = (entry) => {
-            if (!entry) return;
-            if (Array.isArray(entry.fields)) entry.fields.forEach(collect); // секция
-            else if (Array.isArray(entry.row)) { for (const sub of entry.row) result.push(sub); }
-            else result.push(entry);
-        };
-        for (const entry of this._config.fields) collect(entry);
-        return result;
-    }
-
     static validate() {
         const errors = [];
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const field of fields) {
             if (!field.required) continue;
             // computed-поля заполняются автоматически — не валидируем
@@ -430,7 +419,7 @@ export class CkForm {
     }
 
     static _populateFields(record) {
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const f of fields) {
             const el = document.getElementById(`ck-field-${f.key}`);
             if (!el) continue;
@@ -556,7 +545,7 @@ export class CkForm {
     /** Ищет конфиг поля по key (с учётом секций и row-групп). */
     static _findFieldConfig(key) {
         if (!this._config) return null;
-        return this._flattenFields().find(f => f.key === key) || null;
+        return flattenFields(this._config.fields).find(f => f.key === key) || null;
     }
 }
 

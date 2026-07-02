@@ -48,7 +48,14 @@ export class CkFinResConfig {
             ],
             overrides: {
                 metric_code: { label: 'Код метрики', type: 'text' },
-                neg_finder_tb_id: { label: 'ТБ', format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts) },
+                neg_finder_tb_id: {
+                    label: 'ТБ',
+                    format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts),
+                    // Словарный резолвер для F1-фильтра: имя ТБ → массив сырых tb_id.
+                    filterResolve: (q, dicts) => (dicts.terbanks || [])
+                        .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
+                        .map(t => String(t.tb_id)),
+                },
                 metric_amount_rubles: { align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
                 dt_sz: { format: (v) => CkFinResConfig.formatDate(v) },
                 rev_start_dt: { format: (v) => CkFinResConfig.formatDate(v) },

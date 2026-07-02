@@ -2,6 +2,7 @@ import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CkFinResConfig } from '../../static/js/portal/ck-fin-res/ck-fin-res-config.js';
+import { flattenFields } from '../../static/js/shared/datatable/build-columns.js';
 
 test('логический порядок: id первым, «Код метрики» вплотную к «Метрике»', () => {
   const keys = CkFinResConfig.columns.map(c => c.key);
@@ -47,4 +48,19 @@ test('ТБ форматируется через terbanks; длинные тек
   assert.equal(tb.label, 'ТБ');
   assert.equal(tb.format(1, { terbanks: [{ tb_id: 1, short_name: 'ВВБ' }] }), 'ВВБ');
   assert.equal(cols.find(c => c.key === 'deviation_description').longText, true);
+});
+
+test('#15: каждое поле формы присутствует среди колонок (общий flattenFields)', () => {
+  const colKeys = new Set(CkFinResConfig.columns.map(c => c.key));
+  for (const f of flattenFields(CkFinResConfig.fields)) {
+    assert.ok(colKeys.has(f.key), `поле формы ${f.key} отсутствует среди колонок`);
+  }
+});
+
+test('ТБ несёт словарный резолвер (имя ТБ → массив сырых tb_id)', () => {
+  const tb = CkFinResConfig.columns.find(c => c.key === 'neg_finder_tb_id');
+  assert.equal(tb.type, 'dictionary'); // тип сохранён → хедер-UI применит резолвер
+  assert.equal(typeof tb.filterResolve, 'function');
+  const dicts = { terbanks: [{ tb_id: 1, short_name: 'ВВБ' }, { tb_id: 14, short_name: 'СЗБ' }] };
+  assert.deepEqual(tb.filterResolve('в', dicts), ['1']);
 });

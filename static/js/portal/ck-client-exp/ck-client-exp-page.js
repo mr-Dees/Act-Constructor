@@ -133,6 +133,10 @@ export class CkClientExpPage {
     }
 
     static async _onSave() {
+        // В пустом режиме сохранять нечего — выходим до валидации,
+        // API-вызова и перезагрузки данных.
+        if (CkForm.getMode() === 'empty') return;
+
         const { valid, errors } = CkForm.validate();
         if (!valid) {
             const names = errors.map(e => e.label).join(', ');

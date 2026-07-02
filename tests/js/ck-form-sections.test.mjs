@@ -23,9 +23,14 @@ test('flattenFields совместим со старым плоским конф
   assert.deepEqual(flattenFields(flat).map(f => f.key), ['x', 'y', 'z']);
 });
 
-test('CkForm._flattenFields и _findFieldConfig учитывают секции', () => {
+test('#15: CkForm не держит собственный _flattenFields (делегирует в общий)', () => {
+  // Приватный обход удалён — форма и колонки строятся из одного flattenFields
+  // (build-columns.js), иначе поля формы и колонки таблицы могут разойтись.
+  assert.equal(CkForm._flattenFields, undefined);
+});
+
+test('CkForm._findFieldConfig учитывает секции (через общий flattenFields)', () => {
   CkForm.init({ fields: SECTIONED, dictionaries: {}, containerEl: document.createElement('div') });
-  assert.deepEqual(CkForm._flattenFields().map(f => f.key), ['a', 'b', 'c', 'd']);
   assert.equal(CkForm._findFieldConfig('c').label, 'C');
   assert.equal(CkForm._findFieldConfig('zzz'), null);
 });
