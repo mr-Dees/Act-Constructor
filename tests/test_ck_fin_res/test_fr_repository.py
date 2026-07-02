@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import date
 
 from app.core import settings_registry
 from app.domains.ck_fin_res.repositories.fr_validation_repository import (
@@ -48,59 +47,6 @@ def repo(mock_conn):
         "app.db.repositories.base.get_adapter", return_value=mock_adapter
     ):
         return FRValidationRepository(conn=mock_conn)
-
-
-# -------------------------------------------------------------------------
-# search
-# -------------------------------------------------------------------------
-
-
-class TestSearch:
-
-    async def test_no_filters(self, repo, mock_conn):
-        """Без фильтров: нет WHERE, есть ORDER BY id DESC."""
-        mock_conn.fetch.return_value = []
-        await repo.search()
-
-        query = mock_conn.fetch.call_args[0][0]
-        assert "WHERE" not in query
-        assert "ORDER BY id DESC" in query
-
-    async def test_with_date_range(self, repo, mock_conn):
-        """Фильтр по диапазону дат: dt_sz >= $1 AND dt_sz <= $2."""
-        mock_conn.fetch.return_value = []
-        await repo.search(
-            start_date=date(2025, 1, 1),
-            end_date=date(2025, 12, 31),
-        )
-
-        query = mock_conn.fetch.call_args[0][0]
-        assert "dt_sz >= $1" in query
-        assert "dt_sz <= $2" in query
-
-    async def test_with_metric_codes(self, repo, mock_conn):
-        """Фильтр по кодам метрик: metric_code IN (...)."""
-        mock_conn.fetch.return_value = []
-        await repo.search(metric_code=["FR-001", "FR-002"])
-
-        query = mock_conn.fetch.call_args[0][0]
-        assert "metric_code IN" in query
-
-    async def test_with_all_filters(self, repo, mock_conn):
-        """Все фильтры одновременно формируют корректный запрос."""
-        mock_conn.fetch.return_value = []
-        await repo.search(
-            start_date=date(2025, 1, 1),
-            end_date=date(2025, 6, 30),
-            metric_code=["FR-001"],
-            process_code=["1013"],
-        )
-
-        query = mock_conn.fetch.call_args[0][0]
-        assert "dt_sz >= $1" in query
-        assert "dt_sz <= $2" in query
-        assert "metric_code IN" in query
-        assert "process_number IN" in query
 
 
 # -------------------------------------------------------------------------
