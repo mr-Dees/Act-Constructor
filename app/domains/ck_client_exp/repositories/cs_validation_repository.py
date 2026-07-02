@@ -13,6 +13,7 @@ import asyncpg
 from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
 from app.domains.ck_client_exp.schemas.cs_validation import CSValidationView
+from app.domains.ck_client_exp.schemas.requests import FilterSpec
 from app.domains.ck_client_exp.settings import CkClientExpSettings
 
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
@@ -21,6 +22,10 @@ logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 # фильтрации (ILIKE) и сортировки (ORDER BY). Источник истины — поля схемы
 # CSValidationView; whitelist защищает от инъекций в имена колонок/ORDER BY.
 ALLOWED_COLUMNS: set[str] = set(CSValidationView.model_fields.keys())
+
+# Разрешённые типы приведения для range-фильтра. cast валидируется по этому
+# allowlist — сырое значение cast НЕ интерполируется в SQL напрямую.
+_CAST_SQL = {"date": "DATE", "numeric": "NUMERIC"}
 
 _DATE_FIELDS = {"dt_sz"}
 _NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id", "reestr_metric_id"}
@@ -51,6 +56,7 @@ _INSERT_FIELDS = (
     "reestr_metric_id",
     "neg_finder_tb_id",
     "metric_code",
+    "metric_name",
     "metric_unic_clients",
     "metric_element_counts",
     "metric_amount_rubles",
@@ -78,124 +84,83 @@ class CSValidationRepository(BaseRepository):
         self.view = self.adapter.qualify_table_name(s.cs_validation_view, s.schema_name)
 
     # ------------------------------------------------------------------
-    # ПОИСК
-    # ------------------------------------------------------------------
-
-    def _build_search_where(
-        self,
-        start_date: date | None,
-        end_date: date | None,
-        metric_code: list[str] | None,
-        process_code: list[str] | None,
-    ) -> tuple[str, list, int]:
-        """Собирает WHERE-часть SQL для поиска. Возвращает (clause, params, next_idx)."""
-        conditions: list[str] = []
-        params: list = []
-        idx = 1
-
-        if start_date is not None:
-            conditions.append(f"dt_sz >= ${idx}")
-            params.append(start_date)
-            idx += 1
-
-        if end_date is not None:
-            conditions.append(f"dt_sz <= ${idx}")
-            params.append(end_date)
-            idx += 1
-
-        if metric_code:
-            placeholders = ", ".join(f"${idx + i}" for i in range(len(metric_code)))
-            conditions.append(f"metric_code IN ({placeholders})")
-            params.extend(metric_code)
-            idx += len(metric_code)
-
-        if process_code:
-            placeholders = ", ".join(f"${idx + i}" for i in range(len(process_code)))
-            conditions.append(f"process_number IN ({placeholders})")
-            params.extend(process_code)
-            idx += len(process_code)
-
-        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        return where, params, idx
-
-    async def search(
-        self,
-        start_date: date | None = None,
-        end_date: date | None = None,
-        metric_code: list[str] | None = None,
-        process_code: list[str] | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[dict]:
-        """
-        Поиск записей CS-валидации по фильтрам.
-
-        Динамический WHERE-конструктор с параметризованными запросами.
-        Запрашивает VIEW (с вычисляемыми полями).
-        """
-        where, params, idx = self._build_search_where(
-            start_date, end_date, metric_code, process_code,
-        )
-        query = (
-            f"SELECT * FROM {self.view}{where} "
-            f"ORDER BY id DESC LIMIT ${idx} OFFSET ${idx + 1}"
-        )
-        params.extend([limit, offset])
-
-        logger.debug("Поиск CS-валидации: %s параметров", len(params))
-        rows = await self.conn.fetch(query, *params)
-        return [dict(r) for r in rows]
-
-    async def count_search(
-        self,
-        start_date: date | None = None,
-        end_date: date | None = None,
-        metric_code: list[str] | None = None,
-        process_code: list[str] | None = None,
-    ) -> int:
-        """Считает количество записей, удовлетворяющих фильтрам поиска."""
-        where, params, _ = self._build_search_where(
-            start_date, end_date, metric_code, process_code,
-        )
-        return await self.conn.fetchval(
-            f"SELECT COUNT(*) FROM {self.view}{where}",
-            *params,
-        )
-
-    # ------------------------------------------------------------------
     # ПОИСК ПО КОЛОНОЧНЫМ ФИЛЬТРАМ (настраиваемая таблица)
     # ------------------------------------------------------------------
 
     def _build_filter_where(
-        self, filters: dict[str, str] | None,
+        self, filters: dict[str, FilterSpec] | None,
     ) -> tuple[str, list, int]:
-        """Собирает WHERE из колоночных фильтров (ILIKE по whitelist).
+        """Собирает WHERE из типизированных колоночных фильтров (FilterSpec).
 
-        Учитываются только колонки из ALLOWED_COLUMNS; значения подставляются
-        bind-параметрами вида ``%значение%`` (не конкатенируются в SQL).
-        Колонка кастуется в TEXT (``CAST(col AS TEXT)``), т.к. ILIKE не
-        определён для numeric/date/bool — без каста фильтр по таким колонкам
-        падал бы с ``operator does not exist``. Совместимо с PG 9.4 / GP 6.x.
+        Учитываются только колонки из ALLOWED_COLUMNS (иначе фильтр пропускается —
+        защита от инъекции в имя колонки). Все значения подставляются
+        bind-параметрами, ``cast`` валидируется по allowlist (никакой
+        интерполяции сырого cast). Семантика по ``op`` — канон СЫРОЕ значение:
+
+        - ``contains``: ``CAST(col AS TEXT) ILIKE $i`` c параметром ``%value%``;
+          пустой ``value`` → фильтр пропускается;
+        - ``eq``: ``CAST(col AS TEXT) = $i`` c параметром ``value``; пустой
+          ``value`` → фильтр пропускается;
+        - ``in``: ``col IN ($i, ...)`` по сырым ``values``; пустой список →
+          ``1=0`` («совпадений нет»);
+        - ``range``: ``cast`` обязателен (date→DATE, numeric→NUMERIC), иначе
+          фильтр пропускается; условия собираются по наличию границ
+          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``.
+
+        CAST в TEXT нужен, т.к. ILIKE/= по тексту не определены для numeric/
+        date/bool без приведения. Совместимо с PG 9.4 / GP 6.x.
         Возвращает (clause, params, next_idx).
         """
         conditions: list[str] = []
         params: list = []
         idx = 1
-        for column, value in (filters or {}).items():
+        for column, spec in (filters or {}).items():
             if column not in ALLOWED_COLUMNS:
                 continue
-            if value is None or str(value).strip() == "":
-                continue
-            conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-            params.append(f"%{value}%")
-            idx += 1
+            op = spec.op
+            if op == "contains":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
+                params.append(f"%{value}%")
+                idx += 1
+            elif op == "eq":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"CAST({column} AS TEXT) = ${idx}")
+                params.append(value)
+                idx += 1
+            elif op == "in":
+                values = spec.values or []
+                if not values:
+                    conditions.append("1=0")
+                    continue
+                placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
+                conditions.append(f"{column} IN ({placeholders})")
+                params.extend(values)
+                idx += len(values)
+            elif op == "range":
+                cast_sql = _CAST_SQL.get(spec.cast) if spec.cast else None
+                if cast_sql is None:
+                    continue
+                lo, hi = spec.from_, spec.to
+                if lo is not None and str(lo).strip() != "":
+                    conditions.append(f"CAST({column} AS {cast_sql}) >= ${idx}")
+                    params.append(lo)
+                    idx += 1
+                if hi is not None and str(hi).strip() != "":
+                    conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
+                    params.append(hi)
+                    idx += 1
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         return where, params, idx
 
     async def search_filtered(
         self,
         *,
-        filters: dict[str, str] | None = None,
+        filters: dict[str, FilterSpec] | None = None,
         sort: list[tuple[str, str]] | None = None,
         sort_by: str | None = None,
         sort_dir: str = "asc",

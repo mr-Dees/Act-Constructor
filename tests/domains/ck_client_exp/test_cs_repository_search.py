@@ -1,7 +1,8 @@
 """Тесты серверной фильтрации/сортировки CSValidationRepository.
 
-Проверяют построение SQL (ILIKE по whitelist, ORDER BY, LIMIT, COUNT),
-bind-параметры значений и отклонение инъекции в имя колонки сортировки.
+Проверяют построение SQL по типизированному контракту FilterSpec
+(contains/eq/in/range), bind-параметры значений, allowlist-каст для range,
+ORDER BY/LIMIT/COUNT и отклонение инъекции в имя колонки сортировки.
 """
 
 import pytest
@@ -12,6 +13,7 @@ from app.domains.ck_client_exp.repositories.cs_validation_repository import (
     ALLOWED_COLUMNS,
     CSValidationRepository,
 )
+from app.domains.ck_client_exp.schemas.requests import FilterSpec
 from app.domains.ck_client_exp.settings import CkClientExpSettings
 
 
@@ -50,27 +52,28 @@ def repo(mock_conn):
 
 
 def test_allowed_columns_contains_view_fields():
-    """Whitelist содержит ключевые колонки представления."""
+    """Whitelist содержит ключевые колонки представления, включая metric_name."""
     assert "metric_code" in ALLOWED_COLUMNS
+    assert "metric_name" in ALLOWED_COLUMNS
     assert "metric_unic_clients" in ALLOWED_COLUMNS
     assert "act_sub_number" in ALLOWED_COLUMNS
     assert "id" in ALLOWED_COLUMNS
 
 
 # -------------------------------------------------------------------------
-# search_filtered
+# search_filtered — операции фильтра (FilterSpec)
 # -------------------------------------------------------------------------
 
 
-class TestSearchFiltered:
+class TestFilterOps:
 
-    async def test_builds_ilike_order_limit_and_count(self, repo, mock_conn):
-        """Фильтр+сортировка строят ILIKE/ORDER BY/LIMIT и считают total."""
+    async def test_contains_builds_ilike_and_binds_wildcards(self, repo, mock_conn):
+        """contains → CAST(col AS TEXT) ILIKE $i, параметр %value%; COUNT отдельно."""
         mock_conn.fetch.return_value = [{"id": 1}]
         mock_conn.fetchval.return_value = 1
 
         items, total = await repo.search_filtered(
-            filters={"metric_code": "CS001"},
+            filters={"metric_code": FilterSpec(op="contains", value="CS001")},
             sort_by="metric_code",
             sort_dir="desc",
             limit=50,
@@ -81,16 +84,135 @@ class TestSearchFiltered:
         assert items == [{"id": 1}]
 
         sql = mock_conn.fetch.call_args[0][0]
-        assert "ILIKE" in sql
+        assert "CAST(metric_code AS TEXT) ILIKE" in sql
         assert "ORDER BY" in sql.upper()
         assert "LIMIT" in sql.upper()
-        # COUNT отдельным запросом
         count_sql = mock_conn.fetchval.call_args[0][0]
         assert "COUNT(*)" in count_sql.upper()
+        # значение — bind-параметр %...%, не конкатенация
+        assert "%CS001%" in mock_conn.fetch.call_args[0][1:]
 
-        # Значение фильтра — bind-параметр %...%, а не конкатенация
-        bind_args = mock_conn.fetch.call_args[0][1:]
-        assert "%CS001%" in bind_args
+    async def test_contains_empty_value_skipped(self, repo, mock_conn):
+        """Пустой value у contains → фильтр пропускается (нет WHERE)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"metric_code": FilterSpec(op="contains", value="  ")},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "WHERE" not in sql
+        assert mock_conn.fetch.call_args[0][1:] == (10, 0)
+
+    async def test_eq_builds_exact_equality(self, repo, mock_conn):
+        """eq → CAST(col AS TEXT) = $i, параметр без wildcard'ов."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"is_sent_to_top_brass": FilterSpec(op="eq", value="true")},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "CAST(is_sent_to_top_brass AS TEXT) = $1" in sql
+        assert mock_conn.fetch.call_args[0][1:] == ("true", 10, 0)
+
+    async def test_eq_empty_value_skipped(self, repo, mock_conn):
+        """Пустой value у eq → фильтр пропускается."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"metric_code": FilterSpec(op="eq", value="")},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "WHERE" not in sql
+
+    async def test_in_builds_membership_with_bound_values(self, repo, mock_conn):
+        """in → col IN ($i, ...), параметры — сырые значения (для словарей)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"neg_finder_tb_id": FilterSpec(op="in", values=["1", "14"])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "neg_finder_tb_id IN ($1, $2)" in sql
+        assert mock_conn.fetch.call_args[0][1:] == ("1", "14", 10, 0)
+
+    async def test_in_empty_values_yields_no_match(self, repo, mock_conn):
+        """in с пустым values → 1=0 («совпадений нет»), без bind-параметров фильтра."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"neg_finder_tb_id": FilterSpec(op="in", values=[])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "1=0" in sql
+        assert mock_conn.fetch.call_args[0][1:] == (10, 0)
+
+    async def test_range_date_builds_both_bounds_with_date_cast(self, repo, mock_conn):
+        """range/date → CAST(col AS DATE) >= $i И <= $j по границам from/to."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={
+                "dt_sz": FilterSpec(
+                    op="range", from_="2025-01-01", to="2025-06-30", cast="date"
+                )
+            },
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "CAST(dt_sz AS DATE) >= $1" in sql
+        assert "CAST(dt_sz AS DATE) <= $2" in sql
+        assert mock_conn.fetch.call_args[0][1:] == (
+            "2025-01-01", "2025-06-30", 10, 0,
+        )
+
+    async def test_range_numeric_only_lower_bound(self, repo, mock_conn):
+        """range/numeric с одной границей → единственное условие CAST ... NUMERIC >=."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={
+                "metric_amount_rubles": FilterSpec(
+                    op="range", from_="100", cast="numeric"
+                )
+            },
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "CAST(metric_amount_rubles AS NUMERIC) >= $1" in sql
+        assert "<=" not in sql
+        assert mock_conn.fetch.call_args[0][1:] == ("100", 10, 0)
+
+    async def test_range_without_cast_skipped(self, repo, mock_conn):
+        """range без cast → фильтр пропускается (нет интерполяции сырого cast)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"dt_sz": FilterSpec(op="range", from_="2025-01-01", to="2025-06-30")},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "WHERE" not in sql
 
     async def test_unknown_filter_column_ignored(self, repo, mock_conn):
         """Колонка не из whitelist в фильтрах игнорируется."""
@@ -98,29 +220,37 @@ class TestSearchFiltered:
         mock_conn.fetchval.return_value = 0
 
         await repo.search_filtered(
-            filters={"evil; DROP TABLE x": "y", "metric_code": "CS"},
-            sort_by=None,
-            sort_dir="asc",
-            limit=10,
-            offset=0,
+            filters={
+                "evil; DROP TABLE x": FilterSpec(op="contains", value="y"),
+                "metric_code": FilterSpec(op="contains", value="CS"),
+            },
+            limit=10, offset=0,
         )
 
         sql = mock_conn.fetch.call_args[0][0]
         assert "evil" not in sql
         assert "CAST(metric_code AS TEXT) ILIKE" in sql
 
-    async def test_filter_casts_column_to_text(self, repo, mock_conn):
-        """Фильтр кастует колонку в TEXT (ILIKE не определён для numeric/date/bool)."""
+    async def test_contains_casts_column_to_text(self, repo, mock_conn):
+        """contains кастует колонку в TEXT (ILIKE не определён для numeric/date/bool)."""
         mock_conn.fetch.return_value = []
         mock_conn.fetchval.return_value = 0
 
         await repo.search_filtered(
-            filters={"metric_amount_rubles": "100"},
-            sort_by=None, sort_dir="asc", limit=10, offset=0,
+            filters={"metric_amount_rubles": FilterSpec(op="contains", value="100")},
+            limit=10, offset=0,
         )
 
         sql = mock_conn.fetch.call_args[0][0]
         assert "CAST(metric_amount_rubles AS TEXT) ILIKE" in sql
+
+
+# -------------------------------------------------------------------------
+# search_filtered — сортировка/пагинация
+# -------------------------------------------------------------------------
+
+
+class TestSortAndPaging:
 
     async def test_empty_filters_no_where_default_order(self, repo, mock_conn):
         """Без фильтров: нет WHERE, дефолтный ORDER BY id."""
@@ -152,7 +282,7 @@ class TestSearchFiltered:
         mock_conn.fetchval.return_value = 0
 
         await repo.search_filtered(
-            filters={"metric_code": "CS"},
+            filters={"metric_code": FilterSpec(op="contains", value="CS")},
             sort_by=None,
             sort_dir="asc",
             limit=25,

@@ -1,9 +1,30 @@
 """Схемы запросов домена ЦК Клиентский опыт."""
 
-from datetime import date
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class FilterSpec(BaseModel):
+    """Типизированный фильтр одной колонки (канон — СЫРОЕ значение, адаптация под тип).
+
+    Операции:
+    - ``contains`` — подстрока по сырому тексту (``value``);
+    - ``in`` — членство по сырым значениям (``values``); для словарных колонок
+      клиент резолвит имя→id заранее, пустой ``values`` означает «совпадений нет»;
+    - ``range`` — диапазон по сырому с приведением типа (``cast`` ∈ {date, numeric},
+      границы ``from``/``to``);
+    - ``eq`` — точное равенство по сырому тексту (``value``).
+    """
+
+    op: Literal["contains", "in", "range", "eq"]
+    value: Optional[str] = None
+    values: Optional[list[str]] = None
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    cast: Optional[Literal["date", "numeric"]] = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SortSpec(BaseModel):
@@ -14,15 +35,11 @@ class SortSpec(BaseModel):
 
 
 class ValidationSearchRequest(BaseModel):
-    """Параметры поиска записей CS-валидации."""
+    """Параметры поиска записей CS-валидации (колоночные фильтры + сортировка)."""
 
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    metric_code: list[str] = Field(default_factory=list)
-    process_code: list[str] = Field(default_factory=list)
-    # Колоночные фильтры: {имя колонки → подстрока}. Имена валидируются против
+    # Колоночные фильтры: {имя колонки → FilterSpec}. Имена валидируются против
     # whitelist в репозитории (защита от инъекций в ORDER BY/имена колонок).
-    filters: dict[str, str] = Field(default_factory=dict)
+    filters: dict[str, FilterSpec] = Field(default_factory=dict)
     sort_by: Optional[str] = None
     sort_dir: Literal["asc", "desc"] = "asc"
     # Многоколоночная сортировка по приоритету (перекрывает sort_by/sort_dir,
@@ -32,14 +49,3 @@ class ValidationSearchRequest(BaseModel):
     # клампит limit), поэтому жёсткого потолка в схеме нет.
     limit: int = Field(default=50, ge=1)
     offset: int = Field(default=0, ge=0)
-
-    @model_validator(mode="after")
-    def validate_date_range(self):
-        """Проверяет корректность диапазона дат."""
-        if (
-            self.start_date is not None
-            and self.end_date is not None
-            and self.end_date < self.start_date
-        ):
-            raise ValueError("end_date не может быть раньше start_date")
-        return self
