@@ -182,6 +182,35 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private Первый значимый узел ТЕКУЩЕЙ визуальной строки каретки. Строки
+     * блока разделены <br> (Enter). В отличие от _firstSignificantChild (первый
+     * ребёнок всего блока) уважает строку, на которой стоит каретка — иначе Home
+     * на 3-й строке телепортировал бы к капсуле 1-й строки (#12).
+     * @param {Range} range collapsed-каретка
+     * @param {HTMLElement} editor
+     * @returns {Node|null}
+     */
+    _currentLineFirstNode(range, editor) {
+        // Поднимаемся к прямому ребёнку editor, в котором стоит каретка.
+        let node = range.startContainer;
+        if (node === editor) {
+            node = editor.childNodes[range.startOffset] || editor.lastChild;
+        } else {
+            while (node && node.parentNode && node.parentNode !== editor) {
+                node = node.parentNode;
+            }
+        }
+        if (!node) return null;
+        // Назад до <br> (конец предыдущей строки) или до начала блока.
+        while (node.previousSibling && node.previousSibling.nodeName !== 'BR') {
+            node = node.previousSibling;
+        }
+        // Пропускаем пустые/guard-узлы в начале строки → первый значимый.
+        while (this._isInsignificantText(node)) node = node.nextSibling;
+        return node;
+    },
+
+    /**
      * @private Снимает caret-guard'ы: чистые U+FEFF-узлы удаляет, а U+FEFF
      * ВНУТРИ текста с реальными символами (guard, в который успели напечатать)
      * срезает, сохраняя текст. Идемпотентно. U+200B (якорь размера) не трогает.
@@ -425,14 +454,17 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         this.normalizeMarkers(editor);
+        // Наследуем форматирование на новые маркеры (как при ручном создании).
+        // #14: ДО saveContent — иначе унаследованный размер вставленной ссылки
+        // мутируется только в живом DOM и не попадает в сериализованный content
+        // до blur (paste не ставит saveTimeout → flushActiveEditor — no-op).
+        this.applyFormattingToNewNodes(editor);
         this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
         // BUG-4: навешиваем ПОЛНЫЙ набор обработчиков (tooltip/contextmenu/
         // dblclick/клик-каретка) на вставленные маркеры сразу. Иначе ссылка из
         // Word оживала (наведение/редактирование) только при следующем фокусе —
         // перезаход на шаг, перезагрузка или клик в другое поле и обратно.
         this.attachLinkFootnoteHandlers();
-        // Наследуем форматирование на новые маркеры (как при ручном создании).
-        this.applyFormattingToNewNodes(editor);
         this._toggleEmptyClass(editor);
     },
 
@@ -666,8 +698,10 @@ Object.assign(TextBlockManager.prototype, {
         const range = sel.getRangeAt(0);
 
         if (e.key === 'Home') {
-            // Строка начинается капсулой → каретка перед ней (в guard).
-            const first = this._firstSignificantChild(editor);
+            // ТЕКУЩАЯ визуальная строка начинается капсулой → каретка перед ней
+            // (в guard). Берём первый узел строки каретки, а не всего блока (#12):
+            // иначе Home на строке-N прыгал бы к капсуле строки 1.
+            const first = this._currentLineFirstNode(range, editor);
             if (this._isCapsule(first)) {
                 e.preventDefault();
                 this._placeCaretBesideMarker(first, false);
