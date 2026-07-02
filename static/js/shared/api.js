@@ -48,6 +48,14 @@ export class APIClient {
      */
     static _saveInFlight = false;
 
+    /**
+     * #11: промис завершения текущего PUT /content. forceSaveToDb (аварийная
+     * quota-эскалация) дожидается его перед своим PUT, чтобы не разъехаться с
+     * периодическим сохранением (сервер — last-writer-wins без версии). null,
+     * когда обычного PUT в полёте нет.
+     */
+    static _saveInFlightPromise = null;
+
     static async lockAct(actId) {
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/lock`), {
@@ -559,9 +567,11 @@ export class APIClient {
             // при несинхронизированных правках (см. StorageManager.saveState).
             setTimeout(() => {
                 window.StorageManager.enableTracking();
-                if (fontNorm.changed) {
+                if (fontNorm.changed && !AppConfig.readOnlyMode.isReadOnly) {
                     // 6.4: нормализация изменила content — теперь, когда tracking
                     // снова включён, помечаем акт несохранённым (автосейв персистит).
+                    // #4: НЕ в read-only — у зрителя нет прав на PUT (иначе фоновый
+                    // автосейв бил бы в 403), а нормализация в БД всё равно не уйдёт.
                     window.StorageManager.markAsUnsaved();
                 }
                 if (draftRestored) {
@@ -715,6 +725,9 @@ export class APIClient {
             return null;
         }
         APIClient._saveInFlight = true;
+        // #11: публикуем промис завершения — forceSaveToDb на него дождётся.
+        let _resolveSave;
+        APIClient._saveInFlightPromise = new Promise((r) => { _resolveSave = r; });
 
         try {
             // Блокируем отслеживание на время сохранения
@@ -825,6 +838,8 @@ export class APIClient {
             throw err;
         } finally {
             APIClient._saveInFlight = false;
+            APIClient._saveInFlightPromise = null;
+            if (_resolveSave) _resolveSave();
             // Включаем отслеживание обратно
             setTimeout(() => {
                 window.StorageManager.enableTracking();
@@ -833,11 +848,12 @@ export class APIClient {
     }
 
     /**
-     * B-3: форс-PUT текущего акта в БД в обход localStorage и гарда _saveInFlight.
-     * Вызывается ТОЛЬКО из аварийной эскалации StorageManager при переполнении
-     * localStorage: снимок записать не удалось, единственный носитель правок —
-     * память, надо немедленно зафиксировать в БД. Бросает ошибку наверх БЕЗ
-     * собственного toast (решение об UX принимает вызывающий StorageManager).
+     * B-3: форс-PUT текущего акта в БД в обход localStorage. Вызывается ТОЛЬКО из
+     * аварийной эскалации StorageManager при переполнении localStorage: снимок
+     * записать не удалось, единственный носитель правок — память, надо немедленно
+     * зафиксировать в БД. #11: с обычным периодическим PUT сериализуется через
+     * _saveInFlight (дожидается in-flight, затем держит гард). Бросает ошибку
+     * наверх БЕЗ собственного toast (решение об UX принимает StorageManager).
      * @param {number} actId
      * @returns {Promise<Object>} ответ PUT
      * @throws {Error|LockLostError}
@@ -847,28 +863,43 @@ export class APIClient {
         if (!username) {
             throw new Error('Пользователь не авторизован');
         }
-        // flush+сериализация одной воронкой (B-16); _saveInFlight сознательно НЕ
-        // трогаем — обычный PUT мог быть в полёте, но quota-эскалация важнее дедупа.
-        const data = window.StorageManager.exportActData();
-        data.saveType = 'manual';
-        data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
-
-        const resp = await this._fetchWithTimeout(
-            AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`),
-            {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
+        // #11: сериализуемся с обычным (периодическим) PUT. Дожидаемся его
+        // завершения, затем ДЕРЖИМ _saveInFlight на время своего PUT — новый
+        // периодический saveActContent тогда сам себя пропустит (гард in-flight),
+        // и два PUT не разъедутся на last-writer-wins без версии на сервере.
+        while (APIClient._saveInFlight && APIClient._saveInFlightPromise) {
+            try {
+                await APIClient._saveInFlightPromise;
+            } catch {
+                /* чужой PUT упал — не наша забота, продолжаем аварийное сохранение */
             }
-        );
-        if (!resp.ok) {
-            if (resp.status === 409) throw new LockLostError();
-            throw new Error(`Аварийное сохранение в БД не удалось (HTTP ${resp.status})`);
         }
-        const result = await resp.json();
-        if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
-        window.StorageManager.markAsSyncedWithDB();
-        return result;
+        APIClient._saveInFlight = true;
+        try {
+            // flush+сериализация одной воронкой (B-16).
+            const data = window.StorageManager.exportActData();
+            data.saveType = 'manual';
+            data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
+
+            const resp = await this._fetchWithTimeout(
+                AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`),
+                {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                }
+            );
+            if (!resp.ok) {
+                if (resp.status === 409) throw new LockLostError();
+                throw new Error(`Аварийное сохранение в БД не удалось (HTTP ${resp.status})`);
+            }
+            const result = await resp.json();
+            if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
+            window.StorageManager.markAsSyncedWithDB();
+            return result;
+        } finally {
+            APIClient._saveInFlight = false;
+        }
     }
 
     /**
