@@ -1,5 +1,6 @@
 """Тесты inline HTML → docx runs."""
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
@@ -141,6 +142,93 @@ def test_block_paragraph_tag_breaks(doc):
     p = _add_p(doc)
     apply_inline_html(p, "<p>раз</p><p>два</p>", base_size_pt=12)
     assert _count_breaks(p) == 1
+
+
+def test_empty_block_div_single_break(doc):
+    """#6: <div><br></div> между блоками = ОДНА пустая строка, а не две.
+
+    Граница блока и placeholder-<br> внутри пустого <div> — один визуальный
+    разрыв: раньше считались оба (перенос границы + перенос <br>) → лишняя
+    пустая строка в DOCX. Ждём 2 переноса на «a / (пусто) / b»."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<div>a</div><div><br></div><div>b</div>", base_size_pt=12)
+    full = "".join(r.text for r in p.runs)
+    assert "a" in full and "b" in full
+    assert _count_breaks(p) == 2
+
+
+def test_multiple_empty_block_divs_preserved(doc):
+    """#6: несколько пустых блоков-строк сохраняются (НЕ схлопываются в одну).
+
+    Пользователь может намеренно вставить 2+ пустых строки — у каждого пустого
+    блока своя граница-перенос, поэтому «a / пусто / пусто / b» = 3 переноса."""
+    p = _add_p(doc)
+    apply_inline_html(
+        p, "<div>a</div><div><br></div><div><br></div><div>b</div>", base_size_pt=12
+    )
+    assert _count_breaks(p) == 3
+
+
+def test_soft_break_inside_block_still_breaks(doc):
+    """#6-регресс: настоящий <br> ВНУТРИ непустого блока остаётся переносом.
+
+    <div>b<br>c</div> после предыдущего блока: граница блока + реальный мягкий
+    перенос между b и c = 2 переноса (не должен быть съеден как placeholder)."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<div>a</div><div>b<br>c</div>", base_size_pt=12)
+    full = "".join(r.text for r in p.runs)
+    assert "b" in full and "c" in full
+    assert _count_breaks(p) == 2
+
+
+def test_zero_width_size_anchor_stripped(doc):
+    """#8: U+200B (якорь размера из applyFontSize) не утекает в <w:t>."""
+    zwsp = chr(0x200B)
+    p = _add_p(doc)
+    apply_inline_html(p, "до" + zwsp + "после", base_size_pt=12)
+    full = "".join(r.text for r in p.runs)
+    assert zwsp not in full
+    assert full == "допосле"
+
+
+def _direct_text_runs(p):
+    """Прямые w:r параграфа с непустым текстом (без runs внутри w:hyperlink)."""
+    out = []
+    for r in p._p.findall(qn("w:r")):
+        t = r.find(qn("w:t"))
+        if t is not None and t.text:
+            out.append(t.text)
+    return out
+
+
+def test_nbsp_applied_before_footnote_after_word_under_justify(doc):
+    """BUG-3: под justify пробел перед словом-якорем сноски становится NBSP —
+    номер сноски «прилипает» к слову. Базовый (рабочий) сценарий не сломан."""
+    p = _add_p(doc)
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    apply_inline_html(
+        p,
+        'Слово <span class="text-footnote" data-footnote-text="прим">якорь</span>',
+        base_size_pt=12,
+    )
+    joined = "".join(_direct_text_runs(p))
+    assert chr(0xA0) in joined  # неразрывный пробел поставлен
+
+
+def test_nbsp_not_applied_when_footnote_follows_link(doc):
+    """#7-регресс: сноска сразу за ссылкой — прямой run ПЕРЕД ссылкой НЕ должен
+    получить NBSP (он к сноске не примыкает, runs ссылки лежат в w:hyperlink)."""
+    p = _add_p(doc)
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    apply_inline_html(
+        p,
+        'Смотри <span class="text-link" data-link-url="https://e.com">тут</span>'
+        '<span class="text-footnote" data-footnote-text="прим">якорь</span>',
+        base_size_pt=12,
+    )
+    # Прямой текст "Смотри " не тронут: обычный пробел, не NBSP.
+    smotri = next(t for t in _direct_text_runs(p) if "Смотри" in t)
+    assert chr(0xA0) not in smotri
 
 
 def test_break_preserves_inline_formatting(doc):

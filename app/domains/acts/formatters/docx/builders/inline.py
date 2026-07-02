@@ -97,6 +97,10 @@ class _InlineParser(HTMLParser):
         # BUG-3: последний run параграфа на момент открытия footnote-span —
         # ориентир, чтобы strip хвостового пробела якоря не задел предыдущий run.
         self._footnote_run_before: OxmlElement | None = None
+        # #6: перенос-граница блока (<div>/<p>) уже поставлен, а следующий <br>
+        # может быть placeholder'ом пустого блока (<div><br></div>) — тогда его
+        # НЕ дублируем. Флаг сбрасывается на первом же реальном контенте/переносе.
+        self._boundary_break_pending = False
 
     @property
     def state(self) -> _RunState:
@@ -126,13 +130,15 @@ class _InlineParser(HTMLParser):
             # закрывающий </b> снял бы лишний кадр вместо bold-фрейма и
             # текст после </b> остался бы жирным (H7). </br>, если придёт,
             # игнорируется в handle_endtag.
-            self._add_break()
+            self._handle_br()
         elif tag in _BLOCK_TAGS:
             # Граница блока = перенос строки. Перед содержимым нового блока
             # вставляем перенос, но НЕ перед первым (guard по _produced_output).
             # Кадр пушим — парный close-tag снимет его в handle_endtag (len>1).
             if self._produced_output:
                 self._add_break()
+                # #6: перенос уже стоит; placeholder-<br> пустого блока не дублируем.
+                self._boundary_break_pending = True
             self.stack.append(current)
         else:
             self.stack.append(current)
@@ -140,7 +146,7 @@ class _InlineParser(HTMLParser):
     def handle_startendtag(self, tag, attrs):
         """Обрабатывает self-closing теги вида <br/>."""
         if tag == "br":
-            self._add_break()
+            self._handle_br()
         else:
             self.handle_starttag(tag, attrs)
             self.handle_endtag(tag)
@@ -205,9 +211,11 @@ class _InlineParser(HTMLParser):
     def _add_run(self, text: str) -> None:
         # Защита (гибрид Варианта 2): caret-guard'ы (U+FEFF) — рантайм-only во
         # фронте и стрипаются при сохранении; на случай рассинхрона срезаем их и
-        # из DOCX-текста, чтобы невидимый символ не утёк в Word.
-        if "\uFEFF" in text:
-            text = text.replace("\uFEFF", "")
+        # из DOCX-текста. Заодно срезаем U+200B — якорь размера из applyFontSize
+        # (collapsed-caret), намеренно живущий в content, но в <w:t> ему не место
+        # (#8): невидимый zero-width не должен утечь в Word.
+        if "\uFEFF" in text or "\u200B" in text:
+            text = text.replace("\uFEFF", "").replace("\u200B", "")
             if not text:
                 return
         # BUG-5: текст сразу после сноски, начинающийся с ОБЫЧНОГО пробела-
@@ -219,6 +227,9 @@ class _InlineParser(HTMLParser):
             self._after_footnote_ref = False
             if text.startswith(" "):
                 text = "\u00A0" + text[1:]
+        # #6: \u043F\u043E\u0448\u0451\u043B \u0440\u0435\u0430\u043B\u044C\u043D\u044B\u0439 \u0432\u0438\u0434\u0438\u043C\u044B\u0439 \u043A\u043E\u043D\u0442\u0435\u043D\u0442 \u2014 \u0441\u043D\u0438\u043C\u0430\u0435\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 placeholder-<br>
+        # (\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 <br> \u0443\u0436\u0435 \u043D\u0430\u0441\u0442\u043E\u044F\u0449\u0438\u0439 \u043F\u0435\u0440\u0435\u043D\u043E\u0441, \u0430 \u043D\u0435 \u043F\u0443\u0441\u0442\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430 \u0431\u043B\u043E\u043A\u0430).
+        self._boundary_break_pending = False
         self._produced_output = True
         # Вне <a> используем высокоуровневый API python-docx — он создаёт
         # `w:r` с привычным порядком элементов (важно для обратной совместимости
@@ -273,6 +284,21 @@ class _InlineParser(HTMLParser):
 
         self._hyperlink.append(r_el)
 
+    def _handle_br(self) -> None:
+        """Перенос от тега <br>.
+
+        #6: если <br> — placeholder пустого блока (<div><br></div>), он идёт
+        сразу за переносом-границей блока без промежуточного контента. Граница
+        блока уже дала визуальный разрыв этой пустой строки, поэтому <br> НЕ
+        дублируем (иначе одна пустая строка превращалась бы в две). Несколько
+        пустых блоков подряд остаются несколькими пустыми строками: у каждого
+        своя граница-перенос. Обычный <br> (мягкий перенос, <br><br>) — как был.
+        """
+        if self._boundary_break_pending:
+            self._boundary_break_pending = False
+            return
+        self._add_break()
+
     def _add_break(self) -> None:
         """Реальный OOXML-перенос строки (<w:br/>).
 
@@ -292,16 +318,25 @@ class _InlineParser(HTMLParser):
         self._hyperlink.append(r_el)
 
     def _nbsp_trailing_space_before_footnote(self) -> None:
-        """BUG-3: заменяет единственный хвостовой U+0020 предыдущего текстового
-        run'а на U+00A0 — под justify слово-якорь со своим номером не отрывается
-        от предыдущего слова. Несколько пробелов: рвём только последний (стык
-        слово↔якорь), более ранние остаются растяжимыми. Берём только прямые
-        w:r параграфа (runs внутри w:hyperlink не трогаем — сноска сразу за
-        ссылкой редка, неразрывный пробел тогда просто не ставится)."""
-        for r in reversed(self.paragraph._p.findall(qn("w:r"))):
-            t = r.find(qn("w:t"))
+        """BUG-3: заменяет единственный хвостовой U+0020 текста, ПРИМЫКАЮЩЕГО к
+        якорю сноски, на U+00A0 — под justify слово-якорь со своим номером не
+        отрывается от предыдущего слова. Несколько пробелов: рвём только
+        последний (стык слово↔якорь), более ранние остаются растяжимыми.
+
+        #7: примыкающий элемент ищем по ПОСЛЕДНЕМУ значимому ребёнку <w:p>. Если
+        это прямой w:r — правим его хвостовой пробел. Если это w:hyperlink (сноска
+        идёт сразу за ссылкой) — НЕ трогаем ничего: прямые w:r лежат ПЕРЕД
+        ссылкой и к сноске не примыкают (иначе неразрывили бы чужое слово)."""
+        for el in reversed(self.paragraph._p):
+            tag = el.tag.rsplit("}", 1)[-1]
+            if tag == "hyperlink":
+                # Примыкает ссылка, а не прямой run — no-op (как обещает докстринг).
+                return
+            if tag != "r":
+                continue  # pPr / bookmark / прочее — пропускаем
+            t = el.find(qn("w:t"))
             if t is None or not t.text:
-                continue
+                continue  # пустой run (например, w:br) — ищем текст глубже
             if t.text.endswith(" "):
                 t.text = t.text[:-1] + chr(0xA0)
                 t.set(qn("xml:space"), "preserve")
