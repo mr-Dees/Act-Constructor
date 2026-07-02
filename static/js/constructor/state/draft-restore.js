@@ -30,42 +30,6 @@ function sameInstant(a, b) {
 }
 
 /**
- * B-12: семантическая целостность снимка — все записи словарей (tables/
- * textBlocks/violations) ссылаются на существующие узлы дерева, и наоборот
- * листовые узлы ссылаются на существующие записи. Зеркало sanitizeActContent,
- * но БЕЗ мутации — только вердикт «снимок согласован». Чистая функция.
- * @param {Object} data snapshot.data ({tree, tables, textBlocks, violations})
- * @returns {boolean} true если снимок согласован
- */
-function isSnapshotConsistent(data) {
-    const nodeIds = new Set();
-    const refs = []; // листовые ссылки узлов: [{dict, ref}]
-    const stack = [data.tree];
-    while (stack.length) {
-        const node = stack.pop();
-        if (!node || typeof node !== 'object') continue;
-        if (node.id) nodeIds.add(node.id);
-        for (const [dict, prop] of [['tables', 'tableId'], ['textBlocks', 'textBlockId'], ['violations', 'violationId']]) {
-            if (node[prop]) refs.push({ dict, ref: node[prop] });
-        }
-        if (Array.isArray(node.children)) for (const c of node.children) stack.push(c);
-    }
-    // (а) сирота-запись словаря: nodeId не в дереве
-    for (const dict of ['tables', 'textBlocks', 'violations']) {
-        const d = data[dict];
-        if (!d || typeof d !== 'object') continue;
-        for (const entry of Object.values(d)) {
-            if (!entry || !nodeIds.has(entry.nodeId)) return false;
-        }
-    }
-    // (б) висячая ссылка узла: записи в словаре нет
-    for (const { dict, ref } of refs) {
-        if (!(data[dict] && data[dict][ref])) return false;
-    }
-    return true;
-}
-
-/**
  * Решает судьбу снимка-черновика при загрузке акта.
  *
  * @param {Object|null} snapshot Снимок из localStorage ({actId, savedAt,
@@ -73,7 +37,10 @@ function isSnapshotConsistent(data) {
  * @param {string|null} serverUpdatedAt Серверный updated_at акта из GET-контента
  * @returns {'restore'|'discard'|'none'}
  *   'restore' — предложить восстановление (акт не менялся с момента снимка);
- *   'discard' — молча удалить снимок (устарел или повреждён);
+ *              несогласованные снимки тоже восстанавливаются — их чинит
+ *              sanitizeActContent на пути загрузки (#10, Variant Б);
+ *   'discard' — молча удалить снимок (устарел или структурно повреждён — нет
+ *              данных/дерева, либо нельзя сверить метки);
  *   'none'    — снимка нет, делать нечего.
  */
 export function shouldOfferRestore(snapshot, serverUpdatedAt) {
@@ -84,12 +51,11 @@ export function shouldOfferRestore(snapshot, serverUpdatedAt) {
     if (!snapshot.data || typeof snapshot.data !== 'object' || !snapshot.data.tree) {
         return 'discard';
     }
-    // B-12: одного наличия дерева мало — снимок мог быть повреждён/правлен руками
-    // и содержать висячие ссылки (сироты словарей / ссылки узлов в никуда).
-    // Несогласованный снимок не предлагаем восстанавливать.
-    if (!isSnapshotConsistent(snapshot.data)) {
-        return 'discard';
-    }
+    // #10 (Variant Б): семантически несогласованный снимок (сироты словарей /
+    // висячие ссылки узлов) НЕ выбрасываем — восстанавливаем и чиним неразрушающе.
+    // Восстановленные данные подставляются в content, а штатный путь загрузки
+    // прогоняет sanitizeActContent (api.js) — те же инварианты, что чинит зеркало
+    // isSnapshotConsistent, но без потери несохранённых правок пользователя.
     // Без обеих меток сравнить «менялся ли акт» невозможно — консервативно
     // считаем снимок устаревшим.
     if (!snapshot.baseUpdatedAt || !serverUpdatedAt) {
