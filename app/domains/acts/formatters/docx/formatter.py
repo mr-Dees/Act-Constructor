@@ -211,6 +211,19 @@ _SETTINGS_AFTER_UPDATE_FIELDS = frozenset({
 })
 
 
+# Булевы опции CT_Compat, которые по схеме OOXML идут ПЕРЕД
+# w:doNotExpandShiftReturn (единственные, кому он не должен предшествовать).
+# Всё остальное (useFELayout, compatSetting, ...) идёт ПОСЛЕ. В дефолтном
+# шаблоне python-docx их нет, поэтому элемент становится первым ребёнком
+# <w:compat>; набор нужен на случай, если python-docx когда-то добавит их.
+_COMPAT_BEFORE_SHIFT_RETURN = frozenset({
+    "useSingleBorderforContiguousCells", "wpJustification", "noTabHangInd",
+    "noLeading", "spaceForUL", "noColumnBalance",
+    "balanceSingleByteDoubleByteWidth", "noExtraLineSpacing",
+    "doNotLeaveBackslashAlone", "ulTrailSpace",
+})
+
+
 def _enable_update_fields(doc) -> None:
     """Помечает поля документа на пересчёт при открытии (w:updateFields).
 
@@ -244,8 +257,11 @@ def _disable_shift_return_expansion(doc) -> None:
     сноски») баллонит. Настройка касается ТОЛЬКО строк с явным переносом —
     естественно переносимый (word-wrap) текст остаётся выровненным по ширине.
 
-    Булевы опции по схеме CT_Compat идут ПЕРЕД `<w:compatSetting>` — вставляем
-    в правильную позицию, иначе Word может счесть settings.xml некорректным.
+    CT_Compat — фиксированная xsd:sequence: `doNotExpandShiftReturn` обязан идти
+    ПОСЛЕ узкого набора более ранних булевых опций и ПЕРЕД всеми прочими
+    (useFELayout, compatSetting, ...). Вставляем перед первым ребёнком, который
+    по схеме идёт после нас — иначе settings.xml схемо-невалиден и строгие
+    потребители (LibreOffice, валидаторы) могут отбросить весь part (#13).
     """
     settings = doc.settings.element
     compat = settings.find(qn("w:compat"))
@@ -255,8 +271,12 @@ def _disable_shift_return_expansion(doc) -> None:
     if compat.find(qn("w:doNotExpandShiftReturn")) is not None:
         return
     el = OxmlElement("w:doNotExpandShiftReturn")
-    first_setting = compat.find(qn("w:compatSetting"))
-    if first_setting is not None:
-        first_setting.addprevious(el)
+    anchor = None
+    for child in compat:
+        if child.tag.rsplit("}", 1)[-1] not in _COMPAT_BEFORE_SHIFT_RETURN:
+            anchor = child
+            break
+    if anchor is not None:
+        anchor.addprevious(el)
     else:
         compat.append(el)

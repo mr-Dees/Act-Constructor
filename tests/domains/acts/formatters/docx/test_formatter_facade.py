@@ -322,8 +322,12 @@ def test_shift_return_expansion_disabled():
     assert compat is not None
     el = compat.find(qn("w:doNotExpandShiftReturn"))
     assert el is not None
-    # CT_Compat: булевы опции идут ПЕРЕД <w:compatSetting> — проверяем порядок.
-    first_setting = compat.find(qn("w:compatSetting"))
-    if first_setting is not None:
-        children = list(compat)
-        assert children.index(el) < children.index(first_setting)
+    # #13: CT_Compat — фиксированная xsd:sequence. doNotExpandShiftReturn обязан
+    # идти РАНЬШЕ useFELayout (дефолтный шаблон python-docx) и любого
+    # compatSetting, иначе settings.xml схемо-невалиден. Проверяем именно порядок.
+    children = [c.tag.rsplit("}", 1)[-1] for c in compat]
+    idx = children.index("doNotExpandShiftReturn")
+    if "useFELayout" in children:
+        assert idx < children.index("useFELayout")
+    if "compatSetting" in children:
+        assert idx < children.index("compatSetting")
