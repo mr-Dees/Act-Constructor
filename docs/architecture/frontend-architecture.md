@@ -68,7 +68,8 @@ static/js/
     │                 #   ItemsTitleEditing
     ├── table/        # TableManager + cells-operations + sizes
     ├── textblock/    # TextBlockManager + editor + formatting + toolbar
-    │                 #   + links-footnotes
+    │                 #   + links-footnotes + capsule-integrity — deep-dive:
+    │                 #   docs/architecture/textblock-editor-architecture.md
     ├── violation/    # ViolationManager (10 файлов)
     ├── preview/      # PreviewManager + per-type renderer'ы
     ├── dialog/       # HelpManager, InvoiceDialog
@@ -96,6 +97,7 @@ CSS повторяет тройное разделение — см. главу 
 ### 1.4 Связанные документы
 
 - [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (13 модулей, транспорт polling по шине `chat_agent_messages_bus`).
+- [`docs/architecture/textblock-editor-architecture.md`](textblock-editor-architecture.md) — редактор текстблоков: капсулы ссылок/сносок, caret-guard, целостность капсул, DOCX-экспорт.
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §4 — высокоуровневый обзор фронта.
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §10 — UX/persistence/lock.
 - [`docs/architecture/agent-channel-sequence.md`](agent-channel-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
@@ -182,7 +184,7 @@ CSS повторяет тройное разделение — см. главу 
 | `constructor/tree/tree-core.js` | `TreeManager`, `treeManager` (instance) |
 | `constructor/tree/tree-utils.js` | `TreeUtils` |
 | `constructor/table/table-core.js` | `TableManager`, `tableManager` |
-| `constructor/textblock/textblock-core.js` | `TextBlockManager`, `textBlockManager` |
+| `constructor/textblock/textblock-core.js` | `TextBlockManager`, `textBlockManager` (расширяется через `Object.assign` из `textblock-{formatting,editor,toolbar,links-footnotes,capsule-integrity}.js` — deep-dive: [`textblock-editor-architecture.md`](textblock-editor-architecture.md)) |
 | `constructor/violation/violation-init.js` | `violationManager` (instance, инстанциируется при загрузке модуля) |
 | `constructor/items/items-renderer.js` | `ItemsRenderer` |
 | `constructor/preview/preview.js` | `PreviewManager` |
