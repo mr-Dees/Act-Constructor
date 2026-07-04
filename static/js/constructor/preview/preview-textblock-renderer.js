@@ -48,8 +48,10 @@ export class PreviewTextBlockRenderer {
     }
 
     /**
-     * Применяет форматирование к элементу (M.6: и bold/italic/underline —
-     * контейнером, паритет с DOCX-рендером заданного formatting)
+     * Применяет КОНТЕЙНЕРНОЕ форматирование текстблока: размер и выравнивание.
+     * Начертание (жирный/курсив/подчёркивание) — единственным источником истины
+     * выступает inline-HTML внутри content (теги <b>/<i>/<u>), поэтому здесь
+     * НЕ применяется (B-1: убран мёртвый дубль formatting.{bold,italic,underline}).
      * @private
      */
     static _applyFormatting(element, formatting) {
@@ -61,18 +63,6 @@ export class PreviewTextBlockRenderer {
 
         if (formatting.alignment) {
             element.style.textAlign = formatting.alignment;
-        }
-
-        if (formatting.bold) {
-            element.style.fontWeight = 'bold';
-        }
-
-        if (formatting.italic) {
-            element.style.fontStyle = 'italic';
-        }
-
-        if (formatting.underline) {
-            element.style.textDecoration = 'underline';
         }
     }
 }

@@ -137,6 +137,39 @@ class TextblocksSettings(BaseModel):
     """
     font_size_min: int = Field(default=8, gt=0)
     font_size_max: int = Field(default=72, gt=0)
+    # Максимальное число текстблоков-детей одного узла дерева (B-13). Фронт
+    # ограничивает добавление блоков узлу, но прямой API эту проверку обходил —
+    # серверный гейт в ActContentService._validate_tree. Отдаётся через
+    # GET /acts/limits (textblocks.per_node).
+    per_node: int = Field(default=10, gt=0)
+
+
+class SanitizerSettings(BaseModel):
+    """
+    Allowlist HTML-санитайзера контента актов — ЕДИНЫЙ ИСТОЧНИК для bleach
+    (бэк) и DOMPurify (фронт). Раньше списки дублировались в
+    html_sanitizer.py и static/js/shared/sanitize.js и синхронизировались
+    вручную (B-5). Теперь: bleach читает их в рантайме, фронт — через
+    GET /acts/limits (секция sanitizer). Дефолты обязаны совпадать с
+    фолбэк-константами html_sanitizer.py.
+    """
+    # Разрешённые теги (whitelist). javascript:-протоколы и on*-атрибуты
+    # фильтрует bleach/DOMPurify независимо от этого списка.
+    allowed_tags: list[str] = Field(default=[
+        "p", "br", "b", "strong", "i", "em", "u", "s", "strike", "del", "span", "a",
+        "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "div",
+    ])
+    # Разрешённые CSS-свойства inline-style.
+    allowed_css_properties: list[str] = Field(default=[
+        "font-size", "color", "background-color",
+        "font-weight", "font-style", "text-decoration", "text-decoration-line",
+    ])
+    # Разрешённые data-атрибуты span (сноски/ссылки) — без них DOCX-экспорт
+    # теряет содержимое сносок/ссылок.
+    allowed_data_attrs: list[str] = Field(default=[
+        "data-footnote-id", "data-footnote-text",
+        "data-link-id", "data-link-url",
+    ])
 
 
 class ActsSettings(BaseModel):
@@ -149,3 +182,4 @@ class ActsSettings(BaseModel):
     images: ImagesSettings = ImagesSettings()
     tables: TablesSettings = TablesSettings()
     textblocks: TextblocksSettings = TextblocksSettings()
+    sanitizer: SanitizerSettings = SanitizerSettings()

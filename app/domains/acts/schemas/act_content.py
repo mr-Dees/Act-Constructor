@@ -350,16 +350,32 @@ class TableSchema(BaseModel):
         return self
 
 
+@lru_cache(maxsize=1)
+def _textblock_font_bounds() -> tuple[int, int]:
+    """Границы размера шрифта текстблока (min, max) из настроек, с кэшем (B-35).
+
+    Валидатор размера зовётся на КАЖДЫЙ текстблок акта; настройки на старте
+    заполняются один раз и в рантайме не меняются (JupyterHub: процесс-на-юзера),
+    поэтому кэш безопасен. В тестах, инстанцирующих схему до заполнения реестра,
+    кэш сбрасывается autouse-фикстурой (_textblock_font_bounds.cache_clear()).
+    """
+    tb = _acts_settings().textblocks
+    return tb.font_size_min, tb.font_size_max
+
+
 class TextBlockFormattingSchema(BaseModel):
     """
-    Схема форматирования текстового блока.
+    Схема форматирования текстового блока: контейнерные параметры абзаца.
+
+    Начертание (жирный/курсив/подчёркивание) хранится ИСКЛЮЧИТЕЛЬНО в inline-HTML
+    поля content (теги <b>/<i>/<u>), отдельных полей нет (B-1): прежние булевы
+    bold/italic/underline были мёртвыми (редактор в них не писал) и при чтении
+    давали двойное применение форматирования. Здесь — только базовый размер
+    абзаца и выравнивание.
 
     Attributes:
-        fontSize: Базовый размер шрифта в пикселях (8-72)
+        fontSize: Базовый размер шрифта в пикселях (границы — по настройкам)
         alignment: Выравнивание текста
-        bold: Жирный шрифт
-        italic: Курсив
-        underline: Подчеркивание
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -373,18 +389,31 @@ class TextBlockFormattingSchema(BaseModel):
         default="justify",
         description="Выравнивание (дефолт — по ширине, как тело акта)"
     )
-    bold: bool = Field(default=False, description="Жирный")
-    italic: bool = Field(default=False, description="Курсив")
-    underline: bool = Field(default=False, description="Подчеркивание")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_format_fields(cls, data):
+        """Отбрасывает устаревшие поля bold/italic/underline (B-1).
+
+        Начертание теперь живёт только в content (inline-теги). Поля удалены из
+        схемы, но в БД и в версиях ранее сохранённых актов они ещё есть — при
+        extra="forbid" их наличие уронило бы экспорт/restore таких актов
+        (ActDataSchema пересобирается из stored-данных). Молча выкидываем их;
+        новые сохранения их не пишут.
+        """
+        if isinstance(data, dict):
+            for legacy in ("bold", "italic", "underline"):
+                data.pop(legacy, None)
+        return data
 
     @model_validator(mode="after")
     def validate_font_size(self) -> "TextBlockFormattingSchema":
-        """Проверяет размер шрифта по границам из настроек ACTS__TEXTBLOCKS__*."""
-        tb = _acts_settings().textblocks
-        if not (tb.font_size_min <= self.fontSize <= tb.font_size_max):
+        """Проверяет размер шрифта по кэшированным границам ACTS__TEXTBLOCKS__*."""
+        font_min, font_max = _textblock_font_bounds()
+        if not (font_min <= self.fontSize <= font_max):
             raise ValueError(
                 f"Размер шрифта ({self.fontSize}) вне допустимого диапазона "
-                f"{tb.font_size_min}–{tb.font_size_max}"
+                f"{font_min}–{font_max}"
             )
         return self
 
@@ -684,8 +713,11 @@ class ActDataSchema(BaseModel):
         снимает с узлов «висячие» поля-ссылки и предупреждает пользователя одним
         warning'ом. Поэтому метод НЕ бросает, а ВОЗВРАЩАЕТ список нарушений.
 
-        Обратное направление (запись словаря без узла) здесь не собирается —
-        его лечит orphan-фильтр репозитория при сохранении (pbe-4).
+        Обратное направление (запись словаря без узла-владельца) здесь НЕ
+        собирается — его лечит orphan-фильтр репозитория при сохранении: ветки
+        `if node_id not in node_map` в ActContentRepository._save_tables /
+        _save_textblocks / _save_violations (repositories/act_content.py),
+        считающие `dropped`-сироты. См. pbe-4.
 
         Состав проверяемых ссылок строится из реестра LEAF_BLOCK_REFS
         (block_types.py): новый leaf-тип без словаря в схеме упадёт здесь

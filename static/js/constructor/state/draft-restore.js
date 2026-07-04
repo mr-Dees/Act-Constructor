@@ -37,7 +37,10 @@ function sameInstant(a, b) {
  * @param {string|null} serverUpdatedAt Серверный updated_at акта из GET-контента
  * @returns {'restore'|'discard'|'none'}
  *   'restore' — предложить восстановление (акт не менялся с момента снимка);
- *   'discard' — молча удалить снимок (устарел или повреждён);
+ *              несогласованные снимки тоже восстанавливаются — их чинит
+ *              sanitizeActContent на пути загрузки (#10, Variant Б);
+ *   'discard' — молча удалить снимок (устарел или структурно повреждён — нет
+ *              данных/дерева, либо нельзя сверить метки);
  *   'none'    — снимка нет, делать нечего.
  */
 export function shouldOfferRestore(snapshot, serverUpdatedAt) {
@@ -48,6 +51,11 @@ export function shouldOfferRestore(snapshot, serverUpdatedAt) {
     if (!snapshot.data || typeof snapshot.data !== 'object' || !snapshot.data.tree) {
         return 'discard';
     }
+    // #10 (Variant Б): семантически несогласованный снимок (сироты словарей /
+    // висячие ссылки узлов) НЕ выбрасываем — восстанавливаем и чиним неразрушающе.
+    // Восстановленные данные подставляются в content, а штатный путь загрузки
+    // прогоняет sanitizeActContent (api.js) — те же инварианты, что чинит зеркало
+    // isSnapshotConsistent, но без потери несохранённых правок пользователя.
     // Без обеих меток сравнить «менялся ли акт» невозможно — консервативно
     // считаем снимок устаревшим.
     if (!snapshot.baseUpdatedAt || !serverUpdatedAt) {

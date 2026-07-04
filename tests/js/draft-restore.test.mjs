@@ -72,3 +72,18 @@ test('нечитаемые метки времени → discard, а не лож
   const snap = makeSnapshot({ baseUpdatedAt: 'не-дата' });
   assert.equal(shouldOfferRestore(snap, 'тоже-не-дата'), 'discard');
 });
+
+test('#10 (Variant Б): несогласованный, но свежий снимок → restore (не discard)', () => {
+  // Сирота-запись словаря (textBlock ссылается на nodeId, которого нет в дереве)
+  // + висячая ссылка узла. Раньше молча выбрасывалось (потеря правок); теперь
+  // восстанавливается, а sanitizeActContent на пути загрузки чинит неразрушающе.
+  const snap = makeSnapshot({
+    data: {
+      tree: { id: 'root', children: [{ id: 'n1', textBlockId: 'tbX' }] },
+      tables: {},
+      textBlocks: { tbOrphan: { nodeId: 'nMissing', content: 'сирота' } },
+      violations: {},
+    },
+  });
+  assert.equal(shouldOfferRestore(snap, '2026-06-11T10:00:00.123456'), 'restore');
+});

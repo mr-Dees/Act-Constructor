@@ -29,12 +29,11 @@ from app.domains.acts.formatters.docx.styles import (
 )
 from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
 
-# Текстблок рендерится строго по своему formatting: выравнивание/начертание —
-# буквально. Размер ОТДЕЛЬНО: дефолтный fontSize → body_pt (12pt), изменённый
-# → px→pt (×0.75); alignment/bold/italic/underline на размер не влияют (M.1,
-# фикс #9). Дефолт схемы (alignment='justify' = тело акта) совпадает с прежним
-# «нетронутым» рендером, но теперь явный выбор выравнивания (напр. 'left')
-# уважается, а не подменяется на JUSTIFY.
+# Текстблок рендерится по formatting (выравнивание/размер) + inline-разметке
+# content (начертание). Размер: дефолтный fontSize → body_pt (12pt), изменённый
+# → px→pt (×0.75); выравнивание на размер не влияет (M.1, фикс #9). Начертание
+# (жирный/курсив/подчёркивание) — только из inline-тегов content (B-1).
+# Дефолт схемы (alignment='justify' = тело акта) совпадает с «нетронутым» рендером.
 _DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
 
 # px → pt (16px → 12pt) — единый источник в builders/inline.py (_PX_TO_PT).
@@ -65,6 +64,7 @@ class DocxFormatter:
         self._render_tree(doc, ctx, num_id)
         build_signature(doc, ctx.metadata)
         _enable_update_fields(doc)
+        _disable_shift_return_expansion(doc)
         return doc
 
     def _render_tree(self, doc, ctx: ExportContext, num_id: int) -> None:
@@ -94,16 +94,16 @@ class DocxFormatter:
             body_run.font.size = Pt(Sizes.body_pt)
 
     def _render_textblock(self, doc, schema) -> None:
-        """Текстблок по его formatting (M.1).
+        """Текстблок по его formatting (M.1) + inline-разметке content.
 
         Выравнивание применяется буквально через _TB_ALIGNMENT_MAP: дефолт
         схемы (alignment='justify') даёт то же, что прежний «нетронутый»
-        рендер, а явный выбор (напр. 'left') теперь уважается, а не
-        подменяется на JUSTIFY (фикс). Размер: дефолтный fontSize → body_pt
-        (12pt), изменённый → px→pt (×0.75) — смена только выравнивания/
-        начертания шрифт НЕ уменьшает (#9). bold/italic/underline ложатся
-        поверх runs. Inline-разметка содержимого (теги <b>/<i>/...) имеет
-        приоритет — базовые свойства лишь «включают», но не снимают начертание.
+        рендер, а явный выбор (напр. 'left') уважается, а не подменяется на
+        JUSTIFY. Размер: дефолтный fontSize → body_pt (12pt), изменённый →
+        px→pt (×0.75) — смена только выравнивания шрифт НЕ уменьшает (#9).
+        Начертание (жирный/курсив/подчёркивание) задаётся ИСКЛЮЧИТЕЛЬНО
+        inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html выставляет
+        run.bold/italic/underline per-run; базового применения из formatting нет.
         """
         para = doc.add_paragraph()
         fmt = schema.formatting
@@ -113,15 +113,12 @@ class DocxFormatter:
             if fmt.fontSize == _DEFAULT_TB_FORMATTING.fontSize
             else fmt.fontSize * _PX_TO_PT
         )
+        # Начертание — единственным источником истины выступают inline-теги
+        # <b>/<i>/<u> в content (apply_inline_html выставляет run.bold/italic/
+        # underline per-run). Базовое применение из formatting.{bold,italic,
+        # underline} УБРАНО (B-1/B-37): прежний пост-цикл форсил начертание на
+        # ВСЕ runs, перетирая per-run inline-состояние.
         apply_inline_html(para, schema.content, base_size_pt=base_size_pt)
-        if fmt.bold or fmt.italic or fmt.underline:
-            for run in para.runs:
-                if fmt.bold:
-                    run.bold = True
-                if fmt.italic:
-                    run.italic = True
-                if fmt.underline:
-                    run.underline = True
 
     def _add_table_title(self, doc, node) -> None:
         """Заголовок таблицы: жирная подпись без нумерации (таблица — не пункт)."""
@@ -214,6 +211,19 @@ _SETTINGS_AFTER_UPDATE_FIELDS = frozenset({
 })
 
 
+# Булевы опции CT_Compat, которые по схеме OOXML идут ПЕРЕД
+# w:doNotExpandShiftReturn (единственные, кому он не должен предшествовать).
+# Всё остальное (useFELayout, compatSetting, ...) идёт ПОСЛЕ. В дефолтном
+# шаблоне python-docx их нет, поэтому элемент становится первым ребёнком
+# <w:compat>; набор нужен на случай, если python-docx когда-то добавит их.
+_COMPAT_BEFORE_SHIFT_RETURN = frozenset({
+    "useSingleBorderforContiguousCells", "wpJustification", "noTabHangInd",
+    "noLeading", "spaceForUL", "noColumnBalance",
+    "balanceSingleByteDoubleByteWidth", "noExtraLineSpacing",
+    "doNotLeaveBackslashAlone", "ulTrailSpace",
+})
+
+
 def _enable_update_fields(doc) -> None:
     """Помечает поля документа на пересчёт при открытии (w:updateFields).
 
@@ -234,3 +244,39 @@ def _enable_update_fields(doc) -> None:
         anchor.addprevious(el)
     else:
         settings.append(el)
+
+
+def _disable_shift_return_expansion(doc) -> None:
+    """Отключает раздувание строк с мягким переносом под «по ширине»
+    (`<w:doNotExpandShiftReturn/>` в `<w:compat>`).
+
+    Enter в редакторе текстблоков превращается в `<w:br>` (мягкий перенос),
+    поэтому абзац акта — это один `<w:p>` с несколькими строками. Без этой
+    настройки Word силой растягивает КОРОТКУЮ такую строку на всю ширину
+    абзаца, и единственная щель на ней (например стык «слово-якорь ↔ номер
+    сноски») баллонит. Настройка касается ТОЛЬКО строк с явным переносом —
+    естественно переносимый (word-wrap) текст остаётся выровненным по ширине.
+
+    CT_Compat — фиксированная xsd:sequence: `doNotExpandShiftReturn` обязан идти
+    ПОСЛЕ узкого набора более ранних булевых опций и ПЕРЕД всеми прочими
+    (useFELayout, compatSetting, ...). Вставляем перед первым ребёнком, который
+    по схеме идёт после нас — иначе settings.xml схемо-невалиден и строгие
+    потребители (LibreOffice, валидаторы) могут отбросить весь part (#13).
+    """
+    settings = doc.settings.element
+    compat = settings.find(qn("w:compat"))
+    if compat is None:
+        compat = OxmlElement("w:compat")
+        settings.append(compat)
+    if compat.find(qn("w:doNotExpandShiftReturn")) is not None:
+        return
+    el = OxmlElement("w:doNotExpandShiftReturn")
+    anchor = None
+    for child in compat:
+        if child.tag.rsplit("}", 1)[-1] not in _COMPAT_BEFORE_SHIFT_RETURN:
+            anchor = child
+            break
+    if anchor is not None:
+        anchor.addprevious(el)
+    else:
+        compat.append(el)

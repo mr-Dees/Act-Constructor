@@ -2,7 +2,9 @@
 
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <s>/<strike>/<del>,
 <span style="font-size: ...">, <span style="text-decoration: line-through">,
-<br>, <a href="...">. Любой другой тег игнорируется (содержимое сохраняется).
+<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) рендерятся как
+мягкий перенос строки между блоками (контейнерная разметка contenteditable из
+обычного Enter). Любой другой тег игнорируется (содержимое сохраняется).
 
 Зачёркивание (M.19): Chromium execCommand('strikeThrough') эмитит <strike>
 (тег-форма, styleWithCSS в приложении не включается); CSS-форма
@@ -23,6 +25,7 @@ import re
 from html.parser import HTMLParser
 from dataclasses import dataclass, replace
 
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 from docx.oxml import OxmlElement
@@ -33,8 +36,11 @@ from app.domains.acts.formatters.docx.footnotes import add_footnote
 from app.domains.acts.formatters.docx.styles import Fonts
 
 
-# Протоколы, допустимые в гиперссылках DOCX (совпадает с html_sanitizer).
-_SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:")
+# Схемы, допустимые во ВНЕШНИХ гиперссылках DOCX. Зеркало фронтового
+# validateLinkUrl (textblock-links-footnotes.js): веб, почта, телефон, ftp и
+# локальные файлы. Якоря '#...' обрабатываются как ВНУТРЕННИЕ ссылки (w:anchor)
+# в _open_hyperlink. javascript:/data:/vbscript: сюда не попадают → текст plain.
+_SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "file:")
 
 
 def _is_safe_url(href: str) -> bool:
@@ -51,6 +57,8 @@ class _RunState:
 
 
 _PX_TO_PT = 0.75
+# Блочные теги: их граница = перенос строки (Enter в contenteditable → <div>).
+_BLOCK_TAGS = frozenset({"div", "p", "li", "h1", "h2", "h3", "h4", "h5", "h6"})
 _SIZE_RE = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*(px|pt)", re.IGNORECASE)
 # Зачёркивание CSS-формой: и text-decoration, и text-decoration-line.
 _STRIKE_RE = re.compile(r"text-decoration(?:-line)?\s*:\s*[^;]*line-through", re.IGNORECASE)
@@ -73,6 +81,26 @@ class _InlineParser(HTMLParser):
         # Параллельно стеку span'ов: что делать при их закрытии.
         # ("footnote", текст) | ("link", None) | ("plain", None)
         self._span_kinds: list[tuple[str, str | None]] = []
+        # Был ли уже выведен видимый контент (run/перенос) — чтобы не ставить
+        # перенос ПЕРЕД самым первым блоком (иначе пустая первая строка).
+        self._produced_output = False
+        # BUG-5: следующий текстовый run идёт сразу за номером сноски — его
+        # ведущий обычный пробел делаем неразрывным (см. _add_run).
+        self._after_footnote_ref = False
+        # BUG-3: под выравниванием «по ширине» (w:jc both) Word растягивает
+        # ТОЛЬКО обычный пробел U+0020 (U+00A0 не тянется). Разделитель перед
+        # словом-якорем сноски тогда растягивается и отрывает блок «слово+номер»
+        # от предыдущего слова — под justify делаем его неразрывным (см.
+        # _open_span footnote-ветку). Выравнивание известно: formatter.py
+        # выставляет paragraph.alignment ДО apply_inline_html.
+        self._justify = paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+        # BUG-3: последний run параграфа на момент открытия footnote-span —
+        # ориентир, чтобы strip хвостового пробела якоря не задел предыдущий run.
+        self._footnote_run_before: OxmlElement | None = None
+        # #6: перенос-граница блока (<div>/<p>) уже поставлен, а следующий <br>
+        # может быть placeholder'ом пустого блока (<div><br></div>) — тогда его
+        # НЕ дублируем. Флаг сбрасывается на первом же реальном контенте/переносе.
+        self._boundary_break_pending = False
 
     @property
     def state(self) -> _RunState:
@@ -102,14 +130,23 @@ class _InlineParser(HTMLParser):
             # закрывающий </b> снял бы лишний кадр вместо bold-фрейма и
             # текст после </b> остался бы жирным (H7). </br>, если придёт,
             # игнорируется в handle_endtag.
-            self._add_run("\n")
+            self._handle_br()
+        elif tag in _BLOCK_TAGS:
+            # Граница блока = перенос строки. Перед содержимым нового блока
+            # вставляем перенос, но НЕ перед первым (guard по _produced_output).
+            # Кадр пушим — парный close-tag снимет его в handle_endtag (len>1).
+            if self._produced_output:
+                self._add_break()
+                # #6: перенос уже стоит; placeholder-<br> пустого блока не дублируем.
+                self._boundary_break_pending = True
+            self.stack.append(current)
         else:
             self.stack.append(current)
 
     def handle_startendtag(self, tag, attrs):
         """Обрабатывает self-closing теги вида <br/>."""
         if tag == "br":
-            self._add_run("\n")
+            self._handle_br()
         else:
             self.handle_starttag(tag, attrs)
             self.handle_endtag(tag)
@@ -118,6 +155,15 @@ class _InlineParser(HTMLParser):
         """Открывает <span>: footnote-якорь, ссылку или обычный span."""
         cls = attrs.get("class", "")
         if "text-footnote" in cls:
+            # BUG-3: под justify разделитель перед словом-якорем делаем
+            # неразрывным, иначе блок «слово-якорь + номер» отрывается от
+            # предыдущего слова (Word тянет только U+0020).
+            if self._justify:
+                self._nbsp_trailing_space_before_footnote()
+            # Снимок последнего run'а ДО якоря — чтобы strip хвостового пробеля
+            # якоря (BUG-3) не задел предыдущий run, если якорь без текста.
+            existing_runs = self.paragraph._p.findall(qn("w:r"))
+            self._footnote_run_before = existing_runs[-1] if existing_runs else None
             # Якорь рендерим обычным текстом; сноску добавим при закрытии.
             self._span_kinds.append(("footnote", attrs.get("data-footnote-text")))
             self.stack.append(current)
@@ -145,7 +191,14 @@ class _InlineParser(HTMLParser):
         if tag == "span" and self._span_kinds:
             kind, payload = self._span_kinds.pop()
             if kind == "footnote" and payload:
+                # BUG-3: хвостовой обычный пробел ВНУТРИ якоря (например из
+                # вставки Word) дал бы растяжимую щель между якорем и номером
+                # под justify — срезаем его перед добавлением сноски.
+                self._strip_trailing_anchor_space()
                 add_footnote(self.paragraph, payload)
+                # Номер сноски только что вставлен — следующий текстовый run
+                # должен начинаться с неразрывного пробела (BUG-5).
+                self._after_footnote_ref = True
             elif kind == "link":
                 self._close_hyperlink()
         if len(self.stack) > 1:
@@ -156,6 +209,28 @@ class _InlineParser(HTMLParser):
             self._add_run(data)
 
     def _add_run(self, text: str) -> None:
+        # Защита (гибрид Варианта 2): caret-guard'ы (U+FEFF) — рантайм-only во
+        # фронте и стрипаются при сохранении; на случай рассинхрона срезаем их и
+        # из DOCX-текста. Заодно срезаем U+200B — якорь размера из applyFontSize
+        # (collapsed-caret), намеренно живущий в content, но в <w:t> ему не место
+        # (#8): невидимый zero-width не должен утечь в Word.
+        if "\uFEFF" in text or "\u200B" in text:
+            text = text.replace("\uFEFF", "").replace("\u200B", "")
+            if not text:
+                return
+        # BUG-5: текст сразу после сноски, начинающийся с ОБЫЧНОГО пробела-
+        # разделителя, под выравниванием «по ширине» (w:jc both) отрывал бы номер
+        # сноски — Word растягивает обычные пробелы. Делаем этот первый пробел
+        # неразрывным (U+00A0): номер «прилипает» к последующему слову. Работает
+        # для любого контента (старого/нового), т.к. нормализуется на экспорте.
+        if self._after_footnote_ref:
+            self._after_footnote_ref = False
+            if text.startswith(" "):
+                text = "\u00A0" + text[1:]
+        # #6: \u043F\u043E\u0448\u0451\u043B \u0440\u0435\u0430\u043B\u044C\u043D\u044B\u0439 \u0432\u0438\u0434\u0438\u043C\u044B\u0439 \u043A\u043E\u043D\u0442\u0435\u043D\u0442 \u2014 \u0441\u043D\u0438\u043C\u0430\u0435\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 placeholder-<br>
+        # (\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 <br> \u0443\u0436\u0435 \u043D\u0430\u0441\u0442\u043E\u044F\u0449\u0438\u0439 \u043F\u0435\u0440\u0435\u043D\u043E\u0441, \u0430 \u043D\u0435 \u043F\u0443\u0441\u0442\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430 \u0431\u043B\u043E\u043A\u0430).
+        self._boundary_break_pending = False
+        self._produced_output = True
         # Вне <a> используем высокоуровневый API python-docx — он создаёт
         # `w:r` с привычным порядком элементов (важно для обратной совместимости
         # с тестами, читающими p.runs/run.bold/run.font.size).
@@ -209,15 +284,95 @@ class _InlineParser(HTMLParser):
 
         self._hyperlink.append(r_el)
 
+    def _handle_br(self) -> None:
+        """Перенос от тега <br>.
+
+        #6: если <br> — placeholder пустого блока (<div><br></div>), он идёт
+        сразу за переносом-границей блока без промежуточного контента. Граница
+        блока уже дала визуальный разрыв этой пустой строки, поэтому <br> НЕ
+        дублируем (иначе одна пустая строка превращалась бы в две). Несколько
+        пустых блоков подряд остаются несколькими пустыми строками: у каждого
+        своя граница-перенос. Обычный <br> (мягкий перенос, <br><br>) — как был.
+        """
+        if self._boundary_break_pending:
+            self._boundary_break_pending = False
+            return
+        self._add_break()
+
+    def _add_break(self) -> None:
+        """Реальный OOXML-перенос строки (<w:br/>).
+
+        Литеральный '\\n' внутри <w:t> Word НЕ интерпретирует как разрыв
+        (схлопывает в пробел) — видимый перенос даёт только элемент w:br.
+        """
+        self._produced_output = True
+        if self._hyperlink is None:
+            run = self.paragraph.add_run()
+            run.font.name = Fonts.main
+            run.font.size = Pt(self.state.size_pt)
+            run.add_break(WD_BREAK.LINE)
+            return
+        # Внутри <a>: w:br отдельным w:r внутри w:hyperlink.
+        r_el = OxmlElement("w:r")
+        r_el.append(OxmlElement("w:br"))
+        self._hyperlink.append(r_el)
+
+    def _nbsp_trailing_space_before_footnote(self) -> None:
+        """BUG-3: заменяет единственный хвостовой U+0020 текста, ПРИМЫКАЮЩЕГО к
+        якорю сноски, на U+00A0 — под justify слово-якорь со своим номером не
+        отрывается от предыдущего слова. Несколько пробелов: рвём только
+        последний (стык слово↔якорь), более ранние остаются растяжимыми.
+
+        #7: примыкающий элемент ищем по ПОСЛЕДНЕМУ значимому ребёнку <w:p>. Если
+        это прямой w:r — правим его хвостовой пробел. Если это w:hyperlink (сноска
+        идёт сразу за ссылкой) — НЕ трогаем ничего: прямые w:r лежат ПЕРЕД
+        ссылкой и к сноске не примыкают (иначе неразрывили бы чужое слово)."""
+        for el in reversed(self.paragraph._p):
+            tag = el.tag.rsplit("}", 1)[-1]
+            if tag == "hyperlink":
+                # Примыкает ссылка, а не прямой run — no-op (как обещает докстринг).
+                return
+            if tag != "r":
+                continue  # pPr / bookmark / прочее — пропускаем
+            t = el.find(qn("w:t"))
+            if t is None or not t.text:
+                continue  # пустой run (например, w:br) — ищем текст глубже
+            if t.text.endswith(" "):
+                t.text = t.text[:-1] + chr(0xA0)
+                t.set(qn("xml:space"), "preserve")
+            return
+
+    def _strip_trailing_anchor_space(self) -> None:
+        """BUG-3: срезает хвостовые обычные пробелы у текста ЯКОРЯ сноски —
+        иначе они дали бы растяжимую щель между якорем и номером под justify.
+        Стрипаем только run, добавленный ВНУТРИ footnote-span (сравнение со
+        снимком _footnote_run_before), чтобы у пустого якоря не задеть
+        предыдущий run."""
+        runs = self.paragraph._p.findall(qn("w:r"))
+        if not runs:
+            return
+        last = runs[-1]
+        if last is self._footnote_run_before:
+            return  # якорь без текста — собственный run не добавлялся
+        t = last.find(qn("w:t"))
+        if t is not None and t.text and t.text.endswith(" "):
+            t.text = t.text.rstrip(" ")
+
     def _open_hyperlink(self, href: str) -> bool:
-        """Создаёт w:hyperlink с external relationship. Небезопасный
+        """Создаёт w:hyperlink. Якорь '#...' → внутренняя ссылка (w:anchor),
+        безопасная внешняя схема → external relationship (r:id). Небезопасный
         протокол (javascript: и т.п.) отклоняется → текст останется plain."""
-        if not _is_safe_url(href):
-            return False
-        part = self.paragraph.part
-        r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+        href = href.strip()
         hyperlink = OxmlElement("w:hyperlink")
-        hyperlink.set(qn("r:id"), r_id)
+        if href.startswith("#"):
+            # Внутри-документный якорь (закладка) — без external relationship.
+            hyperlink.set(qn("w:anchor"), href[1:])
+        elif _is_safe_url(href):
+            part = self.paragraph.part
+            r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+            hyperlink.set(qn("r:id"), r_id)
+        else:
+            return False
         self.paragraph._p.append(hyperlink)
         self._hyperlink = hyperlink
         return True

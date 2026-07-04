@@ -9,6 +9,7 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
+from app.domains.acts.block_types import NODE_TYPE_TEXTBLOCK
 from app.domains.acts.exceptions import AccessDeniedError, ActValidationError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
@@ -272,3 +273,32 @@ class ActContentService:
         # Проверка наличия корневого узла
         if not tree.get('id'):
             raise ActValidationError("Дерево должно иметь корневой узел с id")
+
+        # Лимит числа текстблоков-детей одного узла (B-13). Фронт ограничивает
+        # добавление блоков узлу, но прямой API эту проверку обходил. Считаем
+        # детей type='textblock' у каждого узла дерева.
+        self._validate_textblocks_per_node(tree)
+
+    def _validate_textblocks_per_node(self, tree: dict) -> None:
+        """Проверяет, что число текстблоков-детей узла не превышает per_node (B-13)."""
+        max_per_node = self.acts_settings.textblocks.per_node
+        if not isinstance(max_per_node, int):
+            # Настройки не сконфигурированы (или замоканы в тестах) — лимит не
+            # применяем. В проде per_node всегда int из ACTS__TEXTBLOCKS__PER_NODE.
+            return
+        stack = [tree]
+        while stack:
+            node = stack.pop()
+            children = node.get("children")
+            if not isinstance(children, list):
+                continue
+            textblock_count = sum(
+                1 for child in children
+                if isinstance(child, dict) and child.get("type") == NODE_TYPE_TEXTBLOCK
+            )
+            if textblock_count > max_per_node:
+                raise ActValidationError(
+                    f"Узел содержит слишком много текстовых блоков "
+                    f"({textblock_count}), максимум — {max_per_node}"
+                )
+            stack.extend(children)

@@ -13,6 +13,7 @@
  */
 
 import { AppConfig } from '../../shared/app-config.js';
+import { applyActsAllowlist } from '../../shared/sanitize.js';
 import { formatMb } from '../../shared/format-units.js';
 import { CONTENT_TYPE_IMAGE } from './violation-content-item.js';
 
@@ -37,6 +38,8 @@ export const DEFAULT_STRUCTURE_LIMITS = {
     minColWidthPx: AppConfig.limits.table.minColWidthPx,
     fontSizeMin: AppConfig.limits.textblock.fontSizeMin,
     fontSizeMax: AppConfig.limits.textblock.fontSizeMax,
+    // B-13: макс. число текстблоков на узел — фолбэк до ответа /acts/limits.
+    textBlocksPerNode: AppConfig.content.limits.textBlocksPerNode,
 };
 
 let _limits = { ...DEFAULT_IMAGE_LIMITS };
@@ -78,6 +81,12 @@ export function loadImageLimits() {
             if (tb) {
                 if (typeof tb.font_size_min === 'number') _structure.fontSizeMin = tb.font_size_min;
                 if (typeof tb.font_size_max === 'number') _structure.fontSizeMax = tb.font_size_max;
+                // B-13: серверный лимит числа текстблоков на узел.
+                if (typeof tb.per_node === 'number') _structure.textBlocksPerNode = tb.per_node;
+            }
+            // B-5/4е: единый allowlist санитайзера из той же выдачи /acts/limits.
+            if (data && data.sanitizer) {
+                applyActsAllowlist(data.sanitizer);
             }
         } catch (_) {
             // Сеть/CORS — дефолты, серверная валидация прикроет.

@@ -28,13 +28,31 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from app.domains.acts.block_types import LEAF_BLOCK_REFS, NODE_TYPE_TABLE
 
+logger = logging.getLogger("audit_workstation.acts.tree_walker")
+
 # Поле-ссылка и имя словаря прикреплённой таблицы (для item-узлов с tableId).
 _TABLE_REF_FIELD, _TABLE_DICT_NAME = LEAF_BLOCK_REFS[NODE_TYPE_TABLE]
+
+
+def _resolve_max_depth() -> int:
+    """Предел глубины обхода из настроек (ACTS__RESOURCE__MAX_TREE_DEPTH).
+
+    Ленивый импорт реестра: на старте/в тестах (реестр пуст) — fallback 50,
+    совпадающий с дефолтом ResourceSettings.max_tree_depth.
+    """
+    try:
+        from app.core.settings_registry import get as _get
+        from app.domains.acts import DOMAIN_NAME
+        from app.domains.acts.settings import ActsSettings
+        return _get(DOMAIN_NAME, ActsSettings).resource.max_tree_depth
+    except Exception:
+        return 50
 
 
 @dataclass(frozen=True)
@@ -88,6 +106,8 @@ def walk(
     tree: Mapping[str, Any],
     visitor: TreeVisitor,
     blocks: Mapping[str, Mapping[str, Any]],
+    *,
+    max_depth: int | None = None,
 ) -> None:
     """Обходит дерево акта DFS и диспетчит узлы в обработчики визитора.
 
@@ -96,9 +116,16 @@ def walk(
         visitor: Визитор с обработчиками типов узлов (TreeVisitor).
         blocks: Словари блоков контента по именам из LEAF_BLOCK_REFS
             (см. collect_blocks).
+        max_depth: Мягкий предел глубины обхода (B-8). None → берётся
+            ACTS__RESOURCE__MAX_TREE_DEPTH (дефолт 50). Защита форматёров вне
+            save-пути: на входе save-пути дерево уже валидировано (depth≤50), но
+            restore/экспорт зовут walk напрямую. При превышении ветка обрезается
+            с WARNING, без исключения (экспорт не должен падать).
     """
+    if max_depth is None:
+        max_depth = _resolve_max_depth()
     for child in (tree or {}).get("children", []):
-        _walk_node(child, visitor, blocks, depth=0, parent=tree)
+        _walk_node(child, visitor, blocks, depth=0, parent=tree, max_depth=max_depth)
 
 
 def _walk_node(
@@ -108,8 +135,15 @@ def _walk_node(
     *,
     depth: int,
     parent: Mapping[str, Any],
+    max_depth: int,
 ) -> None:
     """Посещает узел, диспетчит его по типу и рекурсивно обходит детей."""
+    if depth > max_depth:
+        logger.warning(
+            "tree_walker: обход прерван на глубине %d (предел %d) — ветка обрезана",
+            depth, max_depth,
+        )
+        return
     node_type = node.get("type", "item")
     ctx = WalkContext(depth=depth, parent=parent)
     is_leaf_block = node_type in LEAF_BLOCK_REFS
@@ -132,7 +166,7 @@ def _walk_node(
                 visitor.on_table(node, attached, ctx)
 
     for child in node.get("children", []):
-        _walk_node(child, visitor, blocks, depth=depth + 1, parent=node)
+        _walk_node(child, visitor, blocks, depth=depth + 1, parent=node, max_depth=max_depth)
 
     if not is_leaf_block:
         visitor.on_item_exit(node, ctx)

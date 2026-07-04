@@ -20,8 +20,11 @@
     gap: var(--spacing-sm);
     transition: var(--transition-all);
     max-width: var(--toolbar-max-width);
-    overflow-x: auto;
-    scrollbar-width: thin;
+    /* B-21: на узком экране группы переносятся во второй ряд, а не уезжают в
+       горизонтальный скролл (неудобный fallback). */
+    flex-wrap: wrap;
+    row-gap: var(--spacing-sm);
+    justify-content: center;
 }
 
 /* Скрытое состояние панели */
@@ -29,20 +32,6 @@
     opacity: 0;
     pointer-events: none;
     transform: translateX(-50%) translateY(calc(-1 * var(--translate-lg)));
-}
-
-/* Скроллбар для узких экранов */
-.textblock-toolbar-global::-webkit-scrollbar {
-    height: var(--toolbar-scrollbar-height);
-}
-
-.textblock-toolbar-global::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.textblock-toolbar-global::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb);
-    border-radius: var(--radius-full);
 }
 
 /* Метка панели инструментов */
@@ -62,6 +51,7 @@
     align-items: center;
     gap: var(--translate-md);
     flex-shrink: 0;
+    flex-wrap: nowrap; /* B-21: группа кнопок не рвётся при переносе строк тулбара */
 }
 
 /* Разделитель между группами */
@@ -169,9 +159,68 @@
     box-shadow: var(--input-shadow-focus);
 }
 
-/* Специфичные размеры для селектов */
-#fontSizeSelect {
+/* BUG-3: кастомный дропдаун размера шрифта (вместо нативного <select>, который
+   крал фокус у contenteditable и схлопывал выделение). Триггер — обычная
+   toolbar-btn; список открывается под ней без потери фокуса редактора. */
+.toolbar-fontsize {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.toolbar-fontsize-trigger {
+    gap: var(--spacing-xs);
     min-width: var(--toolbar-font-size-min-width);
+}
+
+.toolbar-fontsize-caret {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    line-height: 1;
+}
+
+.toolbar-fontsize-menu {
+    position: absolute;
+    top: calc(100% + var(--spacing-xs));
+    left: 0;
+    z-index: var(--z-dropdown);
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-xs);
+    max-height: var(--toolbar-fontsize-menu-max-height);
+    overflow-y: auto;
+    min-width: var(--toolbar-font-size-min-width);
+    display: flex;
+    flex-direction: column;
+    gap: var(--textblock-mark-padding);
+}
+
+.toolbar-fontsize-menu.hidden {
+    display: none;
+}
+
+.toolbar-fontsize-option {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    white-space: nowrap;
+    user-select: none;
+    transition: var(--transition-all);
+}
+
+.toolbar-fontsize-option:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.toolbar-fontsize-option.active {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    font-weight: var(--font-weight-semibold);
 }
 
 #headingSelect {

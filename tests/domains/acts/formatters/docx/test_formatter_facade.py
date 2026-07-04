@@ -169,7 +169,7 @@ def test_textblock_default_formatting_keeps_legacy_defaults():
 
 
 def test_textblock_custom_formatting_applied():
-    """Заданный юзером formatting применяется: alignment, fontSize px→pt, b/i/u (M.1)."""
+    """Размер/выравнивание — из formatting; начертание — из inline-тегов content (B-1/B-37)."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
     fmt = DocxFormatter()
@@ -182,11 +182,10 @@ def test_textblock_custom_formatting_applied():
     content = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1", content="Форматированный блок",
-            formatting={
-                "fontSize": 16, "alignment": "center",
-                "bold": True, "italic": True, "underline": True,
-            },
+            id="tb1", nodeId="1.1",
+            # Начертание — inline-тегами в content (единственный источник, B-1).
+            content="<b><i><u>Форматированный блок</u></i></b>",
+            formatting={"fontSize": 16, "alignment": "center"},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
@@ -200,7 +199,7 @@ def test_textblock_custom_formatting_applied():
 
 
 def test_textblock_partial_formatting_left_alignment_applied():
-    """Изменённый formatting с alignment=left применяется буквально (LEFT, не JUSTIFY)."""
+    """alignment=left применяется буквально (LEFT); начертание — из inline <b> в content."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     fmt = DocxFormatter()
     section = {
@@ -212,9 +211,8 @@ def test_textblock_partial_formatting_left_alignment_applied():
     content = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1", content="Левый блок",
-            formatting={"fontSize": 14, "alignment": "left", "bold": True,
-                        "italic": False, "underline": False},
+            id="tb1", nodeId="1.1", content="<b>Левый блок</b>",
+            formatting={"fontSize": 14, "alignment": "left"},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
@@ -307,3 +305,29 @@ def test_update_fields_enabled():
     update = doc.settings.element.find(qn("w:updateFields"))
     assert update is not None
     assert update.get(qn("w:val")) == "true"
+
+
+def test_shift_return_expansion_disabled():
+    """Строки с мягким переносом (<w:br> из Enter) не раздуваются под «по ширине».
+
+    Без <w:doNotExpandShiftReturn/> Word растягивает короткую строку с ручным
+    переносом на всю ширину абзаца, и единственная щель на ней (стык
+    «слово-якорь ↔ номер сноски») баллонит. Естественно переносимый текст
+    остаётся justified.
+    """
+    fmt = DocxFormatter()
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": []})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    compat = doc.settings.element.find(qn("w:compat"))
+    assert compat is not None
+    el = compat.find(qn("w:doNotExpandShiftReturn"))
+    assert el is not None
+    # #13: CT_Compat — фиксированная xsd:sequence. doNotExpandShiftReturn обязан
+    # идти РАНЬШЕ useFELayout (дефолтный шаблон python-docx) и любого
+    # compatSetting, иначе settings.xml схемо-невалиден. Проверяем именно порядок.
+    children = [c.tag.rsplit("}", 1)[-1] for c in compat]
+    idx = children.index("doNotExpandShiftReturn")
+    if "useFELayout" in children:
+        assert idx < children.index("useFELayout")
+    if "compatSetting" in children:
+        assert idx < children.index("compatSetting")

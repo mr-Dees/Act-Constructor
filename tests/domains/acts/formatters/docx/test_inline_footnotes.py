@@ -6,6 +6,7 @@
 нативную сноску Word с footnoteReference после него.
 """
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
@@ -25,7 +26,97 @@ def test_footnote_span_renders_anchor_text():
     )
     assert "До " in para.text
     assert "факта" in para.text
-    assert " и после." in para.text
+    # BUG-5: пробел СРАЗУ после номера сноски — неразрывный (U+00A0), а не обычный.
+    assert "\u00A0и после." in para.text
+
+
+def test_footnote_followed_by_space_uses_nbsp():
+    """BUG-5: обычный пробел-разделитель сразу ПОСЛЕ номера сноски экспортируется
+    неразрывным (U+00A0) — под выравниванием «по ширине» (w:jc both) Word не
+    растягивает NBSP, и номер не отрывается от последующего текста."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="прим">слово</span> далее текст',
+        base_size_pt=12.0,
+    )
+    assert "\u00A0далее" in para.text          # номер приклеен к «далее» неразрывно
+    assert " далее" not in para.text           # обычного растяжимого пробела перед «далее» нет
+    assert "далее текст" in para.text          # последующий обычный пробел сохранён
+
+    # XML-уровень: текстовый run сразу за footnoteReference начинается с NBSP.
+    runs = para._p.findall(qn("w:r"))
+    ref_idx = next(
+        i for i, r in enumerate(runs) if r.find(qn("w:footnoteReference")) is not None
+    )
+    next_text = runs[ref_idx + 1].find(qn("w:t")).text
+    assert next_text.startswith("\u00A0")
+
+
+def test_footnote_under_justify_glues_separator_before_anchor():
+    """BUG-3: под выравниванием «по ширине» (w:jc both) разделитель между
+    предыдущим словом и словом-якорем сноски — неразрывный (U+00A0). Иначе Word
+    растягивает этот обычный пробел и блок «слово-якорь + номер» отрывается от
+    предыдущего слова. Word растягивает только U+0020; U+00A0 не тянется."""
+    doc = Document()
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    apply_inline_html(
+        para,
+        'текст <span class="text-footnote" data-footnote-text="прим">слово</span> хвост',
+        base_size_pt=12.0,
+    )
+    assert "текст\u00A0слово" in para.text      # разделитель перед якорем неразрывный
+    assert "текст слово" not in para.text         # обычного растяжимого пробела нет
+
+
+def test_footnote_left_align_keeps_regular_separator_before_anchor():
+    """BUG-3: вне justify разделитель перед якорём остаётся ОБЫЧНЫМ пробелом —
+    неразрывный пробел там лишь ухудшил бы перенос строк без пользы."""
+    doc = Document()
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    apply_inline_html(
+        para,
+        'текст <span class="text-footnote" data-footnote-text="прим">слово</span> хвост',
+        base_size_pt=12.0,
+    )
+    assert "текст слово" in para.text              # обычный пробел-разделитель сохранён
+
+
+def test_footnote_anchor_trailing_space_stripped_under_justify():
+    """BUG-3: хвостовой обычный пробел ВНУТРИ якоря (например из вставки Word)
+    срезается перед номером — иначе между якорем и номером осталась бы растяжимая
+    щель под justify."""
+    doc = Document()
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    apply_inline_html(
+        para,
+        'aaa <span class="text-footnote" data-footnote-text="прим">слово </span>bbb',
+        base_size_pt=12.0,
+    )
+    runs = para._p.findall(qn("w:r"))
+    ref_idx = next(
+        i for i, r in enumerate(runs) if r.find(qn("w:footnoteReference")) is not None
+    )
+    anchor_text = runs[ref_idx - 1].find(qn("w:t")).text
+    assert anchor_text == "слово"                 # хвостовой пробел якоря убран
+    assert not anchor_text.endswith(" ")
+
+
+def test_footnote_without_trailing_space_unaffected():
+    """BUG-5: если после номера нет ведущего пробела — текст не трогаем."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="прим">слово</span>, далее',
+        base_size_pt=12.0,
+    )
+    assert "\u00A0" not in para.text  # ведущего пробела нет → NBSP не вставляем
+    assert ", далее" in para.text
 
 
 def test_footnote_span_creates_footnote_reference():

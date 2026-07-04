@@ -88,7 +88,11 @@ export class TextBlockManager {
     saveContent(textBlockId, content) {
         const textBlock = this.getTextBlock(textBlockId);
         if (textBlock) {
-            textBlock.content = content;
+            // Снимаем caret-guard'ы + чиним инварианты капсул (дубль-id,
+            // расщеплённый клон, пустой data-*) ПЕРЕД записью в БД.
+            const stripped = this._stripGuards ? this._stripGuards(content) : content;
+            textBlock.content = this.validateAndRepairCapsules
+                ? this.validateAndRepairCapsules(stripped) : stripped;
             // Контентная правка одного блока → точечный патч превью.
             PreviewManager.updateBlock('textblock', textBlockId);
         }
@@ -101,6 +105,21 @@ export class TextBlockManager {
         if (!this.activeEditor) return false;
 
         this.activeEditor.focus();
+
+        // Атомарность капсулы: inline-форматные команды по выделению, заходящему
+        // ВНУТРЬ тела маркера, иначе клонируют его (дубль ссылки). Расширяем
+        // выделение за целые капсулы (как уже делает applyFontSize). Блочные
+        // (justify*) и insert* не трогаем.
+        const FORMAT_CMDS = ['bold', 'italic', 'underline', 'strikeThrough'];
+        if (FORMAT_CMDS.includes(command) && typeof this._expandRangeOutOfMarkers === 'function') {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                const r = sel.getRangeAt(0);
+                this._expandRangeOutOfMarkers(r);
+                sel.removeAllRanges();
+                sel.addRange(r);
+            }
+        }
 
         const result = document.execCommand(command, false, value);
 

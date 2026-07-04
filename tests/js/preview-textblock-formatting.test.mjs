@@ -1,7 +1,7 @@
 /**
- * M.6: превью текстблока применяет ВСЕ поля formatting контейнером
- * (fontSize/textAlign + bold/italic/underline) — паритет с DOCX-рендером
- * заданного юзером formatting (docx/formatter.py:_render_textblock).
+ * B-1: превью текстблока применяет КОНТЕЙНЕРОМ только размер и выравнивание
+ * (fontSize/textAlign). Начертание (жирный/курсив/подчёркивание) — единственным
+ * источником истины выступает inline-HTML в content; полей formatting.b/i/u нет.
  */
 import './_browser-stub.mjs';
 import { test } from 'node:test';
@@ -15,15 +15,17 @@ function apply(formatting) {
     return el.style;
 }
 
-test('полный formatting применяется контейнером', () => {
+test('formatting применяет только размер и выравнивание (начертание — в content, B-1)', () => {
     const style = apply({
         fontSize: 16, alignment: 'center', bold: true, italic: true, underline: true,
     });
     assert.equal(style.fontSize, '16px');
     assert.equal(style.textAlign, 'center');
-    assert.equal(style.fontWeight, 'bold');
-    assert.equal(style.fontStyle, 'italic');
-    assert.equal(style.textDecoration, 'underline');
+    // B-1: bold/italic/underline из formatting НЕ применяются — единственный
+    // источник начертания — inline-HTML в content (теги <b>/<i>/<u>).
+    assert.equal(style.fontWeight, undefined);
+    assert.equal(style.fontStyle, undefined);
+    assert.equal(style.textDecoration, undefined);
 });
 
 test('выключенные b/i/u не задают стилей', () => {

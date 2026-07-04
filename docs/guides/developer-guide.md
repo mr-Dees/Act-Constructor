@@ -7,6 +7,7 @@
 - [`docs/operations/operations-recovery.md`](../operations/operations-recovery.md) — operator playbook: что делать при инцидентах в проде (завис forward-запрос к агенту, singleton-lock, batcher overflow, denied access).
 - [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): ES-модули и entry-файлы, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
 - [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 13 ядерных модулей, polling сообщений, режимы inline/modal/popup.
+- [`docs/architecture/textblock-editor-architecture.md`](../architecture/textblock-editor-architecture.md) — deep-dive по редактору текстблоков: капсулы ссылок/сносок, caret-guard, целостность капсул (prevent-then-heal), DOCX-экспорт (`inline.py`).
 - [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql) — SQL-сниппеты для имитации внешнего ИИ-агента (см. §7.8).
 - Retention bus-таблицы `chat_agent_messages_bus` — см. §9.6 (кода ретеншена в приложении нет, очистка — задача DBA).
 - [`docs/testing/manual-qa-agent-channel.md`](../testing/manual-qa-agent-channel.md) — чек-лист ручного QA моста к внешнему агенту.
@@ -771,6 +772,8 @@ async def app_error_handler(request, exc):
 > **Deep-dive по фронту — в [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md)**: ES-модули и entry-файлы, AppConfig и JupyterHub-proxy, AppState (Proxy deep-tracking), StorageManager (state machine + persistence), LockManager и inactivity, Tree/items/per-node render API, PreviewManager, диалоги, Acts manager, безопасность, accessibility, CSS-каскад. Этот §4 — короткое содержание для тех, кто пришёл за обзором.
 >
 > **Чат-фронт — отдельно**: [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md), плюс event-driven раздел §7.7 ниже.
+>
+> **Редактор текстблоков — отдельно**: [`docs/architecture/textblock-editor-architecture.md`](../architecture/textblock-editor-architecture.md) — капсулы ссылок/сносок, caret-guard (`U+FEFF`), 3-слойная целостность капсул, DOCX-экспорт.
 
 ### 4.1 Зоны и страницы
 

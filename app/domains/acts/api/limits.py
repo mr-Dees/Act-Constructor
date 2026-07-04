@@ -30,13 +30,16 @@ async def get_acts_limits(
     """Возвращает лимиты картинок нарушений и границы таблиц/текстблоков.
 
     Фронт читает один раз при инициализации конструктора: валидация
-    картинок (MIME/размер/число) и границы grid/fontSize синхронизируются
-    с серверными настройками (ACTS__IMAGES__* / ACTS__TABLES__* /
-    ACTS__TEXTBLOCKS__*) — единый источник для UI-гейтов и схемы.
+    картинок (MIME/размер/число), границы grid/fontSize, лимит числа
+    текстблоков на узел (textblocks.per_node) и allowlist санитайзера
+    (секция sanitizer) синхронизируются с серверными настройками
+    (ACTS__IMAGES__* / ACTS__TABLES__* / ACTS__TEXTBLOCKS__* /
+    ACTS__SANITIZER__*) — единый источник для UI-гейтов, схемы и DOMPurify.
     """
     images = acts_cfg.images
     tables = acts_cfg.tables
     textblocks = acts_cfg.textblocks
+    sanitizer = acts_cfg.sanitizer
     return {
         "images": {
             "max_file_size": images.max_file_size,
@@ -53,5 +56,11 @@ async def get_acts_limits(
         "textblocks": {
             "font_size_min": textblocks.font_size_min,
             "font_size_max": textblocks.font_size_max,
+            "per_node": textblocks.per_node,
+        },
+        "sanitizer": {
+            "allowed_tags": sanitizer.allowed_tags,
+            "allowed_css_properties": sanitizer.allowed_css_properties,
+            "allowed_data_attrs": sanitizer.allowed_data_attrs,
         },
     }

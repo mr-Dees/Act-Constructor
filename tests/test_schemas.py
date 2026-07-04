@@ -740,9 +740,14 @@ class TestDynamicLimitsFromSettings:
     @pytest.fixture(autouse=True)
     def _reset_registry(self):
         from app.core import settings_registry
+        # B-35: _textblock_font_bounds кэширует границы (@lru_cache) — между
+        # тестами, меняющими ACTS__TEXTBLOCKS__*, кэш сбрасываем.
+        from app.domains.acts.schemas.act_content import _textblock_font_bounds
         settings_registry.reset()
+        _textblock_font_bounds.cache_clear()
         yield
         settings_registry.reset()
+        _textblock_font_bounds.cache_clear()
 
     @staticmethod
     def _register(acts_settings):
@@ -794,3 +799,27 @@ class TestDynamicLimitsFromSettings:
         with pytest.raises(ValidationError):
             TextBlockFormattingSchema(fontSize=22)
         TextBlockFormattingSchema(fontSize=14)
+
+    def test_startup_hook_clears_poisoned_font_bounds_cache(self):
+        """#2/B-35: кэш границ, заполненный ФОЛБЭК-дефолтами до регистрации
+        настроек (как на импорте формата), сбрасывается startup-хуком —
+        env-границы ACTS__TEXTBLOCKS__* начинают действовать в рантайме.
+
+        Без хука кэш «застревал» на 8..72: UI-гейт видел env-лимит, а валидатор
+        схемы — нет, и PUT /content отклонял допустимый размер."""
+        import asyncio
+        from app.domains.acts.schemas.act_content import _textblock_font_bounds
+        from app.domains.acts.settings import ActsSettings, TextblocksSettings
+        from app.domains.acts._lifecycle import _clear_font_bounds_cache
+
+        # Реестр пуст → первый вызов кэширует фолбэк-дефолты (8..72).
+        assert _textblock_font_bounds() == (8, 72)
+        # Настройки регистрируются ПОСЛЕ (как на старте) — кэш ещё отравлен.
+        self._register(ActsSettings(
+            textblocks=TextblocksSettings(font_size_min=10, font_size_max=90)
+        ))
+        assert _textblock_font_bounds() == (8, 72)  # застряло на дефолтах
+        # Startup-хук сбрасывает кэш — читаются реальные границы.
+        asyncio.run(_clear_font_bounds_cache(None))
+        assert _textblock_font_bounds() == (10, 90)
+        TextBlockFormattingSchema(fontSize=90)  # теперь валиден

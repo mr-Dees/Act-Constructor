@@ -29,6 +29,16 @@ export class ErrorBoundary {
     static _lastReportAt = 0;
 
     /**
+     * @type {number} Отдельное окно rate-limit для диагностических репортов
+     * (sanitize-fallback / sanitize-report): важные события очистки данных не
+     * должны вытесняться потоком обычных JS-ошибок и наоборот.
+     */
+    static _lastDiagReportAt = 0;
+
+    /** Категории, идущие по диагностическому окну rate-limit (не поток ошибок). */
+    static _DIAG_CATEGORIES = new Set(['sanitize-fallback', 'sanitize-report']);
+
+    /**
      * Отправляет отчёт об ошибке на бэкенд с rate-limit.
      * Сам по себе fetch завёрнут в try/catch — ошибки репортера не должны
      * провоцировать новый unhandledrejection и каскад.
@@ -37,10 +47,14 @@ export class ErrorBoundary {
      */
     static _reportToServer(payload) {
         const now = Date.now();
-        if (now - this._lastReportAt < this.REPORT_INTERVAL_MS) {
+        // C4: диагностические события (sanitize) — своё окно rate-limit, чтобы не
+        // конкурировать с потоком обычных JS-ошибок.
+        const isDiag = this._DIAG_CATEGORIES.has(payload.category);
+        const lastKey = isDiag ? '_lastDiagReportAt' : '_lastReportAt';
+        if (now - this[lastKey] < this.REPORT_INTERVAL_MS) {
             return;
         }
-        this._lastReportAt = now;
+        this[lastKey] = now;
 
         try {
             // AppConfig.api.getUrl нужен для корректного префикса под JupyterHub-proxy.
@@ -52,11 +66,15 @@ export class ErrorBoundary {
 
             const body = {
                 type: payload.type || 'error',
+                // B-18/B-19/C4: категория и деталь sanitize-событий (бэк логирует
+                // в WARNING; detail — droppedEntries/removedNodes и т.п.).
+                category: payload.category ?? null,
                 message: payload.message || '',
                 url: payload.url || window.location.href,
                 lineno: payload.lineno ?? null,
                 colno: payload.colno ?? null,
                 stack: payload.stack || null,
+                detail: payload.detail ?? null,
                 userAgent: navigator.userAgent,
                 currentActId: window.currentActId ?? null,
             };
