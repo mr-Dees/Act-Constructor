@@ -287,13 +287,10 @@ Object.assign(TextBlockManager.prototype, {
             selection.addRange(caret);
         }
 
-        const textBlockId = this.activeEditor.dataset.textBlockId;
-        // Форматирование могло завернуть caret-guard в font-span — чистим и
-        // пере-расставляем (U+200B-якорь размера при этом не затрагивается).
-        // normalizeMarkers объявлен в textblock-editor.js — в браузере всегда
-        // загружен через entry; guard на случай частичного импорта в unit-тестах.
-        if (typeof this.normalizeMarkers === 'function') this.normalizeMarkers(this.activeEditor);
-        this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        // Единый сток: форматирование могло завернуть caret-guard в font-span —
+        // finalizeEdit → normalizeMarkers чистит и пере-расставляет их (только при
+        // наличии капсул; U+200B-якорь размера при этом не затрагивается).
+        this.finalizeEdit(this.activeEditor);
         // B-4: при прямом программном вызове (stepFontSize/hotkey) тулбар иначе
         // остаётся с устаревшим значением размера.
         this.updateToolbarState();

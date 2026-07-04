@@ -202,12 +202,10 @@ Object.assign(TextBlockManager.prototype, {
             this.attachLinkFootnoteHandlers();
         }
 
-        const textBlockId = this.activeEditor.dataset.textBlockId;
-        // Капсула появилась/изменилась — пере-расставляем caret-guard'ы.
-        this.normalizeMarkers(this.activeEditor);
-        this.saveContent(textBlockId, this.activeEditor.innerHTML);
-        // B-10: создание/правка маркера могли добавить сноску — пере-нумеровать.
-        this.renumberEditorFootnotes();
+        // Единый сток с принудительной перенумерацией: создание/правка маркера
+        // могли добавить сноску ЛИБО изменить её номер без изменения числа
+        // .text-footnote (правка текста существующей сноски).
+        this.finalizeEdit(this.activeEditor, { renumber: true });
     },
 
     /**
@@ -353,12 +351,9 @@ Object.assign(TextBlockManager.prototype, {
         element.parentNode.replaceChild(formattedSpan, element);
 
         if (this.activeEditor) {
-            const textBlockId = this.activeEditor.dataset.textBlockId;
-            // Капсула удалена — пере-расставляем caret-guard'ы.
-            this.normalizeMarkers(this.activeEditor);
-            this.saveContent(textBlockId, this.activeEditor.innerHTML);
-            // B-10: сноска удалена — пере-нумеровать оставшиеся.
-            this.renumberEditorFootnotes();
+            // Единый сток с принудительной перенумерацией: удалённая сноска
+            // требует пере-нумерации оставшихся.
+            this.finalizeEdit(this.activeEditor, { renumber: true });
         }
     },
 

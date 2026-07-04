@@ -138,9 +138,10 @@ Object.assign(TextBlockManager.prototype, {
                     if (target) {
                         e.preventDefault();
                         this._deleteCapsuleWhole(target);
-                        if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
-                        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                        this._toggleEmptyClass(editor);
+                        // Единый сток: удаление капсулы могло убрать сноску —
+                        // finalizeEdit перенумеровывает по изменению их числа
+                        // (CARET-7) и пере-расставляет guard'ы у оставшихся капсул.
+                        this.finalizeEdit(editor);
                     }
                 }
                 return;
@@ -151,11 +152,12 @@ Object.assign(TextBlockManager.prototype, {
                 e.preventDefault();
                 const range = this._expandStaticRangeOutOfMarkers(r, editor);
                 range.deleteContents();
-                if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
+                // Единый сток ДО восстановления каретки: normalize двигает
+                // guard'ы, перенумерация — по изменению числа сносок (удаление
+                // клипнутой капсулы; CARET-7).
+                this.finalizeEdit(editor);
                 const sel = window.getSelection();
                 if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-                this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                this._toggleEmptyClass(editor);
             }
             return;
         }
@@ -361,7 +363,10 @@ Object.assign(TextBlockManager.prototype, {
                 sel.addRange(range);
             }
         }
-        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // Единый сток: вынесенный из guard текст — реальная правка content
+        // (changelog, TB-5). finalizeEdit зовётся под взведённым __healing;
+        // повторный проход observer'а гасится ранним return + takeRecords.
+        this.finalizeEdit(editor);
     },
 
     /** @private StaticRange → живой Range, расширенный за целые капсулы и их guard'ы. */

@@ -1,7 +1,6 @@
 /**
  * Расширение для работы с редактором
  */
-import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
@@ -398,19 +397,14 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         editor.saveTimeout = setTimeout(() => {
-            const s = this._stripGuards(editor.innerHTML);
-            textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
-
-            if (typeof ChangelogTracker !== 'undefined') {
-                ChangelogTracker._recordDebounced('modify_textblock', textBlock.id, '', {field: 'content'}, 5000);
-            }
-
-            // Применяем форматирование к новым ссылкам и сноскам
+            // Наследуем форматирование на новые ссылки/сноски ДО стока, чтобы
+            // применённые стили попали в сериализованный content (см. #14).
             this.applyFormattingToNewNodes(editor);
-
-            // typing-flow: дополнительный 150 мс debounce поверх 500 мс save-debounce.
-            // Контентная правка одного блока → точечный патч.
-            PreviewManager.scheduleTypingBlock('textblock', textBlock.id);
+            // Единый сток: normalize-if-капсулы + перенумерация-по-изменению +
+            // empty-class + saveContent (changelog внутри, TB-5). Нативное
+            // удаление/paste могли изменить число сносок — finalizeEdit ловит это
+            // и перенумеровывает (CARET-7).
+            this.finalizeEdit(editor);
         }, 500);
     },
 
@@ -428,8 +422,7 @@ Object.assign(TextBlockManager.prototype, {
         // Нет HTML — прежний путь: только чистый текст.
         if (!html || !html.trim()) {
             document.execCommand('insertText', false, plain);
-            this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-            this._toggleEmptyClass(editor);
+            this.finalizeEdit(editor);
             return;
         }
 
@@ -453,19 +446,20 @@ Object.assign(TextBlockManager.prototype, {
             document.execCommand('insertText', false, plain);
         }
 
-        this.normalizeMarkers(editor);
         // Наследуем форматирование на новые маркеры (как при ручном создании).
-        // #14: ДО saveContent — иначе унаследованный размер вставленной ссылки
+        // #14: ДО стока — иначе унаследованный размер вставленной ссылки
         // мутируется только в живом DOM и не попадает в сериализованный content
         // до blur (paste не ставит saveTimeout → flushActiveEditor — no-op).
         this.applyFormattingToNewNodes(editor);
-        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // Единый сток: normalize (guard'ы у вставленных маркеров) + перенумерация
+        // (paste поверх сноски мог её удалить — CARET-7) + empty-class +
+        // saveContent (+ changelog).
+        this.finalizeEdit(editor);
         // BUG-4: навешиваем ПОЛНЫЙ набор обработчиков (tooltip/contextmenu/
         // dblclick/клик-каретка) на вставленные маркеры сразу. Иначе ссылка из
         // Word оживала (наведение/редактирование) только при следующем фокусе —
         // перезаход на шаг, перезагрузка или клик в другое поле и обратно.
         this.attachLinkFootnoteHandlers();
-        this._toggleEmptyClass(editor);
     },
 
     /**
@@ -640,13 +634,17 @@ Object.assign(TextBlockManager.prototype, {
                     e.preventDefault();
                     const br = document.createElement('br');
                     range.insertNode(br);
+                    // Единый сток ДО установки каретки: normalizeMarkers внутри
+                    // пере-расставляет caret-guard'ы у новой границы строки
+                    // (CARET-5). Каретку ставим ПОСЛЕ — иначе normalize сдвинул бы
+                    // guard, в который она встала.
+                    this.finalizeEdit(editor);
                     if (after) {
-                        // Капсула уходит в начало новой строки. Ставим стойкий
-                        // caret-guard перед ней и каретку в нём — той же ленивой
-                        // установкой, что делает клик мышью; иначе перед
-                        // капсулой-в-начале-строки клавиатурой не встать
-                        // (эфемерная setStartAfter(br)-позиция не закреплена в
-                        // узле, а normalizeMarkers тут не зовётся).
+                        // Капсула уходит в начало новой строки — ставим каретку в
+                        // её ведущий caret-guard (его только что пере-расставил
+                        // finalizeEdit), той же ленивой установкой, что делает
+                        // клик мышью; иначе перед капсулой-в-начале-строки
+                        // клавиатурой не встать.
                         this._placeCaretBesideMarker(after, false);
                     } else {
                         const caret = document.createRange();
@@ -655,9 +653,6 @@ Object.assign(TextBlockManager.prototype, {
                         sel.removeAllRanges();
                         sel.addRange(caret);
                     }
-                    this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                    this.renumberEditorFootnotes();
-                    this._toggleEmptyClass(editor);
                     return;
                 }
             }
@@ -666,7 +661,11 @@ Object.assign(TextBlockManager.prototype, {
         // Shift+Enter - двойной перенос
         if (e.key === 'Enter' && e.shiftKey) {
             e.preventDefault();
-            this.execCommand('insertHTML', '<br><br>');
+            // insertHTML напрямую (не через this.execCommand) — вставка остаётся
+            // в нативном undo-стеке, а сток берёт на себя finalizeEdit, без
+            // двойного saveContent.
+            document.execCommand('insertHTML', false, '<br><br>');
+            this.finalizeEdit(editor);
         }
         // Escape - выход
         else if (e.key === 'Escape') {

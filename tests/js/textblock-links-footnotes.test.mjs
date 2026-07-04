@@ -37,10 +37,14 @@ function makeManager() {
   mgr.activeEditor = {
     dataset: { textBlockId: 'tb1' },
     innerHTML: '<p>контент</p>',
+    // finalizeEdit (единый сток) опрашивает капсулы и число сносок.
+    querySelector: () => null,
     querySelectorAll: () => [],
   };
   mgr.saved = [];
   mgr.saveContent = (id, content) => mgr.saved.push({ id, content });
+  // _toggleEmptyClass живёт в textblock-editor.js (тут не импортирован) — стаб.
+  mgr._toggleEmptyClass = () => {};
   mgr.attachCalls = 0;
   mgr.attachLinkFootnoteHandlers = () => { mgr.attachCalls++; };
   return mgr;

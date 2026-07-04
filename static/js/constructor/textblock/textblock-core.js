@@ -4,6 +4,7 @@
  */
 import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
+import { ChangelogTracker } from '../changelog-tracker.js';
 
 export class TextBlockManager {
     constructor() {
@@ -93,9 +94,61 @@ export class TextBlockManager {
             const stripped = this._stripGuards ? this._stripGuards(content) : content;
             textBlock.content = this.validateAndRepairCapsules
                 ? this.validateAndRepairCapsules(stripped) : stripped;
+            // TB-5: changelog пишем в общем стоке saveContent, чтобы правки МИМО
+            // input-события (смена размера, Enter-ветки, HTML-paste, нативное
+            // удаление) тоже попадали в аудит-историю. _recordDebounced
+            // коалесцирует серию правок одного блока в одну запись (ключ
+            // modify_textblock_<id>).
+            if (typeof ChangelogTracker !== 'undefined') {
+                ChangelogTracker._recordDebounced(
+                    'modify_textblock', textBlockId, '', { field: 'content' }, 5000);
+            }
             // Контентная правка одного блока → точечный патч превью.
             PreviewManager.updateBlock('textblock', textBlockId);
         }
+    }
+
+    /**
+     * Единый сток завершения правки текстблока: пересчитывает производные
+     * состояния в фиксированном порядке, чтобы ни один путь правки (Enter у
+     * капсулы, paste, нативное удаление, смена размера, observer-heal) не забывал
+     * часть шагов (класс багов «забытый вызов»). Порядок важен: нормализация
+     * двигает caret-guard'ы, поэтому вызывающие, которые сами ставят каретку,
+     * обязаны звать finalizeEdit ДО установки каретки.
+     * @param {HTMLElement} editor Редактор блока (обычно this.activeEditor).
+     * @param {{renumber?: boolean}} [opts]
+     *   renumber=true — принудительная перенумерация сносок (потоки создания/
+     *   правки/удаления маркера, где номер может измениться без изменения числа
+     *   .text-footnote).
+     */
+    finalizeEdit(editor, opts = {}) {
+        if (!editor || !editor.dataset) return;
+
+        // (а) Guard'ы капсул — только если в блоке ЕСТЬ капсулы (перф: обычный
+        // ввод в plain-текст не гоняет обход маркеров на каждой правке; guard'ы
+        // существуют лишь вокруг капсул, без них чистить/расставлять нечего).
+        if (editor.querySelector('[data-link-url],[data-footnote-text]') &&
+                typeof this.normalizeMarkers === 'function') {
+            this.normalizeMarkers(editor);
+        }
+
+        // (б) Перенумерация сносок — по изменению их числа с прошлого стока (кэш
+        // editor.__lastFootnoteCount ловит нативное удаление/paste поверх сноски,
+        // где create/remove-потоки не срабатывают — CARET-7) ЛИБО по явному
+        // запросу opts.renumber.
+        const footnoteCount = editor.querySelectorAll('.text-footnote').length;
+        if ((opts.renumber === true || footnoteCount !== editor.__lastFootnoteCount) &&
+                typeof this.renumberEditorFootnotes === 'function') {
+            this.renumberEditorFootnotes();
+        }
+        editor.__lastFootnoteCount = footnoteCount;
+
+        // (в) Класс пустоты (placeholder).
+        this._toggleEmptyClass(editor);
+
+        // (г) Запись в state.content + точечный патч превью (changelog — внутри
+        // saveContent, общий для всех путей правки).
+        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
     }
 
     /**
