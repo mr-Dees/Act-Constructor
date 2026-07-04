@@ -30,6 +30,9 @@
 @import '../portal/admin/admin-roles.css';
 @import '../portal/admin/admin-add-user.css';
 
+/* Generic datatable toolkit (используется CK-доменами) */
+@import '../shared/datatable.css';
+
 /* CK domains (Фин.Рез. + Клиентский опыт) */
 @import '../portal/ck/ck-page.css';
 @import '../portal/ck/ck-table.css';

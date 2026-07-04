@@ -9,7 +9,6 @@ from app.domains.ck_client_exp.schemas.cs_validation import (
     CSValidationCreate,
     CSValidationRecord,
 )
-from app.domains.ck_client_exp.schemas.requests import ValidationSearchRequest
 
 
 # -------------------------------------------------------------------------
@@ -106,36 +105,3 @@ class TestCSValidationRecord:
         assert record.metric_code == "CS-999"
         assert record.metric_unic_clients == 42
         assert record.metric_element_counts == 3
-
-
-# -------------------------------------------------------------------------
-# ValidationSearchRequest
-# -------------------------------------------------------------------------
-
-
-class TestValidationSearchRequest:
-
-    def test_date_range_invalid(self):
-        """end_date < start_date вызывает ValueError."""
-        with pytest.raises(ValueError, match="end_date"):
-            ValidationSearchRequest(
-                start_date=date(2025, 6, 1),
-                end_date=date(2025, 5, 1),
-            )
-
-    def test_date_range_valid(self):
-        """Корректный диапазон дат проходит валидацию."""
-        req = ValidationSearchRequest(
-            start_date=date(2025, 1, 1),
-            end_date=date(2025, 12, 31),
-        )
-        assert req.start_date == date(2025, 1, 1)
-        assert req.end_date == date(2025, 12, 31)
-
-    def test_empty_request(self):
-        """Пустой запрос (без фильтров) валиден."""
-        req = ValidationSearchRequest()
-        assert req.start_date is None
-        assert req.end_date is None
-        assert req.metric_code == []
-        assert req.process_code == []

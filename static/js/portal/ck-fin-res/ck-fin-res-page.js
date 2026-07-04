@@ -1,19 +1,20 @@
 /**
  * Контроллер страницы ЦК Фин.Рез.
- * Связывает shared-компоненты с конфигом и API.
+ * Связывает generic-тулкит таблицы (datatable) с конфигом и API домена.
  */
 import { CkFinResConfig } from './ck-fin-res-config.js';
 import { APIClient } from '../../shared/api.js';
 import { CkForm } from '../../shared/ck/ck-form.js';
-import { CkPagination } from '../../shared/ck/ck-pagination.js';
 import { CkProcessPicker } from '../../shared/ck/ck-process-picker.js';
-import { CkTable } from '../../shared/ck/ck-table.js';
+import { DataTable } from '../../shared/datatable/data-table.js';
+import { DataSource } from '../../shared/datatable/data-source.js';
+import { TableViewState } from '../../shared/datatable/table-view-state.js';
+import { ColumnVisibility } from '../../shared/datatable/column-visibility.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export class CkFinResPage {
     static _dictionaries = {};
-    static _records = [];
 
     static async init() {
         try {
@@ -38,22 +39,50 @@ export class CkFinResPage {
 
     static _initComponents() {
         const cfg = CkFinResConfig;
+        const columns = cfg.columns;
+
+        // Состояние представления (видимость/ширины) с persist в localStorage
+        this._viewState = new TableViewState({
+            storageKey: cfg.storageKey,
+            columns,
+            storage: window.localStorage,
+        });
+
+        // Адаптивный источник данных (client/server по факту полноты загрузки)
+        this._dataSource = new DataSource({
+            pageSize: 50,
+            workingSetCap: cfg.workingSetCap,
+            fetchPage: ({ filters, sort, limit, offset }) =>
+                APIClient.searchCkRecordsPage(cfg.apiPrefix, {
+                    filters: filters || {},
+                    sort: (sort || []).map(s => ({ by: s.key, dir: s.dir })),
+                    limit,
+                    offset,
+                }),
+        });
 
         // Таблица
-        CkTable.init({
-            columns: cfg.columns,
-            tableEl: document.getElementById('ckTablePanel'),
-            dictionaries: this._dictionaries,
-            onRowSelect: (record) => this._onRowSelect(record),
+        this._dataTable = new DataTable({
+            mountEl: document.getElementById('ckTablePanel'),
+            footerEl: document.getElementById('ckPaginationContainer'),
+            columns,
+            viewState: this._viewState,
+            dataSource: this._dataSource,
+            dicts: this._dictionaries,
             pageSize: 50,
+            onRowSelect: (record) => this._onRowSelect(record),
         });
 
-        // Пагинация
-        CkPagination.init({
-            containerEl: document.getElementById('ckPaginationContainer'),
-            pageSize: 50,
-            onChange: () => this._onPageChange(),
-        });
+        // Панель видимости колонок (кнопка ⚙ в тулбаре)
+        const colvisBtn = document.getElementById('ckColvisBtn');
+        if (colvisBtn) {
+            ColumnVisibility.mount({
+                anchorEl: colvisBtn,
+                columns,
+                viewState: this._viewState,
+                onChange: () => this._dataTable.refresh(),
+            });
+        }
 
         // Форма
         CkForm.init({
@@ -61,52 +90,31 @@ export class CkFinResPage {
             dictionaries: this._dictionaries,
             containerEl: document.getElementById('ckFormPanel'),
             onProcessPick: (field) => this._openProcessPicker(field),
+            sectionStateKey: cfg.sectionStateKey,
         });
-
-        // Поиск
-        const searchInput = document.getElementById('ckSearchInput');
-        if (searchInput) {
-            searchInput.addEventListener('input', () => {
-                CkTable.filterLocal(searchInput.value);
-            });
-        }
 
         // Toolbar кнопки
         const addBtn = document.getElementById('ckAddRecordBtn');
-        if (addBtn) {
-            addBtn.addEventListener('click', () => this._onAddRecord());
-        }
+        if (addBtn) addBtn.addEventListener('click', () => this._onAddRecord());
 
         const resetBtn = document.getElementById('ckResetFiltersBtn');
-        if (resetBtn) {
-            resetBtn.addEventListener('click', () => this._onResetFilters());
-        }
+        if (resetBtn) resetBtn.addEventListener('click', () => this._onResetFilters());
 
         // Footer кнопки
         const saveBtn = document.getElementById('ckSaveBtn');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', () => this._onSave());
-        }
+        if (saveBtn) saveBtn.addEventListener('click', () => this._onSave());
 
         const deleteBtn = document.getElementById('ckDeleteBtn');
-        if (deleteBtn) {
-            deleteBtn.addEventListener('click', () => this._onDelete());
-        }
+        if (deleteBtn) deleteBtn.addEventListener('click', () => this._onDelete());
     }
 
     static async _loadData() {
         try {
-            const records = await APIClient.searchCkRecords(CkFinResConfig.apiPrefix, {});
-            this._records = records;
-            CkTable.setData(records);
-            CkPagination.setTotal(records.length);
+            await this._dataSource.init();
+            await this._dataTable.render();
         } catch (error) {
             Notifications.error('Ошибка загрузки данных: ' + error.message);
         }
-    }
-
-    static _onPageChange() {
-        CkTable.setPage(CkPagination.getPage());
     }
 
     static _onRowSelect(record) {
@@ -115,19 +123,20 @@ export class CkFinResPage {
     }
 
     static _onAddRecord() {
-        CkTable.clearSelection();
+        this._dataTable.clearSelection();
         CkForm.clear();
         this._updateSubheader(null);
     }
 
     static _onResetFilters() {
-        const searchInput = document.getElementById('ckSearchInput');
-        if (searchInput) searchInput.value = '';
-        CkTable.filterLocal('');
-        CkPagination.reset();
+        this._dataTable.clearFilters();
     }
 
     static async _onSave() {
+        // В пустом режиме сохранять нечего — выходим до валидации,
+        // API-вызова и перезагрузки данных.
+        if (CkForm.getMode() === 'empty') return;
+
         const { valid, errors } = CkForm.validate();
         if (!valid) {
             const names = errors.map(e => e.label).join(', ');

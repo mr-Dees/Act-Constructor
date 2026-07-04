@@ -131,34 +131,3 @@ class TestBatchUpdateRecords:
 
         fr_repo.batch_update.assert_called_once_with(items, "testuser")
         assert result == 3
-
-
-# -------------------------------------------------------------------------
-# search_records
-# -------------------------------------------------------------------------
-
-
-class TestSearchRecords:
-
-    async def test_delegates_to_repo(self, service, fr_repo):
-        """Делегирует вызов в fr_repo.search + считает total через count_search."""
-        fr_repo.search.return_value = [{"id": 1}]
-        fr_repo.count_search.return_value = 1
-        items, total = await service.search_records(metric_code=["FR-001"])
-
-        fr_repo.search.assert_called_once_with(
-            start_date=None,
-            end_date=None,
-            metric_code=["FR-001"],
-            process_code=None,
-            limit=50,
-            offset=0,
-        )
-        fr_repo.count_search.assert_called_once_with(
-            start_date=None,
-            end_date=None,
-            metric_code=["FR-001"],
-            process_code=None,
-        )
-        assert items == [{"id": 1}]
-        assert total == 1

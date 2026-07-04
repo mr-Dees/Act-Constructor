@@ -156,7 +156,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing-md) var(--spacing-2xl);
+    padding: 12px var(--spacing-2xl); /* высота пункта ≈ высоте футера (кнопка AI-ассистента) */
     color: var(--text-secondary);
     text-decoration: none;
     transition: all var(--duration-fast);
@@ -236,16 +236,24 @@
 
 .sidebar-footer {
     flex-shrink: 0;
-    padding: var(--spacing-md) 0;
+    height: 48px;                /* совпадает с .ck-footer домена → линии на одной горизонтали; по высоте вровень с пунктами навигации */
+    display: flex;
+    align-items: stretch;
+    padding: 0;
     border-top: var(--border-width-thin) solid var(--border-light);
 }
 
+/* Кнопка AI-Ассистента визуально совпадает с пунктами навигации (.sidebar-nav-item):
+   те же отступы, типографика и hover. Высота 100% заполняет 48px-футер, поэтому
+   верхняя линия футера лежит на той же горизонтали, что и линия футера ЦК-страницы. */
 .sidebar-chat-btn {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
-    padding: var(--spacing-md) var(--spacing-2xl);
+    padding: 12px var(--spacing-2xl); /* тот же паддинг, что у пунктов навигации */
+    height: 100%;
     width: 100%;
+    box-sizing: border-box;
     border: none;
     background: transparent;
     color: var(--text-secondary);
@@ -257,7 +265,7 @@
 }
 
 .sidebar-chat-btn:hover {
-    background: var(--primary-subtle);
+    background: var(--gray-50);
     color: var(--primary);
 }
 
@@ -266,7 +274,7 @@
 }
 
 .landing-sidebar.collapsed .sidebar-chat-btn {
-    padding: var(--spacing-md) var(--spacing-lg);
+    padding: 0 var(--spacing-lg);
     justify-content: center;
 }
 

@@ -14,6 +14,7 @@ class CSValidationCreate(BaseModel):
     reestr_metric_id: Optional[int] = None
     neg_finder_tb_id: str = Field(default="", max_length=200)
     metric_code: str = Field(..., max_length=200)
+    metric_name: str = Field(default="", max_length=500)
     metric_unic_clients: int = Field(default=0, ge=0)
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")

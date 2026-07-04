@@ -2,10 +2,14 @@
  * Компонент формы редактирования записи ЦК.
  * Рендерит поля по декларативному конфигу.
  */
+import { flattenFields } from '../../shared/datatable/build-columns.js';
+
 export class CkForm {
     static _config = null;
     static _currentRecord = null;
     static _mode = 'empty'; // 'empty' | 'create' | 'edit'
+    static _collapsed = new Set();  // id свёрнутых секций
+    static _sectionStateKey = null; // ключ localStorage для состояния секций
 
     /**
      * @param {Object} config
@@ -18,6 +22,8 @@ export class CkForm {
         this._config = config;
         this._currentRecord = null;
         this._mode = 'empty';
+        this._sectionStateKey = config.sectionStateKey || null;
+        this._loadSectionState();
         this._renderEmpty();
     }
 
@@ -50,7 +56,7 @@ export class CkForm {
 
     static collectData() {
         const data = {};
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const field of fields) {
             // computed-поля приходят из VIEW JOIN на бэке — не отправляем в payload
             if (field.computed) continue;
@@ -83,22 +89,9 @@ export class CkForm {
         return data;
     }
 
-    /** Возвращает плоский список всех полей с учётом row-групп. */
-    static _flattenFields() {
-        const result = [];
-        for (const field of this._config.fields) {
-            if (field.row) {
-                for (const sub of field.row) result.push(sub);
-            } else {
-                result.push(field);
-            }
-        }
-        return result;
-    }
-
     static validate() {
         const errors = [];
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const field of fields) {
             if (!field.required) continue;
             // computed-поля заполняются автоматически — не валидируем
@@ -120,12 +113,29 @@ export class CkForm {
             // Убираем/добавляем класс ошибки
             if (isEmpty) {
                 el.classList.add('ck-form__input--error');
-                errors.push({ key: field.key, label: field.label });
+                errors.push({ key: field.key, label: field.label, el });
             } else {
                 el.classList.remove('ck-form__input--error');
             }
         }
+        // Первая ошибка может прятаться в свёрнутой секции — раскрываем и
+        // фокусируем поле, иначе пользователь не увидит, что блокирует сохранение.
+        if (errors.length) this._revealError(errors[0].el);
         return { valid: errors.length === 0, errors };
+    }
+
+    /** Раскрывает секцию с ошибкой и переводит фокус на проблемное поле. */
+    static _revealError(el) {
+        if (!el || typeof el.closest !== 'function') return;
+        const sec = el.closest('.ck-form__section');
+        if (sec && sec.classList.contains('ck-form__section--collapsed')) {
+            sec.classList.remove('ck-form__section--collapsed');
+            const header = sec.querySelector('.ck-form__section-header');
+            if (header) header.setAttribute('aria-expanded', 'true');
+            const id = sec.dataset.section;
+            if (id) { this._collapsed.delete(id); this._saveSectionState(); }
+        }
+        if (typeof el.focus === 'function') el.focus();
     }
 
     static _renderEmpty() {
@@ -141,25 +151,105 @@ export class CkForm {
         const form = document.createElement('div');
         form.className = 'ck-form';
 
-        for (const field of this._config.fields) {
-            if (field.row) {
-                // Начало строки с несколькими полями
-                const row = document.createElement('div');
-                row.className = 'ck-form__row';
-                for (const subField of field.row) {
-                    row.appendChild(this._createField(subField));
-                }
-                form.appendChild(row);
-            } else {
-                const group = document.createElement('div');
-                group.className = 'ck-form__group';
-                group.appendChild(this._createField(field));
-                form.appendChild(group);
-            }
+        for (const entry of this._config.fields) {
+            if (entry.section) form.appendChild(this._createSection(entry));
+            else this._appendEntry(form, entry);
         }
 
         el.innerHTML = '';
         el.appendChild(form);
+    }
+
+    /** Добавляет в контейнер row-группу или одиночное поле. */
+    static _appendEntry(container, entry) {
+        if (entry.row) {
+            const row = document.createElement('div');
+            row.className = 'ck-form__row';
+            for (const sub of entry.row) row.appendChild(this._createField(sub));
+            container.appendChild(row);
+        } else {
+            const group = document.createElement('div');
+            group.className = 'ck-form__group';
+            group.appendChild(this._createField(entry));
+            container.appendChild(group);
+        }
+    }
+
+    /**
+     * Сворачиваемая секция (disclosure): кнопка-заголовок с aria-expanded +
+     * region-панель. Несколько секций раскрыты одновременно (multi-open).
+     * Состояние свёрнутости — по стабильному id (`key`/название) с persist.
+     */
+    static _createSection(cfg) {
+        const sec = document.createElement('div');
+        sec.className = 'ck-form__section';
+        const id = cfg.key || cfg.section;
+        sec.dataset.section = id;
+
+        const panelId = `ck-section-${id}`;
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'ck-form__section-header';
+        header.setAttribute('aria-controls', panelId);
+
+        const chevron = document.createElement('span');
+        chevron.className = 'ck-form__section-chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+
+        const title = document.createElement('span');
+        title.className = 'ck-form__section-title';
+        title.textContent = cfg.section;
+
+        header.appendChild(chevron);
+        header.appendChild(title);
+
+        const panel = document.createElement('div');
+        panel.className = 'ck-form__section-body';
+        panel.id = panelId;
+        panel.setAttribute('role', 'region');
+        panel.setAttribute('aria-label', cfg.section);
+        for (const entry of (cfg.fields || [])) this._appendEntry(panel, entry);
+
+        const collapsed = this._collapsed.has(id);
+        sec.classList.toggle('ck-form__section--collapsed', collapsed);
+        header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+
+        header.addEventListener('click', () => {
+            const isCollapsed = sec.classList.toggle('ck-form__section--collapsed');
+            header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+            if (isCollapsed) this._collapsed.add(id);
+            else this._collapsed.delete(id);
+            this._saveSectionState();
+        });
+
+        sec.appendChild(header);
+        sec.appendChild(panel);
+        return sec;
+    }
+
+    /** Загружает свёрнутые секции из localStorage (по ключу формы). */
+    static _loadSectionState() {
+        this._collapsed = new Set();
+        if (!this._sectionStateKey) return;
+        try {
+            const raw = window.localStorage.getItem(this._sectionStateKey);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) this._collapsed = new Set(arr);
+            }
+        } catch {
+            /* битое состояние — все секции раскрыты */
+        }
+    }
+
+    /** Сохраняет свёрнутые секции в localStorage. */
+    static _saveSectionState() {
+        if (!this._sectionStateKey) return;
+        try {
+            window.localStorage.setItem(this._sectionStateKey, JSON.stringify([...this._collapsed]));
+        } catch {
+            /* переполнение квоты — игнорируем */
+        }
     }
 
     static _createField(field) {
@@ -174,6 +264,10 @@ export class CkForm {
         const label = document.createElement('label');
         label.className = 'ck-form__label';
         label.textContent = field.label;
+        if (field.description) {
+            label.title = field.description; // подсказка по наведению — полное описание поля
+            label.classList.add('ck-form__label--described');
+        }
         if (field.required) {
             const req = document.createElement('span');
             req.className = 'required';
@@ -325,7 +419,7 @@ export class CkForm {
     }
 
     static _populateFields(record) {
-        const fields = this._flattenFields();
+        const fields = flattenFields(this._config.fields);
         for (const f of fields) {
             const el = document.getElementById(`ck-field-${f.key}`);
             if (!el) continue;
@@ -448,18 +542,10 @@ export class CkForm {
         });
     }
 
-    /** Ищет конфиг поля по key (с учётом row-групп). */
+    /** Ищет конфиг поля по key (с учётом секций и row-групп). */
     static _findFieldConfig(key) {
         if (!this._config) return null;
-        for (const field of this._config.fields) {
-            if (field.row) {
-                const found = field.row.find(f => f.key === key);
-                if (found) return found;
-            } else if (field.key === key) {
-                return field;
-            }
-        }
-        return null;
+        return flattenFields(this._config.fields).find(f => f.key === key) || null;
     }
 }
 

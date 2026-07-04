@@ -1553,6 +1553,25 @@ export class APIClient {
     }
 
     /**
+     * Поиск записей ЦК с пагинацией/фильтрами/сортировкой — полный ответ.
+     * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
+     * @param {Object} body - {filters, sort: [{by, dir}], limit, offset}
+     * @returns {Promise<{items: Array, total: number}>}
+     */
+    static async searchCkRecordsPage(prefix, body = {}) {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/search`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        const json = await response.json();
+        return { items: json.items || [], total: json.total || 0 };
+    }
+
+    /**
      * Получить запись по ID.
      * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
      * @param {number} id

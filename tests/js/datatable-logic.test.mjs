@@ -1,0 +1,122 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  filterRows, sortRows, sortRowsMulti, paginate, specMatches, compareBy,
+} from '../../static/js/shared/datatable/datatable-logic.js';
+
+// Канон фильтра — СЫРЬЁ. filterMap = dict[colKey → FilterSpec].
+const columns = [
+  { key: 'tb', type: 'dictionary' },   // сырое — id (число/строка)
+  { key: 'sum', type: 'number' },      // сырое — число
+  { key: 'name', type: 'text' },
+  { key: 'dt', type: 'date' },
+];
+const rows = [
+  { id: 1, tb: 1, sum: 1234.5, name: 'Альфа', dt: '2025-02-01' },
+  { id: 2, tb: 2, sum: 98000, name: 'Бета', dt: '2025-05-10' },
+];
+
+test('specMatches contains — по сырому тексту', () => {
+  assert.equal(specMatches('Альфа', { op: 'contains', value: 'льф' }), true);
+  assert.equal(specMatches('Альфа', { op: 'contains', value: 'бет' }), false);
+  assert.equal(specMatches('x', { op: 'contains', value: '' }), true); // пустой — не режет
+});
+
+test('specMatches eq — точное равенство', () => {
+  assert.equal(specMatches(true, { op: 'eq', value: 'true' }), true);
+  assert.equal(specMatches(false, { op: 'eq', value: 'true' }), false);
+  assert.equal(specMatches('a', { op: 'eq', value: '' }), true); // пустой — не режет
+});
+
+test('specMatches in — членство по сырому id; пустой массив → совпадений нет', () => {
+  assert.equal(specMatches(1, { op: 'in', values: ['1', '14'] }), true);
+  assert.equal(specMatches(2, { op: 'in', values: ['1', '14'] }), false);
+  assert.equal(specMatches(1, { op: 'in', values: [] }), false); // in:[] → ничего не совпадает
+});
+
+test('specMatches range date — включительно от/до', () => {
+  const s = { op: 'range', cast: 'date', from: '2025-03-01', to: '2025-06-01' };
+  assert.equal(specMatches('2025-05-10', s), true);
+  assert.equal(specMatches('2025-02-01', s), false);
+  assert.equal(specMatches('2025-06-01', { op: 'range', cast: 'date', to: '2025-06-01' }), true);
+});
+
+test('specMatches range numeric — только нижняя граница', () => {
+  const s = { op: 'range', cast: 'numeric', from: '1000' };
+  assert.equal(specMatches(1234.5, s), true);
+  assert.equal(specMatches(500, s), false);
+});
+
+test('filterRows: словарь по сырому id (op in)', () => {
+  assert.deepEqual(filterRows(rows, columns, { tb: { op: 'in', values: ['1'] } }).map(r => r.id), [1]);
+});
+
+test('filterRows: число по подстроке сырого значения', () => {
+  assert.deepEqual(filterRows(rows, columns, { sum: { op: 'contains', value: '1234' } }).map(r => r.id), [1]);
+});
+
+test('filterRows: дата-диапазон', () => {
+  const out = filterRows(rows, columns, { dt: { op: 'range', cast: 'date', from: '2025-04-01', to: '2025-12-31' } });
+  assert.deepEqual(out.map(r => r.id), [2]);
+});
+
+test('filterRows: несколько фильтров комбинируются по И', () => {
+  const out = filterRows(rows, columns, {
+    tb: { op: 'in', values: ['2'] },
+    name: { op: 'contains', value: 'бет' },
+  });
+  assert.deepEqual(out.map(r => r.id), [2]);
+});
+
+test('filterRows: пустой набор/пустые спеки не режут', () => {
+  assert.equal(filterRows(rows, columns, { name: { op: 'contains', value: '' } }).length, 2);
+  assert.equal(filterRows(rows, columns, {}).length, 2);
+});
+
+test('compareBy: id сортируется ЧИСЛЕННО (не 1,10,2)', () => {
+  const data = [{ id: 2 }, { id: 10 }, { id: 1 }];
+  const col = { key: 'id', type: 'id' };
+  const out = data.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
+  assert.deepEqual(out, [1, 2, 10]);
+});
+
+test('compareBy: дата — хронологически', () => {
+  const col = { key: 'dt', type: 'date' };
+  const out = rows.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
+  assert.deepEqual(out, [1, 2]); // 2025-02-01 < 2025-05-10
+});
+
+test('сортировка чисел по убыванию', () => {
+  assert.deepEqual(sortRows(rows, columns[1], 'desc').map(r => r.id), [2, 1]);
+});
+
+test('сортировка текста по-русски', () => {
+  assert.deepEqual(sortRows(rows, columns[2], 'asc').map(r => r.id), [1, 2]);
+});
+
+test('мультисортировка: вторичный ключ разрешает равенство по первичному', () => {
+  const data = [
+    { id: 1, grp: 1, name: 'Б' },
+    { id: 2, grp: 1, name: 'А' },
+    { id: 3, grp: 2, name: 'В' },
+  ];
+  const cols = { grp: { key: 'grp', type: 'number' }, name: { key: 'name', type: 'text' } };
+  const out = sortRowsMulti(data, [
+    { column: cols.grp, dir: 'asc' },
+    { column: cols.name, dir: 'asc' },
+  ]).map(r => r.id);
+  assert.deepEqual(out, [2, 1, 3]);
+});
+
+test('sortRowsMulti без спецификаций — копия в исходном порядке', () => {
+  const data = [{ id: 3 }, { id: 1 }];
+  const out = sortRowsMulti(data, []);
+  assert.deepEqual(out.map(r => r.id), [3, 1]);
+  assert.notEqual(out, data);
+});
+
+test('paginate отдаёт страницу и число страниц', () => {
+  const r = paginate([1, 2, 3, 4, 5], 2, 2);
+  assert.deepEqual(r.pageRows, [3, 4]);
+  assert.equal(r.totalPages, 3);
+});

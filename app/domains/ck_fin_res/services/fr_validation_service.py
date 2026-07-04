@@ -7,12 +7,14 @@
 """
 
 import logging
-from datetime import date
 
+from app.core.settings_registry import get as get_domain_settings
 from app.domains.ck_fin_res.exceptions import FRRecordNotFoundError
 from app.domains.ck_fin_res.repositories.fr_validation_repository import (
     FRValidationRepository,
 )
+from app.domains.ck_fin_res.schemas.requests import FilterSpec
+from app.domains.ck_fin_res.settings import CkFinResSettings
 from app.domains.ua_data.interfaces import IDictionaryRepository
 
 logger = logging.getLogger("audit_workstation.domains.ck_fin_res.service")
@@ -59,31 +61,39 @@ class FRValidationService:
     # ПОИСК
     # ------------------------------------------------------------------
 
-    async def search_records(
+    async def search(
         self,
-        start_date: date | None = None,
-        end_date: date | None = None,
-        metric_code: list[str] | None = None,
-        process_code: list[str] | None = None,
+        *,
+        filters: dict[str, FilterSpec] | None = None,
+        sort: list[tuple[str, str]] | None = None,
+        sort_by: str | None = None,
+        sort_dir: str = "asc",
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[list[dict], int]:
-        """Поиск записей FR-валидации: страница + общее количество."""
-        items = await self.fr_repo.search(
-            start_date=start_date,
-            end_date=end_date,
-            metric_code=metric_code,
-            process_code=process_code,
-            limit=limit,
+    ) -> dict:
+        """Поиск по колоночным фильтрам с сортировкой и пагинацией.
+
+        Пробрасывает параметры в репозиторий; ``sort`` — упорядоченный список
+        (колонка, направление) для многоколоночной сортировки. Размер страницы
+        ограничивается ``working_set_cap`` домена. Возвращает {items, total,
+        limit, offset}.
+        """
+        settings = get_domain_settings("ck_fin_res", CkFinResSettings)
+        capped_limit = min(limit, settings.working_set_cap)
+        items, total = await self.fr_repo.search_filtered(
+            filters=filters,
+            sort=sort,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=capped_limit,
             offset=offset,
         )
-        total = await self.fr_repo.count_search(
-            start_date=start_date,
-            end_date=end_date,
-            metric_code=metric_code,
-            process_code=process_code,
-        )
-        return items, total
+        return {
+            "items": items,
+            "total": total,
+            "limit": capped_limit,
+            "offset": offset,
+        }
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID

@@ -4,31 +4,26 @@
 
 {% block content %}
 <div class="ck-page">
-    <!-- 1. Toolbar -->
+    <!-- 1. Toolbar: слева кнопки (над таблицей), справа мета записи (над панелью
+         формы, в одной полосе-отчерке вровень с тулбаром — см. п.7) -->
     <div class="ck-toolbar">
-        <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
-        <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
-        <div class="ck-toolbar__user">
-            Пользователь: <b id="ckUsername"></b>
+        <div class="ck-toolbar__left">
+            <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
+            <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
+            <button class="btn btn-secondary" id="ckColvisBtn" title="Настройка колонок">Колонки</button>
+        </div>
+        <div class="ck-toolbar__right">
+            <span class="ck-record-title" id="ckRecordTitle"></span>
+            <span class="ck-record-meta" id="ckRecordMeta"></span>
         </div>
     </div>
 
-    <!-- 2. Sub-header -->
-    <div class="ck-subheader">
-        <div class="ck-subheader__left">
-            <input type="text" class="ck-search-input" id="ckSearchInput"
-                   placeholder="🔍 Поиск: введите искомое значение">
-        </div>
-        <div class="ck-subheader__right">
-            <span class="ck-subheader__record-title" id="ckRecordTitle"></span>
-            <span class="ck-subheader__record-meta" id="ckRecordMeta"></span>
-        </div>
-    </div>
-
-    <!-- 3. Content -->
+    <!-- 2. Content -->
     <div class="ck-content">
         <div class="ck-content__table-panel" id="ckTablePanel"></div>
-        <div class="ck-content__form-panel" id="ckFormPanel"></div>
+        <div class="ck-content__form-panel">
+            <div class="ck-form-mount" id="ckFormPanel"></div>
+        </div>
     </div>
 
     <!-- 4. Footer -->
@@ -56,9 +51,6 @@
         if (isAuthorized) {
             PortalSidebar.init();
             LandingSettingsManager.init();
-
-            const usernameEl = document.getElementById('ckUsername');
-            if (usernameEl) usernameEl.textContent = AuthManager.getCurrentUser();
 
             {% block ck_init %}{% endblock %}
         }
