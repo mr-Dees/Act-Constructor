@@ -28,8 +28,8 @@ function makeManager(cfg = {}) {
     querySelectorAll: () => new Array(cfg.footnoteCount || 0).fill({}),
   };
   mgr.normalizeMarkers = () => calls.push('normalize');
-  // Fix 2: renumber должен получить ПЕРЕДАННЫЙ editor, а не activeEditor.
-  mgr.renumberEditorFootnotes = (ed) => calls.push(ed === editor ? 'renumber' : 'renumber:other');
+  // Task 7 (TREE-1): перенумерация теперь ГЛОБАЛЬНАЯ (весь лист), без аргумента.
+  mgr.renumberAllFootnotes = () => calls.push('renumber');
   mgr._toggleEmptyClass = () => calls.push('toggleEmpty');
   mgr.saveContent = (id, html) => calls.push(`save:${id}:${html}`);
   return { mgr, editor, calls };
@@ -90,7 +90,7 @@ test('finalizeEdit: рост/спад числа сносок (нативное 
     querySelector: () => null,
     querySelectorAll: () => new Array(fc).fill({}),
   };
-  mgr.renumberEditorFootnotes = () => calls.push('renumber');
+  mgr.renumberAllFootnotes = () => calls.push('renumber');
   mgr._toggleEmptyClass = () => {};
   mgr.saveContent = () => {};
 
@@ -117,21 +117,21 @@ test('finalizeEdit: без opts.renumber и без смены счётчика �
   assert.ok(!calls.includes('renumber'));
 });
 
-test('finalizeEdit: renumberEditorFootnotes получает ПЕРЕДАННЫЙ editor, не activeEditor (Fix 2)', () => {
+test('finalizeEdit: перенумерация ГЛОБАЛЬНАЯ (renumberAllFootnotes), кэш переданного editor примирён (Task 7)', () => {
   const captured = [];
   const mgr = Object.create(TextBlockManager.prototype);
   const passed = {
     dataset: { textBlockId: 'tbX' }, innerHTML: 'x', textContent: '',
     querySelector: () => null, querySelectorAll: () => [{}],
   };
-  mgr.activeEditor = { dataset: { textBlockId: 'OTHER' } }; // НЕ должен использоваться
+  mgr.activeEditor = { dataset: { textBlockId: 'OTHER' } }; // не участвует
   mgr._toggleEmptyClass = () => {};
   mgr.saveContent = () => {};
-  mgr.renumberEditorFootnotes = (ed) => captured.push(ed);
+  // Глобальный проход не принимает editor — считает весь лист (TREE-1).
+  mgr.renumberAllFootnotes = () => captured.push('all');
   mgr.finalizeEdit(passed, { renumber: true });
-  assert.equal(captured.length, 1);
-  assert.equal(captured[0], passed, 'renumber получил переданный editor');
-  assert.notEqual(captured[0], mgr.activeEditor);
+  assert.deepEqual(captured, ['all'], 'сток зовёт глобальную перенумерацию');
+  assert.equal(passed.__lastFootnoteCount, 1, 'кэш числа сносок переданного editor примирён');
 });
 
 // ── Защитный no-op ───────────────────────────────────────────────────────────

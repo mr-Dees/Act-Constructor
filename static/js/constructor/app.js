@@ -421,11 +421,11 @@ export class App {
      * @private
      */
     static _applyReadOnlyToContent() {
-        // Делаем текстовые блоки нередактируемыми
-        document.querySelectorAll('.textblock-content[contenteditable="true"]').forEach(el => {
-            el.contentEditable = 'false';
-            el.classList.add('read-only');
-        });
+        // TREE-2: текстблоки переводятся в read-only в createEditor при рендере
+        // (textblock-editor.js — реальный, работающий гард), поэтому отдельного
+        // фолбэк-прохода по ним здесь нет: прежний селектор '.textblock-content'
+        // не соответствовал ни одному элементу (реальный класс — '.textblock-editor',
+        // и он уже создаётся с contentEditable='false' в RO-режиме).
 
         // Делаем ячейки таблиц нередактируемыми
         document.querySelectorAll('.table-cell[contenteditable="true"]').forEach(el => {

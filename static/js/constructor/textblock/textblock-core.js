@@ -140,12 +140,16 @@ export class TextBlockManager {
         // (б) Перенумерация сносок — по изменению их числа с прошлого стока (кэш
         // editor.__lastFootnoteCount ловит нативное удаление/paste поверх сноски,
         // где create/remove-потоки не срабатывают — CARET-7) ЛИБО по явному
-        // запросу opts.renumber. Перенумеровываем ИМЕННО переданный editor (тот же,
-        // на котором считали счётчик), а не безусловно this.activeEditor.
+        // запросу opts.renumber. Перенумеровываем ГЛОБАЛЬНО (весь лист, TREE-1):
+        // смена числа сносок в ЭТОМ блоке сдвигает сквозные номера в ПОСЛЕДУЮЩИХ
+        // блоках. Гейт по счётчику держит это дёшево — обычный ввод без правки
+        // сносок сюда не заходит. Счётчик считаем на ПЕРЕДАННОМ editor; глобальный
+        // проход примирит __lastFootnoteCount всех редакторов, а строка ниже
+        // фиксирует его и для этого (единственный путь, когда проход не звался).
         const footnoteCount = editor.querySelectorAll('.text-footnote').length;
         if ((opts.renumber === true || footnoteCount !== editor.__lastFootnoteCount) &&
-                typeof this.renumberEditorFootnotes === 'function') {
-            this.renumberEditorFootnotes(editor);
+                typeof this.renumberAllFootnotes === 'function') {
+            this.renumberAllFootnotes();
         }
         editor.__lastFootnoteCount = footnoteCount;
 

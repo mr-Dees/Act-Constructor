@@ -582,6 +582,30 @@ Object.assign(TextBlockManager.prototype, {
         if (!editor) return;
         const offset = footnoteOffsetForBlock(editor.dataset.textBlockId);
         numberFootnotes(editor, offset + 1);
+    },
+
+    /**
+     * TREE-1/CORE-3: сквозная нумерация сносок по ВСЕМ редакторам листа единым
+     * проходом — аналог numberFootnotes(sheet) в превью. Обход идёт по document
+     * order контейнера #itemsContainer, который renderAll строит в порядке дерева
+     * (тот же порядок, что у листа превью и DOCX), поэтому соответствие
+     * «сноска→номер» совпадает с превью/экспортом. Один счётчик на весь лист —
+     * O(N), НЕ per-editor offset (иначе O(N²)). Работает и в read-only: капсулы
+     * там отрендерены, просто редактор нередактируем.
+     *
+     * Поддерживает когерентность кэша editor.__lastFootnoteCount (гейт
+     * finalizeEdit): после прохода каждому редактору проставляем его текущее
+     * число .text-footnote тем же критерием (ВСЕ капсулы, включая пустые), что
+     * считает сам finalizeEdit, — иначе гейт стрелял бы вхолостую или молчал.
+     * @param {ParentNode} [container=document.getElementById('itemsContainer')]
+     */
+    renumberAllFootnotes(container = document.getElementById('itemsContainer')) {
+        if (!container || typeof container.querySelectorAll !== 'function') return;
+        // Единый сквозной проход — тот же обход листа, что numberFootnotes(sheet).
+        numberFootnotes(container, 1);
+        container.querySelectorAll('.textblock-editor').forEach((ed) => {
+            ed.__lastFootnoteCount = ed.querySelectorAll('.text-footnote').length;
+        });
     }
 });
 
