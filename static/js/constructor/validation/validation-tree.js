@@ -149,6 +149,50 @@ export const ValidationTree = {
         const limitName = AppConfig.content.limitNames[contentType];
 
         return ValidationCore.validateLimit(existingCount, limit, limitName);
+    },
+
+    /**
+     * Проверяет лимит текстблоков-на-узел при вставке ГОТОВОГО поддерева
+     * (PERSIST-2: undo восстановления удалённого блока, paste). insertNodeAt —
+     * официальный мутатор для таких вставок — в отличие от addTextBlockToNode
+     * не зовёт canAddContent, поэтому без этой проверки узел мог получить
+     * N+1 текстблоков, и сервер отклонял бы уже сохранение всего акта.
+     *
+     * Проверяются две вещи:
+     *  - целевой родитель: если сам корень поддерева — textblock, его +1 не
+     *    должен превысить лимит родителя (тот же лимит, что у «Добавить
+     *    текстовый блок»);
+     *  - самосогласованность поддерева: число текстблоков-детей на каждом его
+     *    узле не должно превышать ТЕКУЩИЙ лимит — поддерево скопировано/удалено
+     *    раньше и могло стать невалидным, если лимит с тех пор снизился
+     *    (буфер обмена в localStorage переживает перезагрузку страницы).
+     *
+     * @param {string} parentId - ID узла, в children которого встанет node
+     * @param {Object} node - Вставляемый узел (возможно, с поддеревом)
+     * @returns {Object} Результат с полями valid, message
+     */
+    canInsertTextBlockSubtree(parentId, node) {
+        const limit = getStructureLimits().textBlocksPerNode;
+        if (typeof limit !== 'number') return ValidationCore.success();
+
+        const limitName = AppConfig.content.limitNames[AppConfig.nodeTypes.TEXTBLOCK];
+        const fail = () => ValidationCore.failure(AppConfig.content.errors.limitReached(limitName, limit));
+
+        const parent = AppState.findNodeById(parentId);
+        if (parent && node.type === AppConfig.nodeTypes.TEXTBLOCK) {
+            const existingCount = TreeUtils.countChildrenByType(parent, AppConfig.nodeTypes.TEXTBLOCK);
+            if (existingCount + 1 > limit) return fail();
+        }
+
+        const stack = [node];
+        while (stack.length) {
+            const current = stack.pop();
+            if (!Array.isArray(current.children)) continue;
+            if (TreeUtils.countChildrenByType(current, AppConfig.nodeTypes.TEXTBLOCK) > limit) return fail();
+            stack.push(...current.children);
+        }
+
+        return ValidationCore.success();
     }
 };
 

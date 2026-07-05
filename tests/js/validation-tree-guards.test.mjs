@@ -14,8 +14,13 @@ import { AppState } from '../../static/js/constructor/state/state-core.js';
 import '../../static/js/constructor/state/state-tree.js';
 import '../../static/js/constructor/state/state-content.js';
 import { ValidationTree } from '../../static/js/constructor/validation/validation-tree.js';
+import {
+    getStructureLimits,
+    resetImageLimitsForTests,
+} from '../../static/js/constructor/violation/violation-image-validator.js';
 
 beforeEach(() => {
+    resetImageLimitsForTests();
     AppState.treeData = {
         id: 'root',
         label: 'Акт',
@@ -62,4 +67,99 @@ test('canAddSibling запрещает обычного соседа на 0 ур
     assert.ok(AppState.addNode('5', 'Подпункт', true).valid);
     const child = AppState.findNodeById('5').children.at(-1);
     assert.equal(ValidationTree.canAddSibling(child.id).valid, true);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// PERSIST-2: canInsertTextBlockSubtree — лимит текстблоков при вставке
+// ГОТОВОГО поддерева (undo/paste, insertNodeAt не зовёт canAddContent)
+// ──────────────────────────────────────────────────────────────────────────
+
+test('canInsertTextBlockSubtree: родитель на лимите + корень-textblock → отказ', () => {
+    getStructureLimits().textBlocksPerNode = 1;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const newTextBlock = { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] };
+    const result = ValidationTree.canInsertTextBlockSubtree('p', newTextBlock);
+    assert.equal(result.valid, false);
+    assert.match(result.message, /текстовых блоков/);
+});
+
+test('canInsertTextBlockSubtree: родитель НЕ на лимите → success', () => {
+    getStructureLimits().textBlocksPerNode = 2;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const newTextBlock = { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] };
+    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', newTextBlock).valid, true);
+});
+
+test('canInsertTextBlockSubtree: корень поддерева — не textblock, прямая проверка родителя не применяется', () => {
+    getStructureLimits().textBlocksPerNode = 1;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    // Вставляем item (не сам textblock) — родитель получает не-textblock ребёнка.
+    const itemNode = { id: 'sub', type: 'item', children: [] };
+    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', itemNode).valid, true);
+});
+
+test('canInsertTextBlockSubtree: узел поддерева нарушает ТЕКУЩИЙ лимит (самосогласованность) → отказ', () => {
+    getStructureLimits().textBlocksPerNode = 2;
+    AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
+    AppState._rebuildNodeIndex();
+
+    // Поддерево несёт узел с 3 текстблоками — валидно было при лимите ≥3, но
+    // лимит уже снижен (например, конфиг поменялся после копирования/удаления).
+    const subtree = {
+        id: 'sub', type: 'item', children: [
+            { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] },
+            { id: 'tb3', type: 'textblock', textBlockId: 'tb3', children: [] },
+        ],
+    };
+    const result = ValidationTree.canInsertTextBlockSubtree('p', subtree);
+    assert.equal(result.valid, false, 'самосогласованность поддерева нарушена под текущим лимитом');
+});
+
+test('canInsertTextBlockSubtree: поддерево самосогласовано → success', () => {
+    getStructureLimits().textBlocksPerNode = 3;
+    AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
+    AppState._rebuildNodeIndex();
+
+    const subtree = {
+        id: 'sub', type: 'item', children: [
+            { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] },
+            { id: 'tb3', type: 'textblock', textBlockId: 'tb3', children: [] },
+        ],
+    };
+    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', subtree).valid, true);
+});
+
+test('canInsertTextBlockSubtree: лимит не задан (не число) → проверка не применяется', () => {
+    getStructureLimits().textBlocksPerNode = undefined;
+    AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
+    AppState._rebuildNodeIndex();
+
+    const newTextBlock = { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] };
+    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', newTextBlock).valid, true);
 });

@@ -127,6 +127,7 @@ def test_complete_table_no_issues():
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.domains.acts.exceptions import ActValidationError
 from app.domains.acts.services.act_content_service import ActContentService
 
 
@@ -219,6 +220,29 @@ async def test_broken_act_auto_save_does_not_notify():
         result = await svc.save_content(act_id=1, data=data, username="12345")
     assert result["validation_status"] == "error"
     emit.assert_not_called()
+
+
+async def test_textblocks_per_node_limit_raises_validation_error():
+    """PERSIST-2/B-13: сервер отклоняет узел с N+1 текстблоками — реальный вызов
+    _validate_textblocks_per_node (раньше _svc() мокал acts_settings без явного
+    per_node, проверка молча выключалась — isinstance(MagicMock, int) is False).
+    ActValidationError.status_code=400 (у бизнес-валидации акта, не 422 —
+    см. test_save_content_business_validation_error_returns_400)."""
+    svc, _saved = _svc()
+    svc.acts_settings.textblocks.per_node = 2
+    sections = _base_sections()
+    sections[0]["children"] = [
+        {"id": f"tb{i}", "label": "Текстовый блок", "type": "textblock",
+         "textBlockId": f"tb{i}", "children": []}
+        for i in range(3)
+    ]
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        saveType="manual",
+    )
+    with pytest.raises(ActValidationError, match="текстовых блоков") as exc_info:
+        await svc.save_content(act_id=1, data=data, username="12345")
+    assert exc_info.value.status_code == 400
 
 
 async def test_warning_act_manual_save_does_not_notify():

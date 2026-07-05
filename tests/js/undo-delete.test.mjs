@@ -29,6 +29,10 @@ import {
 import { TreeUtils } from '../../static/js/constructor/tree/tree-utils.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
 import { Notifications } from '../../static/js/shared/notifications.js';
+import {
+    getStructureLimits,
+    resetImageLimitsForTests,
+} from '../../static/js/constructor/violation/violation-image-validator.js';
 
 // ── Шпионы: console.warn (fallback индекса) и Notifications ─────────────────
 const warns = [];
@@ -62,6 +66,7 @@ afterEach(() => {
     console.warn = originalWarn;
     Object.assign(Notifications, originalNotifications);
     AppConfig.readOnlyMode.isReadOnly = false;
+    resetImageLimitsForTests();
 });
 
 // ── Хелперы ──────────────────────────────────────────────────────────────────
@@ -330,6 +335,54 @@ test('read-only: откат недоступен', () => {
     assert.equal(UndoDeleteManager.undoLast(), false);
     assert.equal(notified.warning.length, 1);
     assert.ok(UndoDeleteManager.canUndo(), 'снимок сохранён — откат возможен после выхода из read-only');
+});
+
+// ── PERSIST-2: лимит текстблоков-на-узел при восстановлении ─────────────────
+
+test('undo текстблока отклоняется на лимите узла: снимок остаётся в стеке, ретрай после освобождения лимита проходит', () => {
+    AppState.initializeTree(true);
+    getStructureLimits().textBlocksPerNode = 2;
+    const item = addItem('4', 'Пункт');
+    assert.ok(AppState.addTextBlockToNode(item.id).valid);
+    assert.ok(AppState.addTextBlockToNode(item.id).valid);
+    const tb1 = item.children.find(c => c.type === 'textblock');
+    AppState.generateNumbering();
+
+    assert.ok(AppState.deleteNode(tb1.id));
+    assert.ok(AppState.addTextBlockToNode(item.id).valid); // узел снова на лимите (2/2)
+    AppState.generateNumbering();
+
+    const childrenBefore = item.children.length;
+    assert.equal(UndoDeleteManager.undoLast(), false, 'откат отклонён — узел на лимите текстблоков');
+    assert.equal(notified.error.filter(m => /текстовых блоков/i.test(m)).length, 1, 'тост про лимит текстблоков');
+    assert.equal(item.children.length, childrenBefore, 'состояние не изменилось (атомарно)');
+    assert.ok(UndoDeleteManager.canUndo(), 'снимок остался в стеке — ретрай возможен');
+
+    // Лимит увеличен (место освобождено иным путём) — повтор проходит.
+    getStructureLimits().textBlocksPerNode = 3;
+    assert.ok(UndoDeleteManager.undoLast(), 'повторный откат проходит после снятия ограничения');
+    assert.equal(item.children.filter(c => c.type === 'textblock').length, 3);
+    assertIndexConsistent('undo текстблока после ретрая');
+    assertNoIndexMiss();
+});
+
+test('undo item-поддерева с текстблоками сверх ТЕКУЩЕГО лимита (лимит снижен между удалением и откатом) — отказ, дерево не меняется', () => {
+    AppState.initializeTree(true);
+    getStructureLimits().textBlocksPerNode = 5;
+    const item = addItem('4', 'Пункт с текстблоками');
+    assert.ok(AppState.addTextBlockToNode(item.id).valid);
+    assert.ok(AppState.addTextBlockToNode(item.id).valid);
+    assert.ok(AppState.addTextBlockToNode(item.id).valid);
+    AppState.generateNumbering();
+
+    assert.ok(AppState.deleteNode(item.id));
+    // Лимит снижается между удалением и попыткой отката.
+    getStructureLimits().textBlocksPerNode = 2;
+
+    assert.equal(UndoDeleteManager.undoLast(), false, 'откат отклонён — поддерево нарушает текущий лимит');
+    assert.equal(AppState.findNodeById(item.id), null, 'узел остался неудалённым (откат не применился)');
+    assert.ok(UndoDeleteManager.canUndo(), 'снимок остался в стеке');
+    assertNoIndexMiss();
 });
 
 // ── Каскад metrics↔risk (§5-кластер) ────────────────────────────────────────
