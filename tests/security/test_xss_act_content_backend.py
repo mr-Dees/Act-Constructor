@@ -4,7 +4,7 @@ XSS-санитизация content-полей акта на бэкенде.
 Гарантирует, что ActContentService.save_content вычищает опасные
 теги/атрибуты до записи в БД: <script>, <img onerror>, <svg onload>,
 <iframe srcdoc>, javascript:-URL. Whitelist разрешает p/b/i/span/a/...
-и атрибуты {a:href,title; span:class,style; div:class; *:class}.
+и атрибуты {a:href,title; span:class,style; div/p:class,style; *:class}.
 
 Тесты дополнительно покрывают utils/html_sanitizer.sanitize_html
 напрямую (быстрые сценарии без поднятия сервиса).

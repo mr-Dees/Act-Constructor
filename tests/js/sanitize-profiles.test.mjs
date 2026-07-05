@@ -60,6 +60,7 @@ test('acts: CSS-allowlist зеркалит бэк ALLOWED_CSS_PROPERTIES (#10/#1
     const backendCss = [
         'font-size', 'color', 'background-color',
         'font-weight', 'font-style', 'text-decoration', 'text-decoration-line',
+        'text-align',
     ];
     assert.deepEqual([...ACTS_CSS_PROPERTIES].sort(), [...backendCss].sort());
     // Профиль несёт allowlist для хука фильтрации inline-style.
@@ -67,6 +68,9 @@ test('acts: CSS-allowlist зеркалит бэк ALLOWED_CSS_PROPERTIES (#10/#1
     // text-decoration-line обязателен — иначе зачёркивание из внешнего контента
     // срезалось бы и расходилось бы между превью и экспортом.
     assert.ok(ACTS_CSS_PROPERTIES.includes('text-decoration-line'));
+    // TB-1: text-align обязателен — иначе per-line выравнивание блочных
+    // элементов (execCommand justify*) пропадало бы в превью и после reload.
+    assert.ok(ACTS_CSS_PROPERTIES.includes('text-align'));
 });
 
 test('fallback без DOMPurify: sanitize экранирует HTML (и для профиля acts)', () => {

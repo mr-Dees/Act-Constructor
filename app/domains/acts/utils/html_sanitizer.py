@@ -43,6 +43,9 @@ _FALLBACK_CSS = [
     # Внешний контент шлёт зачёркивание и так: без него DOCX-парсер
     # (inline.py _STRIKE_RE) ловит line-through, но bleach срезал бы свойство.
     "text-decoration-line",
+    # TB-1: per-line выравнивание — execCommand justify* пишет text-align в
+    # style блочных элементов; без свойства центрирование пропадало на PUT.
+    "text-align",
 ]
 
 # data-footnote-* / data-link-* несут текст сноски и URL ссылки — без них
@@ -118,7 +121,10 @@ def sanitize_html(html: str | None) -> str:
     attributes = {
         "a": ["href", "title"],
         "span": ["class", "style", *cfg.allowed_data_attrs],
-        "div": ["class"],
+        # TB-1: style на блочных тегах несёт per-line text-align; состав
+        # свойств всё равно режется CSSSanitizer'ом до allowed_css_properties.
+        "div": ["class", "style"],
+        "p": ["class", "style"],
         "*": ["class"],
     }
     return bleach.clean(

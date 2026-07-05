@@ -163,6 +163,8 @@ class SanitizerSettings(BaseModel):
     allowed_css_properties: list[str] = Field(default=[
         "font-size", "color", "background-color",
         "font-weight", "font-style", "text-decoration", "text-decoration-line",
+        # TB-1: per-line выравнивание живёт в style блочных элементов content.
+        "text-align",
     ])
     # Разрешённые data-атрибуты span (сноски/ссылки) — без них DOCX-экспорт
     # теряет содержимое сносок/ссылок.

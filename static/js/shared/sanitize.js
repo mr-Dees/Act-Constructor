@@ -49,6 +49,9 @@ const DEFAULT_CONFIG = {
 export const ACTS_CSS_PROPERTIES = [
     'font-size', 'color', 'background-color',
     'font-weight', 'font-style', 'text-decoration', 'text-decoration-line',
+    // TB-1: per-line выравнивание — execCommand justify* пишет text-align
+    // в style блочных элементов; без свойства в allowlist превью теряло центр.
+    'text-align',
 ];
 const ACTS_TAGS_FALLBACK = [
     'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del',
