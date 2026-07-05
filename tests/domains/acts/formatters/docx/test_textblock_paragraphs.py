@@ -218,6 +218,23 @@ def test_footnote_nbsp_under_justify_per_paragraph(doc):
     assert any(chr(0xA0) in t for t in texts)
 
 
+def test_footnotes_in_different_segments_get_distinct_ids(doc):
+    """Две сноски в РАЗНЫХ сегментах одного текстблока — разные footnote-id:
+    счётчик документный (add_footnote), разбиение на w:p его не сбрасывает."""
+    paras = _render(
+        doc,
+        '<div>a <span class="text-footnote" data-footnote-text="один">я1</span></div>'
+        '<div>b <span class="text-footnote" data-footnote-text="два">я2</span></div>',
+    )
+    ids = [
+        ref.get(qn("w:id"))
+        for p in paras
+        for ref in p._p.findall(".//" + qn("w:footnoteReference"))
+    ]
+    assert len(ids) == 2
+    assert len(set(ids)) == 2
+
+
 def test_footnote_nbsp_not_applied_in_centered_paragraph(doc):
     """В center-абзаце Word не растягивает пробелы — NBSP-замена не нужна
     и не делается (та же семантика, что была у не-justify рендера)."""

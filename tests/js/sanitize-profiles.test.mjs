@@ -12,7 +12,9 @@ import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SafeHTML, SAFE_HTML_PROFILES, ACTS_CSS_PROPERTIES } from '../../static/js/shared/sanitize.js';
+import {
+    SafeHTML, SAFE_HTML_PROFILES, ACTS_CSS_PROPERTIES, filterCssDeclarations,
+} from '../../static/js/shared/sanitize.js';
 
 const acts = SAFE_HTML_PROFILES.acts;
 
@@ -71,6 +73,32 @@ test('acts: CSS-allowlist зеркалит бэк ALLOWED_CSS_PROPERTIES (#10/#1
     // TB-1: text-align обязателен — иначе per-line выравнивание блочных
     // элементов (execCommand justify*) пропадало бы в превью и после reload.
     assert.ok(ACTS_CSS_PROPERTIES.includes('text-align'));
+});
+
+test('per-tag политика style: div/p — только text-align (enum), span — полный allowlist', () => {
+    const css = [...ACTS_CSS_PROPERTIES];
+    // div: чужие свойства режутся, остаётся один text-align.
+    assert.deepEqual(
+        filterCssDeclarations(
+            'DIV',
+            [['font-size', '40px'], ['color', 'red'], ['text-align', 'center']],
+            css,
+        ),
+        ['text-align:center;'],
+    );
+    // Не-enum значения (inherit/start) срезают style целиком.
+    assert.deepEqual(filterCssDeclarations('div', [['text-align', 'inherit']], css), []);
+    assert.deepEqual(filterCssDeclarations('p', [['text-align', 'start']], css), []);
+    // p — та же блочная политика, что div.
+    assert.deepEqual(
+        filterCssDeclarations('p', [['font-weight', 'bold'], ['text-align', 'right']], css),
+        ['text-align:right;'],
+    );
+    // span: полный CSS-allowlist без изменений (font-size живёт, чужое — нет).
+    assert.deepEqual(
+        filterCssDeclarations('span', [['font-size', '20px'], ['position', 'fixed']], css),
+        ['font-size:20px;'],
+    );
 });
 
 test('fallback без DOMPurify: sanitize экранирует HTML (и для профиля acts)', () => {
