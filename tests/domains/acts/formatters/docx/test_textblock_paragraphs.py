@@ -281,3 +281,34 @@ def test_custom_font_size_applies_to_every_paragraph(doc):
     )
     for p in paras:
         assert p.runs[0].font.size == Pt(12)
+
+
+# --- вертикальная геометрия: спейсинг разбитого блока -------------------------
+
+
+def test_intermediate_paragraphs_zero_space_after(doc):
+    """Инвариант геометрии: границы сегментов — бывшие w:br, поэтому
+    промежуточные w:p идут с явным space_after=0; Normal-спейсинг (3pt after)
+    сохраняет только последний w:p — как у прежнего единственного абзаца."""
+    paras = _render(doc, "<div>раз</div><div>два</div><div>три</div>")
+    spacings = [p.paragraph_format.space_after for p in paras]
+    # None = прямого форматирования нет, наследуется Normal (прежнее значение).
+    assert spacings == [Pt(0), Pt(0), None]
+
+
+def test_empty_line_paragraph_also_zero_spacing_except_last(doc):
+    """Пустая строка (<div><br></div>) не ломает раскладку: пустой w:p в
+    середине блока тоже без межабзацного интервала."""
+    paras = _render(doc, "<div>a</div><div><br></div><div>b</div>")
+    spacings = [p.paragraph_format.space_after for p in paras]
+    assert spacings == [Pt(0), Pt(0), None]
+
+
+def test_single_paragraph_keeps_inherited_spacing(doc):
+    """Одноабзацный контент — без прямого спейсинга: геометрия побайтно
+    совпадает со старой моделью (всё от Normal)."""
+    for content in ("Просто текст", '<div style="text-align: center;">один</div>'):
+        paras = _render(doc, content)
+        assert len(paras) == 1
+        assert paras[0].paragraph_format.space_after is None
+        assert paras[0].paragraph_format.space_before is None

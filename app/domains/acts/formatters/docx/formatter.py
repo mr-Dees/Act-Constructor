@@ -105,8 +105,11 @@ class DocxFormatter:
         чтение мёртвого formatting.alignment убрано). Блок без text-align и
         контент вне блочной разметки (голый текст/span — легаси) получают
         дефолт JUSTIFY — как прежний «нетронутый» рендер; <br> внутри блока
-        остаётся мягким переносом w:br. Абзацный формат (интервал, spacing)
-        каждый w:p наследует от Normal, как раньше единственный.
+        остаётся мягким переносом w:br. Вертикальная геометрия — как у прежней
+        одноабзацной модели: промежуточным w:p обнуляется space_after (граница
+        сегментов = бывший w:br, межабзацного зазора быть не должно),
+        Normal-спейсинг (3pt after) сохраняет только последний w:p блока —
+        расстояние до следующего контента не меняется.
 
         Размер: дефолтный fontSize → body_pt (12pt), изменённый → px→pt
         (×0.75) — смена только выравнивания шрифт НЕ уменьшает (#9).
@@ -126,6 +129,7 @@ class DocxFormatter:
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             return
+        paragraphs = []
         for segment in segments:
             para = doc.add_paragraph()
             para.alignment = _TB_ALIGNMENT_MAP.get(
@@ -134,6 +138,13 @@ class DocxFormatter:
             # Пустой сегмент (<div><br></div>) — пустая строка-абзац;
             # apply_inline_html сам no-op на пустом html.
             apply_inline_html(para, segment.html, base_size_pt=base_size_pt)
+            paragraphs.append(para)
+        # Границы сегментов — бывшие w:br: без обнуления Normal (3pt after)
+        # раздвинул бы строки, разделённые Enter. space_before Normal и так
+        # даёт 0 — наследуется. Последний w:p спейсинг не трогает: расстояние
+        # от текстблока до следующего контента — как у одноабзацной модели.
+        for para in paragraphs[:-1]:
+            para.paragraph_format.space_after = Pt(0)
 
     def _add_table_title(self, doc, node) -> None:
         """Заголовок таблицы: жирная подпись без нумерации (таблица — не пункт)."""
