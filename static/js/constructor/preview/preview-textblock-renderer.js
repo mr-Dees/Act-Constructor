@@ -4,7 +4,7 @@
  * Создает HTML-представление текстовых блоков с сохранением
  * форматирования и стилей.
  */
-import { SafeHTML } from '../../shared/sanitize.js';
+import { renderActContent } from '../../shared/sanitize.js';
 import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 export class PreviewTextBlockRenderer {
@@ -43,7 +43,7 @@ export class PreviewTextBlockRenderer {
         this._applyBaseFontSize(content);
         // textBlock.content — пользовательский HTML, см. C-XSS-1.
         // Профиль 'acts' — allowlist, синхронный с бэк-санитайзером (5.2.3).
-        SafeHTML.set(content, textBlock.content, 'acts');
+        renderActContent(content, textBlock.content);
 
         return content;
     }

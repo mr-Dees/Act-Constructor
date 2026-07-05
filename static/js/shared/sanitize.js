@@ -278,4 +278,19 @@ function escapeHtml(str) {
 
 export const SafeHTML = { set, sanitize, escapeHtml };
 window.SafeHTML = SafeHTML;
+
+/**
+ * CORE-1: единая точка рендера пользовательского контента акта (текстблок-
+ * редактор, превью) — всегда профилем 'acts'. Раньше редактор звал
+ * SafeHTML.set(el, html) БЕЗ профиля (дефолтный blocklist DEFAULT_CONFIG
+ * пропускал теги вне allowlist'а, например <img src=...> из легаси-контента) —
+ * редактируемая поверхность расходилась с тем, что реально допускает
+ * бэк-санитайзер и что отрисует превью.
+ * @param {HTMLElement} el
+ * @param {string} html
+ */
+export function renderActContent(el, html) {
+    set(el, html, 'acts');
+}
+
 export { CHAT_MD_CONFIG };

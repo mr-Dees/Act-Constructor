@@ -5,7 +5,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
-import { SafeHTML, SAFE_HTML_PROFILES } from '../../shared/sanitize.js';
+import { SafeHTML, SAFE_HTML_PROFILES, renderActContent } from '../../shared/sanitize.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -44,12 +44,14 @@ Object.assign(TextBlockManager.prototype, {
         editor.dataset.placeholder = 'Введите текст...';
         // Sanitize: textBlock.content приходит из БД, мог быть сохранён до того,
         // как backend начнёт чистить через bleach. DOMPurify обрабатывает любой
-        // вектор stored-XSS на клиенте.
-        SafeHTML.set(editor, textBlock.content || '');
+        // вектор stored-XSS на клиенте. CORE-1: профиль 'acts' (не дефолтный
+        // blocklist) — редактируемая поверхность должна совпадать с тем, что
+        // реально допускает бэк-санитайзер и что отрисует превью.
+        renderActContent(editor, textBlock.content || '');
 
         // O1: чиним уже-битые капсулы старых актов при открытии (дубль-id и т.п.).
         if (this.validateAndRepairCapsules) {
-            SafeHTML.set(editor, this.validateAndRepairCapsules(editor.innerHTML));
+            renderActContent(editor, this.validateAndRepairCapsules(editor.innerHTML));
         }
 
         // BUG-2.2: бэк-санитайзер (bleach, html_sanitizer.py) срезает с маркеров
