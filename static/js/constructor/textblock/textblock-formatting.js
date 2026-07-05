@@ -60,35 +60,35 @@ Object.assign(TextBlockManager.prototype, {
     inheritFromNeighbors(element) {
         if (!element) return;
 
-        let prevNode = element.previousSibling;
         let nextNode = element.nextSibling;
 
-        // Ищем предыдущий span с форматированием
-        while (prevNode) {
-            if (prevNode.nodeType === 1 && prevNode.tagName === 'SPAN' && prevNode.style.length > 0) {
-                // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
-                // computed: computed резолвит унаследованные/дефолтные значения
-                // (например fontWeight '400'), которые иначе жёстко прибились бы
-                // к маркеру как inline и раздули разметку.
-                const inline = prevNode.style;
+        // TB-2: наследуем ТОЛЬКО от НЕПОСРЕДСТВЕННОГО span-соседа. _caretHomeSibling
+        // (textblock-editor.js) пропускает исключительно zero-width-узлы (caret-guard
+        // U+FEFF, якорь размера U+200B) и останавливается на первом значимом узле —
+        // непустом тексте, <br> или капсуле; раньше цикл пропускал ЛЮБОЙ узел, не
+        // подошедший под условие, и наследовал размер издалека через реальный текст.
+        // Капсула физически тоже <span> — исключаем её явно: она не донор формата.
+        const prevNode = this._caretHomeSibling(element, 'previousSibling');
+        if (prevNode && prevNode.nodeType === 1 && prevNode.tagName === 'SPAN'
+                && !this._isCapsule(prevNode) && prevNode.style.length > 0) {
+            // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
+            // computed: computed резолвит унаследованные/дефолтные значения
+            // (например fontWeight '400'), которые иначе жёстко прибились бы
+            // к маркеру как inline и раздули разметку.
+            const inline = prevNode.style;
 
-                if (inline.fontSize && !element.style.fontSize) {
-                    element.style.fontSize = inline.fontSize;
-                }
-                if (inline.fontWeight && !element.style.fontWeight) {
-                    element.style.fontWeight = inline.fontWeight;
-                }
-                if (inline.fontStyle && !element.style.fontStyle) {
-                    element.style.fontStyle = inline.fontStyle;
-                }
-                if (inline.textDecoration && !element.style.textDecoration) {
-                    element.style.textDecoration = inline.textDecoration;
-                }
-
-                break;
+            if (inline.fontSize && !element.style.fontSize) {
+                element.style.fontSize = inline.fontSize;
             }
-
-            prevNode = prevNode.previousSibling;
+            if (inline.fontWeight && !element.style.fontWeight) {
+                element.style.fontWeight = inline.fontWeight;
+            }
+            if (inline.fontStyle && !element.style.fontStyle) {
+                element.style.fontStyle = inline.fontStyle;
+            }
+            if (inline.textDecoration && !element.style.textDecoration) {
+                element.style.textDecoration = inline.textDecoration;
+            }
         }
     },
 
