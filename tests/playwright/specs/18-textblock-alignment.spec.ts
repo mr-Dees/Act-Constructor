@@ -60,10 +60,12 @@ test.describe('Textblock alignment round-trip (TB-1)', () => {
       '#preview .preview-textblock-content div[style*="text-align"]',
       { hasText: 'Исходный текст' }
     );
+    // Переключение на step1 планирует ререндер превью через requestAnimationFrame
+    // (App._handleStepTransition) — обычный .evaluate() мог поймать промежуточный
+    // кадр перестройки DOM и вернуть пустой computed style. toHaveCSS — web-first
+    // ассерт, повторяет попытки, пока превью не осядет.
     await expect(previewBlock).toBeVisible({ timeout: 5000 });
-    expect(
-      await previewBlock.evaluate((el) => getComputedStyle(el).textAlign)
-    ).toBe('center');
+    await expect(previewBlock).toHaveCSS('text-align', 'center');
 
     // Reload: контент пришёл из БД — центр пережил bleach и доехал в редактор.
     await openAct(page, SEED_ACTS.withContent);
