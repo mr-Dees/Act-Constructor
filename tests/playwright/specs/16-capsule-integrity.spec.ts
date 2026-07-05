@@ -303,3 +303,47 @@ test.describe('capsule-integrity: observer-самозалечивание', () =
     }, { timeout: 1000 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 1 (fix-цикл): самоочистка guard при удалении ПОСЛЕДНЕЙ капсулы (Fix 1).
+// Гейт normalize в finalizeEdit расширен: нормализация идёт и когда капсул не
+// осталось, но в DOM есть guard-символ U+FEFF — иначе он оставался бы висеть в
+// живом редакторе после удаления единственной edge-капсулы.
+// ---------------------------------------------------------------------------
+
+test.describe('capsule-integrity: самоочистка guard при удалении последней капсулы', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('удаление ЕДИНСТВЕННОЙ капсулы через removeLinkOrFootnote → в живом DOM нет U+FEFF', async ({ page }) => {
+    await setupLeadingCapsuleWithGuard(page); // ведущая капсула + guard U+FEFF перед ней
+
+    // Предусловие: guard есть, капсула ровно одна.
+    const before = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return {
+        hasGuard: ed.textContent.includes('\uFEFF'),
+        capsules: ed.querySelectorAll('.text-link, .text-footnote').length,
+      };
+    });
+    expect(before.hasGuard).toBe(true);
+    expect(before.capsules).toBe(1);
+
+    // Удаляем единственную капсулу штатным потоком → finalizeEdit({renumber:true}).
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      tbm.removeLinkOrFootnote(ed.querySelector('.text-link, .text-footnote'));
+    });
+
+    const after = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return {
+        hasGuard: ed.textContent.includes('\uFEFF'),
+        capsules: ed.querySelectorAll('.text-link, .text-footnote').length,
+      };
+    });
+    expect(after.capsules).toBe(0);      // капсула удалена
+    expect(after.hasGuard).toBe(false);  // осиротевший guard вычищен самоочисткой (Fix 1)
+  });
+});

@@ -531,15 +531,18 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * B-10: проставляет сквозную нумерацию сносок активного редактора
-     * (data-footnote-number) с учётом сносок в предшествующих по дереву блоках.
-     * Вызывается из потока фокуса и после создания/удаления маркера (не из
+     * B-10: проставляет сквозную нумерацию сносок редактора (data-footnote-number)
+     * с учётом сносок в предшествующих по дереву блоках. По умолчанию — активный
+     * редактор; finalizeEdit передаёт СВОЙ editor (тот же, на котором считал число
+     * сносок для гейта, иначе счёт и мутация могли бы разойтись). Вызывается из
+     * потока фокуса и после создания/удаления маркера (не из
      * attachLinkFootnoteHandlers — нумерация не привязана к навешиванию слушателей).
+     * @param {HTMLElement} [editor=this.activeEditor]
      */
-    renumberEditorFootnotes() {
-        if (!this.activeEditor) return;
-        const offset = footnoteOffsetForBlock(this.activeEditor.dataset.textBlockId);
-        numberFootnotes(this.activeEditor, offset + 1);
+    renumberEditorFootnotes(editor = this.activeEditor) {
+        if (!editor) return;
+        const offset = footnoteOffsetForBlock(editor.dataset.textBlockId);
+        numberFootnotes(editor, offset + 1);
     }
 });
 

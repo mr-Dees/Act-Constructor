@@ -124,22 +124,28 @@ export class TextBlockManager {
     finalizeEdit(editor, opts = {}) {
         if (!editor || !editor.dataset) return;
 
-        // (а) Guard'ы капсул — только если в блоке ЕСТЬ капсулы (перф: обычный
-        // ввод в plain-текст не гоняет обход маркеров на каждой правке; guard'ы
-        // существуют лишь вокруг капсул, без них чистить/расставлять нечего).
-        if (editor.querySelector('[data-link-url],[data-footnote-text]') &&
-                typeof this.normalizeMarkers === 'function') {
+        // (а) Guard'ы капсул — если в блоке ЕСТЬ капсулы (обычная правка) ЛИБО в
+        // живом DOM остались guard-символы U+FEFF. Второе условие даёт самоочистку
+        // после удаления ПОСЛЕДНЕЙ капсулы из ЛЮБОГО пути (removeLinkOrFootnote,
+        // beforeinput): normalizeMarkers на редакторе без капсул только вычищает
+        // guard'ы (_cleanCapGuards), новых не ставит. Иначе пропуск (перф: обычный
+        // ввод в plain-текст без невидимок). U+200B-якорь размера намеренно НЕ
+        // триггерит — normalizeMarkers его и не трогает.
+        const hasCapsules = !!editor.querySelector('[data-link-url],[data-footnote-text]');
+        const hasGuardChars = (editor.textContent || '').includes('\uFEFF');
+        if ((hasCapsules || hasGuardChars) && typeof this.normalizeMarkers === 'function') {
             this.normalizeMarkers(editor);
         }
 
         // (б) Перенумерация сносок — по изменению их числа с прошлого стока (кэш
         // editor.__lastFootnoteCount ловит нативное удаление/paste поверх сноски,
         // где create/remove-потоки не срабатывают — CARET-7) ЛИБО по явному
-        // запросу opts.renumber.
+        // запросу opts.renumber. Перенумеровываем ИМЕННО переданный editor (тот же,
+        // на котором считали счётчик), а не безусловно this.activeEditor.
         const footnoteCount = editor.querySelectorAll('.text-footnote').length;
         if ((opts.renumber === true || footnoteCount !== editor.__lastFootnoteCount) &&
                 typeof this.renumberEditorFootnotes === 'function') {
-            this.renumberEditorFootnotes();
+            this.renumberEditorFootnotes(editor);
         }
         editor.__lastFootnoteCount = footnoteCount;
 
