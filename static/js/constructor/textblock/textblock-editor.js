@@ -5,7 +5,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
-import { SafeHTML } from '../../shared/sanitize.js';
+import { SafeHTML, SAFE_HTML_PROFILES } from '../../shared/sanitize.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -70,6 +70,12 @@ Object.assign(TextBlockManager.prototype, {
         if (AppConfig.readOnlyMode?.isReadOnly) {
             editor.contentEditable = 'false';
             editor.classList.add('read-only');
+            // CARET-2 (перенос между актами): редактировать в RO нельзя, но
+            // КОПИРОВАТЬ можно — навешиваем copy (не cut) со strip guard'ов
+            // (U+FEFF в RO-DOM есть: normalizeMarkers выше отрабатывает до RO-ветки)
+            // и меткой data-aw-clip. editor берётся замыканием (activeEditor RO не
+            // ставит) — handleEditorCopy передаёт его в _expandRangeOutOfMarkers.
+            editor.addEventListener('copy', (e) => this.handleEditorCopy(e, editor, false));
         } else {
             editor.contentEditable = 'true';
             this.attachEditorEvents(editor, textBlock);
@@ -469,8 +475,9 @@ Object.assign(TextBlockManager.prototype, {
             const range = selection.getRangeAt(0);
             // Атомарность: выделение, клипающее тело капсулы, расширяем за целые
             // капсулы — иначе insertHTML (как deleteContents) надкусит атом.
+            // editor передаём явно (не полагаемся на activeEditor).
             if (typeof this._expandRangeOutOfMarkers === 'function') {
-                this._expandRangeOutOfMarkers(range);
+                this._expandRangeOutOfMarkers(range, editor);
                 selection.removeAllRanges();
                 selection.addRange(range);
             }
@@ -524,9 +531,10 @@ Object.assign(TextBlockManager.prototype, {
         e.preventDefault();
 
         // Клон выделения, расширенный за целые капсулы (не надкусываем атом).
+        // editor передаём явно — RO-редактор не ставит activeEditor.
         const work = range.cloneRange();
         if (typeof this._expandRangeOutOfMarkers === 'function') {
-            this._expandRangeOutOfMarkers(work);
+            this._expandRangeOutOfMarkers(work, editor);
         }
         const wrapper = document.createElement('div');
         wrapper.setAttribute('data-aw-clip', '1');
@@ -562,9 +570,20 @@ Object.assign(TextBlockManager.prototype, {
         return this._buildExternalPasteFragment(html);
     },
 
-    /** @private Фрагмент помечен как наш буфер обмена (copy/cut редактора)? */
+    /**
+     * @private Фрагмент помечен как наш буфер обмена (copy/cut редактора)?
+     * Точная проверка АТРИБУТА (а не подстроки — иначе слово «data-aw-clip» в
+     * тексте/чужом атрибуте ложно включило бы щедрый режим): парсим инертно в
+     * <template> и ищем ЭЛЕМЕНТ с data-aw-clip. querySelector по всему фрагменту,
+     * не только по корню: на реальном round-trip браузер оборачивает наш <div> в
+     * <html>/<body>/StartFragment-комментарии (CF_HTML), и корнем стал бы <html>.
+     * Дешёвый substring-префильтр отсекает обычный внешний HTML без парса.
+     */
     _isOwnClipboardHtml(html) {
-        return typeof html === 'string' && html.indexOf('data-aw-clip') !== -1;
+        if (typeof html !== 'string' || html.indexOf('data-aw-clip') === -1) return false;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        return tpl.content.querySelector('[data-aw-clip]') !== null;
     },
 
     /**
@@ -572,20 +591,25 @@ Object.assign(TextBlockManager.prototype, {
      * (инлайн-формат b/i/u/s/span[style] + разметка капсул), затем реконструкция
      * капсул фабриками со СВЕЖИМИ id. Метку data-aw-clip может подделать и внешний
      * источник — это безопасно: DOMPurify режет script, on*-обработчики и js-схему,
-     * а data-link-url
-     * прогоняется через validateLinkUrl (ниже), поэтому спуф даёт лишь обычную
-     * ссылку/сноску, не XSS.
+     * а data-link-url прогоняется через validateLinkUrl (ниже), поэтому спуф даёт
+     * лишь обычную ссылку/сноску, не XSS.
      * @private
      */
     _buildOwnPasteFragment(html) {
         // §7: DOMPurify НЕ валидирует URL в data-атрибутах (только href/src),
         // поэтому data-link-url проверяем сами (validateLinkUrl в
-        // _reconstructPastedCapsules). Хуки allowlist не мутируют.
+        // _reconstructPastedCapsules). Хуки allowlist не мутируем.
         const clean = SafeHTML.sanitize(html, {
             USE_PROFILES: false,
             ALLOWED_TAGS: ['b', 'i', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'],
             ALLOWED_ATTR: ['style', 'class', 'href',
                 'data-link-id', 'data-link-url', 'data-footnote-id', 'data-footnote-text'],
+            // Round-trip живёт в том же контракте словаря форматирования, что
+            // превью/PUT: style фильтруется до CSS-allowlist профиля 'acts' (хук
+            // afterSanitizeAttributes читает __cssAllowlist), а не «любое
+            // DOMPurify-безопасное свойство». Берём активный набор профиля
+            // (отражает серверный applyActsAllowlist).
+            __cssAllowlist: [...(SAFE_HTML_PROFILES.acts.__cssAllowlist || [])],
         });
         const tmp = document.createElement('div');
         tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга

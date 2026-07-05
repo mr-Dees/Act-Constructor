@@ -14,9 +14,11 @@ import '../../static/js/constructor/textblock/textblock-links-footnotes.js';
 
 // ── Опознание своего буфера ──────────────────────────────────────────────────
 
-test('_isOwnClipboardHtml: метка data-aw-clip → свой буфер; иначе внешний', () => {
+test('_isOwnClipboardHtml: без метки data-aw-clip → внешний (быстрый отказ без DOM-парса)', () => {
   const mgr = Object.create(TextBlockManager.prototype);
-  assert.equal(mgr._isOwnClipboardHtml('<div data-aw-clip="1">x</div>'), true);
+  // Substring-префильтр отсекает обычный внешний HTML без парсинга; точная
+  // attribute-проверка (парс в inert <template>) требует реального DOM —
+  // покрыта e2e в 16-capsule-integrity (детект + устойчивость к CF_HTML-обёртке).
   assert.equal(mgr._isOwnClipboardHtml('<p>внешний Word</p>'), false);
   assert.equal(mgr._isOwnClipboardHtml(''), false);
   assert.equal(mgr._isOwnClipboardHtml(null), false);

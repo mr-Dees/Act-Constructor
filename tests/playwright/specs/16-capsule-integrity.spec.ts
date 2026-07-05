@@ -777,4 +777,137 @@ test.describe('capsule-integrity: буфер обмена (Task 3)', () => {
     expect(res.capText).toContain('ВСТАВКА');  // plain вставлен в тело капсулы
     expect(res.linkUrl).toBe('https://a.ru');  // атрибуты капсулы целы
   });
+
+  test('copy из read-only редактора → paste в редактируемый: капсула реконструирована (CARET-2 между актами)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const tbm = (window as any).textBlockManager;
+      const AppConfig = (window as any).AppConfig;
+
+      // 1) Строим read-only редактор с ВЕДУЩЕЙ сноской (normalizeMarkers ставит
+      //    guard U+FEFF перед ней — он есть и в RO-DOM).
+      AppConfig.readOnlyMode.isReadOnly = true;
+      const roTb = {
+        id: 'txt-ro-src',
+        content: '<span class="text-footnote" data-footnote-id="RO1" data-footnote-text="тело RO"' +
+          ' contenteditable="false">сн</span> хвост',
+        formatting: {},
+      };
+      (window as any).AppState.textBlocks['txt-ro-src'] = roTb;
+      const roEd = tbm.createEditor(roTb) as HTMLElement;
+      document.body.appendChild(roEd);
+      AppConfig.readOnlyMode.isReadOnly = false; // цель paste — редактируемая
+
+      const roIsReadOnly = roEd.getAttribute('contenteditable') === 'false';
+      const roHasGuard = roEd.textContent!.includes('\uFEFF');
+
+      // 2) Копируем из RO-редактора, НЕ ставя activeEditor — проверяем, что
+      //    handleEditorCopy editor-относительный (передаёт свой editor).
+      tbm.activeEditor = null;
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(roEd);
+      s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      roEd.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const clipHtml = dt.getData('text/html');
+
+      // 3) Вставляем в редактируемый сид-редактор.
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      tbm.activeEditor = ed;
+      ed.innerHTML = ''; ed.focus();
+      const r2 = document.createRange(); r2.selectNodeContents(ed); r2.collapse(false);
+      s.removeAllRanges(); s.addRange(r2);
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+
+      const cap = ed.querySelector('.text-footnote');
+      roEd.remove();
+      return {
+        roIsReadOnly, roHasGuard,
+        clipHasMark: clipHtml.includes('data-aw-clip'),
+        clipHasBody: clipHtml.includes('data-footnote-text="тело RO"'),
+        clipHasGuard: clipHtml.includes('\uFEFF'),
+        pastedBody: cap ? cap.getAttribute('data-footnote-text') : null,
+        pastedId: cap ? cap.getAttribute('data-footnote-id') : null,
+      };
+    });
+    expect(res.roIsReadOnly).toBe(true);    // редактор действительно read-only
+    expect(res.roHasGuard).toBe(true);      // guard в RO-DOM присутствует
+    expect(res.clipHasMark).toBe(true);     // буфер помечен своим форматом
+    expect(res.clipHasBody).toBe(true);     // тело сноски унесено в буфер
+    expect(res.clipHasGuard).toBe(false);   // U+FEFF стрипнут даже в RO (CORE-4)
+    expect(res.pastedBody).toBe('тело RO'); // капсула реконструирована в редактируемом
+    expect(res.pastedId).not.toBe('RO1');   // свежий id
+  });
+
+  test('свой буфер с javascript:-URL в data-link-url → развёрнут в текст, ноль ссылок/anchor (граница доверия)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = ''; ed.focus();
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+      s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      dt.setData('text/html',
+        '<div data-aw-clip="1"><span class="text-link" data-link-url="javascript:alert(1)">x</span></div>');
+      dt.setData('text/plain', 'x');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return {
+        links: ed.querySelectorAll('.text-link').length,
+        anchors: ed.querySelectorAll('a').length,
+        hasJs: ed.innerHTML.includes('javascript'),
+        text: ed.textContent!.replace(/[\uFEFF\u200B]/g, ''),
+      };
+    });
+    expect(res.links).toBe(0);      // капсула-ссылка НЕ создана
+    expect(res.anchors).toBe(0);    // и anchor тоже
+    expect(res.hasJs).toBe(false);  // javascript: не просочился
+    expect(res.text).toBe('x');     // развёрнуто в видимый текст
+  });
+
+  test('_isOwnClipboardHtml: точная attribute-проверка, устойчива к CF_HTML-обёртке', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const tbm = (window as any).textBlockManager;
+      return {
+        bare: tbm._isOwnClipboardHtml('<div data-aw-clip="1">x</div>'),
+        wrapped: tbm._isOwnClipboardHtml(
+          '<html><body><!--StartFragment--><div data-aw-clip="1">x</div><!--EndFragment--></body></html>'),
+        substringInText: tbm._isOwnClipboardHtml('<p>про data-aw-clip в тексте</p>'),
+        external: tbm._isOwnClipboardHtml('<p>внешний Word</p>'),
+      };
+    });
+    expect(res.bare).toBe(true);             // наш буфер
+    expect(res.wrapped).toBe(true);          // наш буфер под обёрткой браузера (CF_HTML)
+    expect(res.substringInText).toBe(false); // подстрока в ТЕКСТЕ — НЕ наш буфер
+    expect(res.external).toBe(false);
+  });
+
+  test('own-paste фильтрует style до CSS-allowlist профиля acts (font-size живёт, margin режется)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = ''; ed.focus();
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+      s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      dt.setData('text/html',
+        '<div data-aw-clip="1"><span style="font-size:24px;margin:99px">Т</span></div>');
+      dt.setData('text/plain', 'Т');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const span = ed.querySelector('span[style]');
+      return {
+        style: span ? span.getAttribute('style') : null,
+        text: ed.textContent!.replace(/[\uFEFF\u200B]/g, ''),
+      };
+    });
+    expect(res.style).toContain('font-size');  // разрешённое свойство сохранено
+    expect(res.style).not.toContain('margin'); // неразрешённое отфильтровано (контракт acts)
+    expect(res.text).toBe('Т');
+  });
 });

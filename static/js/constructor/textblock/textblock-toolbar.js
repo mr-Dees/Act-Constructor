@@ -484,12 +484,18 @@ Object.assign(TextBlockManager.prototype, {
      * range.extractContents() клонирует частично выделенный маркер (дубль ссылки
      * в начале строки). Сдвигаем start перед маркером, end — после, чтобы маркер
      * переместился во фрагмент целиком.
+     * @param {Range} range
+     * @param {HTMLElement} [editor=this.activeEditor] Редактор-владелец диапазона.
+     *   Параметризован (тот же паттерн, что renumberEditorFootnotes) ради
+     *   read-only-копирования: RO-редакторы НЕ ставят activeEditor, а copy-путь
+     *   передаёт свой editor — иначе обход границ не находил бы капсулы и клонировал
+     *   бы половину маркера.
      * @private
      */
-    _expandRangeOutOfMarkers(range) {
+    _expandRangeOutOfMarkers(range, editor = this.activeEditor) {
         const markerAncestor = (node) => {
             let el = node?.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== this.activeEditor && this.activeEditor?.contains(el)) {
+            while (el && el !== editor && editor?.contains(el)) {
                 // Капсула в inline-правке (editing-mode) — обычный редактируемый
                 // контент, за её границы диапазон НЕ расширяем (CARET-1).
                 if ((el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) &&
