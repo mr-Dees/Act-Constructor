@@ -79,6 +79,26 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Публичная фабрика inline-маркера сноски — зеркало createLinkMarker для
+     * paste-потока round-trip (CARET-2). Создаёт detached span.text-footnote с
+     * уникальным id и телом сноски в data-footnote-text; НЕ вставляет в DOM и НЕ
+     * навешивает обработчики. Номер (data-footnote-number) проставит renumber.
+     * @param {string} text Видимый текст сноски
+     * @param {string} footnoteText Тело сноски
+     * @returns {HTMLSpanElement}
+     */
+    createFootnoteMarker(text, footnoteText) {
+        const markerId = 'footnote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const span = document.createElement('span');
+        span.className = 'text-footnote';
+        span.setAttribute('data-footnote-id', markerId);
+        span.setAttribute('data-footnote-text', footnoteText);
+        span.contentEditable = 'false';
+        span.textContent = text;
+        return span;
+    },
+
+    /**
      * Общий поток создания/редактирования inline-маркера (ссылка/сноска):
      * поиск существующего маркера в выделении → prompt значения → обновление
      * атрибута существующего ЛИБО вставка нового span с наследованием

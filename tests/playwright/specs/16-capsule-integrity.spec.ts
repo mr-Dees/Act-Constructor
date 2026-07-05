@@ -524,3 +524,257 @@ test.describe('capsule-integrity: inline-правка капсулы (editing-mo
     expect(gone).toBe(true); // обычная капсула удалена целиком (атомарность цела)
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 3 (CARET-2 / CORE-4 / CARET-6): round-trip капсул через буфер обмена
+// (copy/cut → paste со свежими id и живым телом), гейт пустого paste, undo,
+// строгая политика внешнего HTML, и paste во время inline-правки капсулы.
+// ---------------------------------------------------------------------------
+
+/** Переходит на шаг 2, дожидается сид-редактора и делает его активным. */
+async function openStep2AndActivate(page) {
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await page.locator('.step[data-step="2"]').click();
+  await page.locator(EDITOR_SEL).waitFor({ state: 'visible', timeout: 5000 });
+  await page.locator(EDITOR_SEL).click();
+  await page.evaluate(() => {
+    const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+    (window as any).textBlockManager.activeEditor = ed;
+  });
+}
+
+test.describe('capsule-integrity: буфер обмена (Task 3)', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('cut капсулы-сноски → paste переносит тело и id, номер пересчитан (CARET-2)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML =
+        'до ' +
+        '<span class="text-footnote" data-footnote-id="F1" data-footnote-text="тело сноски"' +
+        ' contenteditable="false">сн</span>' +
+        ' после';
+      tbm.attachLinkFootnoteHandlers();
+      ed.focus();
+
+      // Выделяем капсулу целиком и вырезаем в синтетический буфер.
+      const cap = ed.querySelector('.text-footnote')!;
+      const origId = cap.getAttribute('data-footnote-id');
+      const r = document.createRange(); r.selectNode(cap);
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      ed.dispatchEvent(new ClipboardEvent('cut', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const clipHtml = dt.getData('text/html');
+      const clipPlain = dt.getData('text/plain');
+      const capGone = ed.querySelector('.text-footnote') === null;
+
+      // Каретка в конец, вставляем из того же буфера.
+      const r2 = document.createRange(); r2.selectNodeContents(ed); r2.collapse(false);
+      s.removeAllRanges(); s.addRange(r2);
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+
+      const cap2 = ed.querySelector('.text-footnote');
+      return {
+        clipHtml, clipPlain, capGone, origId,
+        alive: !!cap2,
+        body: cap2 ? cap2.getAttribute('data-footnote-text') : null,
+        id: cap2 ? cap2.getAttribute('data-footnote-id') : null,
+        num: cap2 ? cap2.getAttribute('data-footnote-number') : null,
+        text: cap2 ? cap2.textContent!.replace(/[\uFEFF\u200B]/g, '') : null,
+      };
+    });
+    // Буфер помечен своим форматом, тело сноски в нём, guard не утёк (CORE-4).
+    expect(res.clipHtml).toContain('data-aw-clip');
+    expect(res.clipHtml).toContain('data-footnote-text="тело сноски"');
+    expect(res.clipHtml).not.toContain('\uFEFF');
+    expect(res.clipPlain).toBe('сн');
+    // Cut удалил капсулу; paste восстановил её тело со свежим id и номером.
+    expect(res.capGone).toBe(true);
+    expect(res.alive).toBe(true);
+    expect(res.body).toBe('тело сноски');       // тело сноски НЕ потеряно (CARET-2)
+    expect(res.id).not.toBe(res.origId);         // свежий id у копии
+    expect(res.text).toBe('сн');
+    expect(res.num).toBe('1');                   // перенумерована на рендере
+  });
+
+  test('copy стрипает caret-guard U+FEFF из буфера, хотя в DOM он есть (CORE-4)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      // Ведущая капсула → normalizeMarkers ставит guard U+FEFF перед ней.
+      ed.innerHTML =
+        '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru"' +
+        ' contenteditable="false">ссыл</span> хвост';
+      tbm.normalizeMarkers(ed);
+      tbm.attachLinkFootnoteHandlers();
+      ed.focus();
+      const domHasGuard = ed.textContent!.includes('\uFEFF');
+
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed);
+      s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      ed.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return {
+        domHasGuard,
+        clipHtml: dt.getData('text/html'),
+        clipPlain: dt.getData('text/plain'),
+      };
+    });
+    expect(res.domHasGuard).toBe(true);           // в живом DOM guard действительно есть
+    expect(res.clipHtml).not.toContain('\uFEFF'); // в буфер не утёк (CORE-4)
+    expect(res.clipPlain).not.toContain('\uFEFF');
+    expect(res.clipHtml).toContain('data-aw-clip');
+  });
+
+  test('round-trip своего буфера сохраняет инлайн-формат и реконструирует ссылку', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML =
+        '<b>жир</b> ' +
+        '<span class="text-link" data-link-id="L1" data-link-url="https://a.ru"' +
+        ' contenteditable="false">ссыл</span>';
+      tbm.attachLinkFootnoteHandlers();
+      ed.focus();
+
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed);
+      s.removeAllRanges(); s.addRange(r);
+      const dt = new DataTransfer();
+      ed.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const clipHtml = dt.getData('text/html');
+
+      const r2 = document.createRange(); r2.selectNodeContents(ed); r2.collapse(false);
+      s.removeAllRanges(); s.addRange(r2);
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+
+      const links = [...ed.querySelectorAll('.text-link')];
+      return {
+        clipHtml,
+        linkCount: links.length,
+        uniqueIds: new Set(links.map((a) => a.getAttribute('data-link-id'))).size,
+        urls: links.map((a) => a.getAttribute('data-link-url')),
+        boldCount: ed.querySelectorAll('b').length,
+      };
+    });
+    expect(res.clipHtml).toContain('data-aw-clip');
+    expect(res.linkCount).toBe(2);                       // оригинал + вставленная копия
+    expect(res.uniqueIds).toBe(2);                       // свежий id у копии (id не делится)
+    expect(res.urls).toEqual(['https://a.ru', 'https://a.ru']); // URL прошёл validateLinkUrl
+    expect(res.boldCount).toBe(2);                       // инлайн-формат <b> сохранён
+  });
+
+  test('Ctrl+Z после paste откатывает вставку (insertHTML в undo-стеке, §6.9)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = 'абв';
+      ed.focus();
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+      s.removeAllRanges(); s.addRange(r);
+
+      const dt = new DataTransfer();
+      dt.setData('text/html', '<p>ЭКС</p>');
+      dt.setData('text/plain', 'ЭКС');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const afterPaste = ed.textContent;
+      document.execCommand('undo');
+      const afterUndo = ed.textContent;
+      return { afterPaste, afterUndo };
+    });
+    expect(res.afterPaste).toContain('ЭКС');       // вставка произошла
+    expect(res.afterUndo).not.toContain('ЭКС');    // Ctrl+Z откатил её (нативный undo)
+  });
+
+  test('пустой после санитизации фрагмент (img, пустой plain) не съедает выделение (CARET-6)', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = 'раз два три';
+      ed.focus();
+      const t = ed.firstChild as Text;
+      const r = document.createRange();
+      r.setStart(t, 4); r.setEnd(t, 7); // 'два'
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+      const selText = r.toString();
+
+      const dt = new DataTransfer();
+      dt.setData('text/html', '<img src=x onerror=alert(1)>'); // весь фрагмент вырежет DOMPurify
+      dt.setData('text/plain', '');                            // пустой plain
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return { selText, text: ed.textContent };
+    });
+    expect(res.selText).toBe('два');
+    expect(res.text).toBe('раз два три'); // выделение не съедено, ничего не вставлено (CARET-6)
+  });
+
+  test('внешний HTML — строгая политика: формат схлопнут, выживает только ссылка', async ({ page }) => {
+    await openStep2AndActivate(page);
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.activeEditor = ed;
+      ed.innerHTML = ''; ed.focus();
+      const s = getSelection()!;
+      const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+      s.removeAllRanges(); s.addRange(r);
+
+      const dt = new DataTransfer();
+      dt.setData('text/html', '<b>жирный</b> <a href="https://x.ru">ссыл</a>'); // БЕЗ метки data-aw-clip
+      dt.setData('text/plain', 'жирный ссыл');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return {
+        links: [...ed.querySelectorAll('.text-link')].map((a) => a.getAttribute('data-link-url')),
+        boldCount: ed.querySelectorAll('b').length,
+        text: ed.textContent,
+      };
+    });
+    expect(res.links).toEqual(['https://x.ru']); // ссылка сохранена как капсула
+    expect(res.boldCount).toBe(0);               // <b> схлопнут (строгая политика не изменилась)
+    expect(res.text).toContain('жирный');        // текст сохранён как plain
+  });
+
+  test('paste во время inline-правки капсулы идёт плейн-текстом в тело, не клоббит капсулу (CARET-1)', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page); // 'до <link>ссылка</link> после'
+    await page.locator(`${EDITOR_SEL} .text-link`).dblclick();
+    await page.waitForFunction(() => {
+      const cap = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"] .text-link');
+      return !!(cap && cap.classList.contains('editing-mode') &&
+        cap.getAttribute('contenteditable') === 'true');
+    }, { timeout: 2000 });
+    await page.waitForTimeout(150); // выделение тела капсулы ставится в setTimeout(0)
+
+    const res = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const dt = new DataTransfer();
+      // HTML с капсулой-сноской + plain: в editing-mode HTML игнорируется.
+      dt.setData('text/html', '<span class="text-footnote" data-footnote-text="тело">X</span>');
+      dt.setData('text/plain', 'ВСТАВКА');
+      ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const cap = ed.querySelector('.text-link');
+      return {
+        linkAlive: !!cap,
+        footnotes: ed.querySelectorAll('.text-footnote').length,
+        capText: cap ? cap.textContent : null,
+        linkUrl: cap ? cap.getAttribute('data-link-url') : null,
+      };
+    });
+    expect(res.linkAlive).toBe(true);          // капсула не склоблена
+    expect(res.footnotes).toBe(0);             // HTML не реконструирован в капсулу (только plain)
+    expect(res.capText).toContain('ВСТАВКА');  // plain вставлен в тело капсулы
+    expect(res.linkUrl).toBe('https://a.ru');  // атрибуты капсулы целы
+  });
+});

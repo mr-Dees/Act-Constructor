@@ -334,6 +334,8 @@ Object.assign(TextBlockManager.prototype, {
         editor.addEventListener('input', () => this.handleEditorInput(editor, textBlock));
         editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e, editor, textBlock));
         editor.addEventListener('paste', (e) => this.handleEditorPaste(e, editor, textBlock));
+        editor.addEventListener('copy', (e) => this.handleEditorCopy(e, editor, false));
+        editor.addEventListener('cut', (e) => this.handleEditorCopy(e, editor, true));
         editor.addEventListener('mouseup', () => this.handleSelectionChange());
         editor.addEventListener('keyup', () => this.handleSelectionChange());
     },
@@ -417,15 +419,28 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Обработчик вставки. Стратегия «только ссылки» (4г): <a href> с абсолютной
-     * схемой http/https/mailto → внутренний span.text-link, всё остальное
-     * форматирование схлопывается в plain-text. Сноски из буфера не адаптируем.
+     * Обработчик вставки. Два режима по метке происхождения data-aw-clip:
+     *  - свой буфер (data-aw-clip) — round-trip капсул: реконструкция ссылок/
+     *    сносок фабриками со свежими id + сохранение инлайн-формата (CARET-2);
+     *  - внешний HTML — прежняя строгая политика «только ссылки» (4г).
+     * Вставка идёт через execCommand('insertHTML') — остаётся в нативном undo
+     * (§6.9). Гейт пустоты (CARET-6): пустой после санитизации фрагмент НЕ съедает
+     * выделение (никакого deleteContents до проверки), а откатывается в insertText.
      */
     handleEditorPaste(e, editor, textBlock) {
         e.preventDefault();
 
         const html = e.clipboardData.getData('text/html');
         const plain = e.clipboardData.getData('text/plain');
+
+        // CARET-1: вставка во время inline-правки капсулы (двойной клик) идёт
+        // ПЛЕЙН-текстом в её тело — HTML/капсулам внутри капсулы места нет. Наши
+        // слои её не клоббят (editing-mode), нативный insertText остаётся в undo;
+        // финальное сохранение делает finishEditing на выходе из режима.
+        if (editor.querySelector('.editing-mode')) {
+            if (plain) document.execCommand('insertText', false, plain);
+            return;
+        }
 
         // Нет HTML — прежний путь: только чистый текст.
         if (!html || !html.trim()) {
@@ -436,19 +451,35 @@ Object.assign(TextBlockManager.prototype, {
 
         const fragment = this._buildPasteFragment(html);
 
+        // Гейт пустоты (CARET-6): DOMPurify мог вырезать весь фрагмент (например
+        // «Копировать изображение» кладёт только <img> при пустом plain). Проверку
+        // делаем ДО любой правки выделения — никакого deleteContents, иначе
+        // выделение исчезало бы без вставки и без undo. Пусто → откат в insertText
+        // (вернёт и undo); при пустом plain — no-op, выделение не трогаем.
+        if (!fragment.childNodes.length) {
+            if (plain) {
+                document.execCommand('insertText', false, plain);
+                this.finalizeEdit(editor);
+            }
+            return;
+        }
+
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
-            // Атомарность: если выделение клипает капсулу, deleteContents клонирует
-            // её. Расширяем границы за целые капсулы перед удалением/вставкой.
+            // Атомарность: выделение, клипающее тело капсулы, расширяем за целые
+            // капсулы — иначе insertHTML (как deleteContents) надкусит атом.
             if (typeof this._expandRangeOutOfMarkers === 'function') {
                 this._expandRangeOutOfMarkers(range);
+                selection.removeAllRanges();
+                selection.addRange(range);
             }
-            range.deleteContents();
-            range.insertNode(fragment);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
+            // insertHTML (не insertNode) — вставка остаётся в нативном undo-стеке.
+            // Фрагмент уже безопасен: капсулы реконструированы (свежие id,
+            // contenteditable=false, URL прогнан через validateLinkUrl).
+            const holder = document.createElement('div');
+            holder.appendChild(fragment);
+            document.execCommand('insertHTML', false, holder.innerHTML);
         } else {
             // Нет каретки — деградируем до plain-text.
             document.execCommand('insertText', false, plain);
@@ -471,16 +502,147 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * 4г: строит DocumentFragment из вставленного HTML. <a href> на ЛЮБОЙ глубине
-     * → span.text-link (фабрика createLinkMarker, C5); прочий текст → textContent.
-     * Структура (абзацы/списки) теряется сознательно — режим «только ссылки».
-     * Word оборачивает <a> в mso-разметку, поэтому обходим всё дерево рекурсивно
-     * (а не только top-level), иначе вложенная ссылка терялась бы (BUG-4).
-     * Схему href валидирует validateLinkUrl (http/https/mailto/tel/ftp/file/#),
-     * как и при ручном вводе.
+     * CORE-4 + CARET-2: копирование/вырезание выделения в буфер СВОИМ форматом.
+     * Кладёт в clipboardData text/html (капсулы — как есть, span с data-атрибутами,
+     * под меткой происхождения data-aw-clip) и text/plain, предварительно стрипнув
+     * caret-guard'ы (U+FEFF) — иначе невидимка утекает во внешние приложения
+     * (CORE-4) и ломает обратную вставку. Выделение клонируется расширенным за
+     * целые капсулы (атомарность). cut дополнительно удаляет выделение через
+     * execCommand('delete') — остаётся в нативном undo (§6.9).
+     * @param {ClipboardEvent} e
+     * @param {HTMLElement} editor
+     * @param {boolean} isCut true для cut, false для copy
+     */
+    handleEditorCopy(e, editor, isCut) {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        // Только выделение внутри ЭТОГО редактора — иначе не вмешиваемся.
+        if (!editor.contains(range.commonAncestorContainer)) return;
+        if (!e.clipboardData) return;
+
+        e.preventDefault();
+
+        // Клон выделения, расширенный за целые капсулы (не надкусываем атом).
+        const work = range.cloneRange();
+        if (typeof this._expandRangeOutOfMarkers === 'function') {
+            this._expandRangeOutOfMarkers(work);
+        }
+        const wrapper = document.createElement('div');
+        wrapper.setAttribute('data-aw-clip', '1');
+        wrapper.appendChild(work.cloneContents());
+        // Стрип caret-guard'ов (U+FEFF) из всего клона — рантайм-only, во внешние
+        // приложения не отдаём. U+200B (якорь размера) в html оставляем: переживает
+        // round-trip и сохраняет размер; из plain — вычищаем (в тексте он мусор).
+        if (typeof this._cleanCapGuards === 'function') this._cleanCapGuards(wrapper);
+
+        e.clipboardData.setData('text/html', wrapper.outerHTML);
+        e.clipboardData.setData('text/plain',
+            (wrapper.textContent || '').replace(/\u200B/g, ''));
+
+        if (isCut) {
+            // Удаляем расширенное выделение нативно — остаётся в undo-стеке.
+            selection.removeAllRanges();
+            selection.addRange(work);
+            document.execCommand('delete');
+            this.finalizeEdit(editor);
+        }
+    },
+
+    /**
+     * Строит DocumentFragment из вставленного HTML, выбирая режим по метке
+     * происхождения data-aw-clip: свой буфер → реконструкция капсул + инлайн-
+     * формат; внешний HTML → строгая политика «только ссылки».
      * @private
      */
     _buildPasteFragment(html) {
+        if (this._isOwnClipboardHtml(html)) {
+            return this._buildOwnPasteFragment(html);
+        }
+        return this._buildExternalPasteFragment(html);
+    },
+
+    /** @private Фрагмент помечен как наш буфер обмена (copy/cut редактора)? */
+    _isOwnClipboardHtml(html) {
+        return typeof html === 'string' && html.indexOf('data-aw-clip') !== -1;
+    },
+
+    /**
+     * CARET-2: свой буфер (data-aw-clip) — round-trip капсул. Щедрый allowlist
+     * (инлайн-формат b/i/u/s/span[style] + разметка капсул), затем реконструкция
+     * капсул фабриками со СВЕЖИМИ id. Метку data-aw-clip может подделать и внешний
+     * источник — это безопасно: DOMPurify режет script, on*-обработчики и js-схему,
+     * а data-link-url
+     * прогоняется через validateLinkUrl (ниже), поэтому спуф даёт лишь обычную
+     * ссылку/сноску, не XSS.
+     * @private
+     */
+    _buildOwnPasteFragment(html) {
+        // §7: DOMPurify НЕ валидирует URL в data-атрибутах (только href/src),
+        // поэтому data-link-url проверяем сами (validateLinkUrl в
+        // _reconstructPastedCapsules). Хуки allowlist не мутируют.
+        const clean = SafeHTML.sanitize(html, {
+            USE_PROFILES: false,
+            ALLOWED_TAGS: ['b', 'i', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'],
+            ALLOWED_ATTR: ['style', 'class', 'href',
+                'data-link-id', 'data-link-url', 'data-footnote-id', 'data-footnote-text'],
+        });
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
+        this._reconstructPastedCapsules(tmp);
+        const fragment = document.createDocumentFragment();
+        while (tmp.firstChild) fragment.appendChild(tmp.firstChild);
+        return fragment;
+    },
+
+    /**
+     * @private Реконструирует капсулы во вставленном фрагменте своими фабриками
+     * (createLinkMarker/createFootnoteMarker) со СВЕЖИМИ id — чтобы вставленная
+     * копия не делила id с оригиналом. URL ссылки прогоняется через validateLinkUrl
+     * (DOMPurify data-атрибуты не проверяет). Невалидная/пустая капсула (нет
+     * текста, пустой/битый URL, пустое тело сноски) разворачивается в plain-text.
+     * validateLinkUrl лежит в window (избегаем циклического импорта с
+     * links-footnotes.js).
+     * @param {HTMLElement} root
+     */
+    _reconstructPastedCapsules(root) {
+        const caps = root.querySelectorAll(
+            '.text-link, .text-footnote, [data-link-url], [data-footnote-text]');
+        caps.forEach(el => {
+            if (!el.parentNode) return; // уже заменён (вложенный случай)
+            const text = el.textContent || '';
+            const isLink = el.classList.contains('text-link') || el.hasAttribute('data-link-url');
+            let replacement = null;
+            if (isLink) {
+                const verdict = window.validateLinkUrl
+                    ? window.validateLinkUrl(el.getAttribute('data-link-url') || '')
+                    : { ok: false };
+                if (text.trim() && verdict.ok) {
+                    replacement = this.createLinkMarker(text, verdict.url);
+                }
+            } else {
+                const body = (el.getAttribute('data-footnote-text') || '').trim();
+                if (text.trim() && body) {
+                    replacement = this.createFootnoteMarker(text, body);
+                }
+            }
+            // Невалидная/пустая капсула → её видимый текст.
+            if (!replacement) replacement = document.createTextNode(text);
+            el.parentNode.replaceChild(replacement, el);
+        });
+    },
+
+    /**
+     * 4г: строит DocumentFragment из ВНЕШНЕГО вставленного HTML. <a href> на ЛЮБОЙ
+     * глубине → span.text-link (фабрика createLinkMarker, C5); прочий текст →
+     * textContent. Структура (абзацы/списки) теряется сознательно — режим «только
+     * ссылки». Word оборачивает <a> в mso-разметку, поэтому обходим всё дерево
+     * рекурсивно (а не только top-level), иначе вложенная ссылка терялась бы
+     * (BUG-4). Схему href валидирует validateLinkUrl (http/https/mailto/tel/ftp/
+     * file/#), как и при ручном вводе.
+     * @private
+     */
+    _buildExternalPasteFragment(html) {
         // DOMPurify сводит вход к <a href> + блочной разметке + тексту; прочее
         // вырезается (KEEP_CONTENT=true по умолчанию сохраняет текст внутри
         // удалённых тегов). BUG-4: дефолтный ALLOWED_URI_REGEXP вырезает href со
