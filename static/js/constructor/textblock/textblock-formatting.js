@@ -55,6 +55,32 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private TB-2: непосредственный узел-донор форматирования для
+     * inheritFromNeighbors (обход previousSibling). НЕ переиспользует
+     * _caretHomeSibling (textblock-editor.js): та функция для каретко-навигации
+     * умышленно прозрачна к span-якорю размера (U+200B из applyFontSize без
+     * выделения) — якорь не должен блокировать Home/стрелки. Здесь наоборот:
+     * якорь — самый явный сигнал «пользователь выставил размер тут» и обязан
+     * быть донором, даже когда всё его содержимое — чистый zero-width.
+     * Правило: span с font-size — донор НЕЗАВИСИМО от содержимого (проверяется
+     * ДО zero-width-пропуска); голый zero-width БЕЗ font-size (caret-guard,
+     * span без style) — прозрачен, обход идёт дальше; любой другой значимый
+     * узел (текст, <br>, капсула, span без font-size) — стена.
+     * @param {Node} element
+     * @returns {Node|null}
+     */
+    _formatDonorSibling(element) {
+        let n = element.previousSibling;
+        while (n) {
+            const isFontSizeSpan = n.nodeType === 1 && n.tagName === 'SPAN'
+                && !this._isCapsule(n) && !!n.style.fontSize;
+            if (isFontSizeSpan || !this._isZeroWidthNode(n)) return n;
+            n = n.previousSibling;
+        }
+        return null;
+    },
+
+    /**
      * Наследует форматирование от соседних элементов (span'ов с форматированием)
      */
     inheritFromNeighbors(element) {
@@ -62,13 +88,9 @@ Object.assign(TextBlockManager.prototype, {
 
         let nextNode = element.nextSibling;
 
-        // TB-2: наследуем ТОЛЬКО от НЕПОСРЕДСТВЕННОГО span-соседа. _caretHomeSibling
-        // (textblock-editor.js) пропускает исключительно zero-width-узлы (caret-guard
-        // U+FEFF, якорь размера U+200B) и останавливается на первом значимом узле —
-        // непустом тексте, <br> или капсуле; раньше цикл пропускал ЛЮБОЙ узел, не
-        // подошедший под условие, и наследовал размер издалека через реальный текст.
+        // TB-2: наследуем ТОЛЬКО от НЕПОСРЕДСТВЕННОГО донора (_formatDonorSibling).
         // Капсула физически тоже <span> — исключаем её явно: она не донор формата.
-        const prevNode = this._caretHomeSibling(element, 'previousSibling');
+        const prevNode = this._formatDonorSibling(element);
         if (prevNode && prevNode.nodeType === 1 && prevNode.tagName === 'SPAN'
                 && !this._isCapsule(prevNode) && prevNode.style.length > 0) {
             // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
