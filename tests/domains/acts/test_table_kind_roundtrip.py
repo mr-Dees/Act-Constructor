@@ -142,3 +142,21 @@ class TestCopyTablesKind:
         assert sql.count("kind") >= 2, (
             f"copy_tables не копирует kind (встречается {sql.count('kind')} раз)"
         )
+
+
+class TestCopyTextblocks:
+    """copy_textblocks не копирует вырезанную колонку formatting (Task 5)."""
+
+    async def test_copy_textblocks_sql_omits_formatting(self, mock_conn):
+        """SQL copy_textblocks не упоминает formatting: колонка дропнута из схемы,
+        иначе дубликат акта падал бы UndefinedColumnError на новой БД."""
+        repo = ActCrudRepository(mock_conn)
+        await repo.copy_textblocks(from_id=1, to_id=2)
+
+        sql = mock_conn.execute.call_args.args[0]
+        assert "formatting" not in sql, (
+            "copy_textblocks копирует вырезанную колонку formatting"
+        )
+        # Пин копируемых колонок — против случайной правки списка.
+        for col in ("textblock_id", "node_id", "node_number", "content"):
+            assert col in sql, f"copy_textblocks не копирует {col}"

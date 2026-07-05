@@ -423,10 +423,10 @@ class ActCrudRepository(BaseRepository):
         await self.conn.execute(
             f"""
             INSERT INTO {self.textblocks} (
-                act_id, textblock_id, node_id, node_number, content, formatting
+                act_id, textblock_id, node_id, node_number, content
             )
             SELECT
-                $2, textblock_id, node_id, node_number, content, formatting
+                $2, textblock_id, node_id, node_number, content
             FROM {self.textblocks}
             WHERE act_id = $1
             """,

@@ -791,7 +791,6 @@ test.describe('capsule-integrity: буфер обмена (Task 3)', () => {
         id: 'txt-ro-src',
         content: '<span class="text-footnote" data-footnote-id="RO1" data-footnote-text="тело RO"' +
           ' contenteditable="false">сн</span> хвост',
-        formatting: {},
       };
       (window as any).AppState.textBlocks['txt-ro-src'] = roTb;
       const roEd = tbm.createEditor(roTb) as HTMLElement;
