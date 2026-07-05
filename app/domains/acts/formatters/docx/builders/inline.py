@@ -2,9 +2,14 @@
 
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <s>/<strike>/<del>,
 <span style="font-size: ...">, <span style="text-decoration: line-through">,
-<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) рендерятся как
-мягкий перенос строки между блоками (контейнерная разметка contenteditable из
-обычного Enter). Любой другой тег игнорируется (содержимое сохраняется).
+<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) внутри
+переданного фрагмента рендерятся как мягкий перенос строки между блоками.
+Любой другой тег игнорируется (содержимое сохраняется).
+
+TB-1: ВЕРХНЕУРОВНЕВЫЕ <div>/<p> контента текстблока — отдельные абзацы Word
+со своим выравниванием из style="text-align". Разбиение делает
+split_block_segments (ниже), потребитель — formatter._render_textblock:
+каждый сегмент → свой w:p → apply_inline_html только для внутренностей.
 
 Зачёркивание (M.19): Chromium execCommand('strikeThrough') эмитит <strike>
 (тег-форма, styleWithCSS в приложении не включается); CSS-форма
@@ -389,3 +394,151 @@ def _extract_size_pt(attrs: dict) -> float | None:
     value = float(match.group(1))
     unit = match.group(2).lower()
     return value * _PX_TO_PT if unit == "px" else value
+
+
+# ---------------------------------------------------------------------------
+# TB-1: разбиение контента текстблока на верхнеуровневые сегменты-абзацы.
+# ---------------------------------------------------------------------------
+
+# Void-теги HTML: элемент не открывается, на глубину вложенности не влияют.
+# Для сегментации важен <br>; остальные — страховка для легаси-контента.
+_VOID_TAGS = frozenset({
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+})
+
+# text-align из inline-style блочного элемента. Прочие значения (start/end/
+# -webkit-*) сознательно не распознаются — рендер применит дефолт justify.
+_TEXT_ALIGN_RE = re.compile(
+    r"text-align\s*:\s*(left|center|right|justify)\b", re.IGNORECASE
+)
+
+# Сегмент из одного placeholder-<br> (пустая строка contenteditable:
+# <div><br></div>) — сам абзац уже даёт строку, w:br удвоил бы её.
+_PLACEHOLDER_BR_RE = re.compile(r"^\s*<br\b[^>]*>\s*$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class BlockSegment:
+    """Верхнеуровневый «абзац» контента текстблока.
+
+    alignment — значение text-align блочного элемента (None = не задано,
+    рендер подставит дефолт justify); html — внутренняя разметка сегмента
+    (пустая строка = пустой абзац-строка).
+    """
+    alignment: str | None
+    html: str
+
+
+def split_block_segments(html: str) -> list[BlockSegment]:
+    """Режет content на верхнеуровневые сегменты-абзацы для DOCX.
+
+    Верхнеуровневый <div>/<p> → отдельный сегмент со своим text-align.
+    Смежный контент ВНЕ блочных элементов (голый текст, span «размера на
+    каретке», <br> — легаси-разметка) группируется в анонимный сегмент без
+    выравнивания: он не теряется, а уходит в абзац с дефолтным justify.
+    Вложенные блочные теги остаются внутри html сегмента — apply_inline_html
+    рендерит их мягкими переносами w:br, как раньше. Пустой/пробельный
+    контент даёт пустой список (рендер сам добавит абзац-строку).
+    """
+    if not html:
+        return []
+    splitter = _TopLevelSplitter()
+    splitter.feed(html)
+    splitter.close()
+    return splitter.finish()
+
+
+class _TopLevelSplitter(HTMLParser):
+    """Собирает сегменты, реконструируя сырой HTML из событий парсера.
+
+    convert_charrefs=False + get_starttag_text: entity-ссылки и атрибуты
+    вложенной разметки доезжают до apply_inline_html дословно, без
+    повторного экранирования.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self._segments: list[BlockSegment] = []
+        self._buf: list[str] = []
+        # Глубина открытых элементов внутри текущего сегмента; 0 = верхний
+        # уровень content. _in_block — копим внутренности top-level div/p.
+        self._depth = 0
+        self._in_block = False
+        self._block_align: str | None = None
+
+    def handle_starttag(self, tag, attrs):
+        raw = self.get_starttag_text() or ""
+        if tag in _VOID_TAGS:
+            self._buf.append(raw)
+            return
+        if self._depth == 0 and tag in ("div", "p"):
+            self._flush_anonymous()
+            self._in_block = True
+            self._block_align = _extract_text_align(dict(attrs))
+            self._depth = 1
+            return
+        self._buf.append(raw)
+        self._depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        # Self-closing (<br/>) — элемент не открывается, глубина не растёт.
+        self._buf.append(self.get_starttag_text() or "")
+
+    def handle_endtag(self, tag):
+        if tag in _VOID_TAGS:
+            return
+        if self._depth == 0:
+            return  # непарный закрывающий тег на верхнем уровне
+        self._depth -= 1
+        if self._depth == 0 and self._in_block:
+            self._emit_block()
+            return
+        self._buf.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if data:
+            self._buf.append(data)
+
+    def handle_entityref(self, name):
+        self._buf.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self._buf.append(f"&#{name};")
+
+    def finish(self) -> list[BlockSegment]:
+        """Хвост после конца ввода: незакрытый блок или анонимный остаток."""
+        if self._in_block:
+            self._emit_block()
+        else:
+            self._flush_anonymous()
+        return self._segments
+
+    def _flush_anonymous(self) -> None:
+        text = "".join(self._buf)
+        self._buf.clear()
+        # Межблочные ASCII-пробелы браузер схлопывает — абзац из них не
+        # делаем. &nbsp;/U+00A0 сюда не попадают (не в " \t\r\n").
+        if not text.strip(" \t\r\n"):
+            return
+        self._segments.append(BlockSegment(None, _normalize_segment_html(text)))
+
+    def _emit_block(self) -> None:
+        inner = "".join(self._buf)
+        self._buf.clear()
+        self._in_block = False
+        self._segments.append(
+            BlockSegment(self._block_align, _normalize_segment_html(inner))
+        )
+        self._block_align = None
+
+
+def _normalize_segment_html(inner: str) -> str:
+    if _PLACEHOLDER_BR_RE.match(inner):
+        return ""
+    return inner
+
+
+def _extract_text_align(attrs: dict) -> str | None:
+    match = _TEXT_ALIGN_RE.search(attrs.get("style") or "")
+    return match.group(1).lower() if match else None

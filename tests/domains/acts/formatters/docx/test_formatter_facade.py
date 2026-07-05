@@ -169,7 +169,8 @@ def test_textblock_default_formatting_keeps_legacy_defaults():
 
 
 def test_textblock_custom_formatting_applied():
-    """Размер/выравнивание — из formatting; начертание — из inline-тегов content (B-1/B-37)."""
+    """Размер — из formatting.fontSize; выравнивание — из style="text-align"
+    блочного элемента content (TB-1); начертание — из inline-тегов (B-1/B-37)."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
     fmt = DocxFormatter()
@@ -183,8 +184,10 @@ def test_textblock_custom_formatting_applied():
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
             id="tb1", nodeId="1.1",
-            # Начертание — inline-тегами в content (единственный источник, B-1).
-            content="<b><i><u>Форматированный блок</u></i></b>",
+            # Начертание — inline-тегами в content (единственный источник, B-1);
+            # выравнивание — text-align блочного элемента (TB-1).
+            content='<div style="text-align: center;">'
+                    "<b><i><u>Форматированный блок</u></i></b></div>",
             formatting={"fontSize": 16, "alignment": "center"},
         )},
     )
@@ -198,8 +201,8 @@ def test_textblock_custom_formatting_applied():
     assert run.underline is True
 
 
-def test_textblock_partial_formatting_left_alignment_applied():
-    """alignment=left применяется буквально (LEFT); начертание — из inline <b> в content."""
+def test_textblock_html_left_alignment_applied():
+    """text-align: left применяется буквально (LEFT); начертание — из inline <b>."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     fmt = DocxFormatter()
     section = {
@@ -211,8 +214,9 @@ def test_textblock_partial_formatting_left_alignment_applied():
     content = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1", content="<b>Левый блок</b>",
-            formatting={"fontSize": 14, "alignment": "left"},
+            id="tb1", nodeId="1.1",
+            content='<div style="text-align: left;"><b>Левый блок</b></div>',
+            formatting={"fontSize": 14},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
@@ -221,13 +225,10 @@ def test_textblock_partial_formatting_left_alignment_applied():
     assert para.runs[0].bold is True
 
 
-def test_textblock_explicit_left_with_default_fields_renders_left():
-    """Регрессия: явный alignment=left при прочих дефолтах → LEFT, не JUSTIFY.
-
-    Раньше formatting, совпавший со схемными дефолтами (когда дефолт был
-    'left'), распознавался как «нетронутый» и подменялся на JUSTIFY — явный
-    левый выбор не доезжал до LEFT. Дефолт схемы теперь 'justify', выравнивание
-    применяется буквально.
+def test_textblock_formatting_alignment_dead_html_wins():
+    """TB-1: мёртвое formatting.alignment не читается — выравнивание берётся
+    ТОЛЬКО из style="text-align" блочного элемента content (явный left
+    не подменяется ни дефолтом justify, ни значением из formatting).
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     fmt = DocxFormatter()
@@ -240,8 +241,10 @@ def test_textblock_explicit_left_with_default_fields_renders_left():
     content = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1", content="Явно левый блок",
-            formatting={"fontSize": 14, "alignment": "left", "bold": False,
+            id="tb1", nodeId="1.1",
+            content='<div style="text-align: left;">Явно левый блок</div>',
+            # Противоречащее значение в мёртвом поле — не должно влиять.
+            formatting={"fontSize": 14, "alignment": "center", "bold": False,
                         "italic": False, "underline": False},
         )},
     )
@@ -253,9 +256,9 @@ def test_textblock_explicit_left_with_default_fields_renders_left():
 def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
     """#9: смена только выравнивания при дефолтном fontSize=14 НЕ уменьшает шрифт.
 
-    Раньше любое отличие formatting гнало через fontSize*0.75 (14→10.5pt);
-    теперь дефолтный размер сохраняет body_pt (12pt), а выравнивание
-    применяется независимо.
+    Выравнивание (теперь — text-align блочного элемента content, TB-1)
+    применяется независимо от размера: дефолтный fontSize сохраняет body_pt
+    (12pt), а не прогоняется через fontSize*0.75 (14→10.5pt).
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
@@ -270,8 +273,9 @@ def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
     content = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": [section]},
         textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1", content="Центрированный блок",
-            formatting={"fontSize": 14, "alignment": "center", "bold": False,
+            id="tb1", nodeId="1.1",
+            content='<div style="text-align: center;">Центрированный блок</div>',
+            formatting={"fontSize": 14, "bold": False,
                         "italic": False, "underline": False},
         )},
     )
