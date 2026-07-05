@@ -190,11 +190,10 @@ async def _insert_textblock(conn: asyncpg.Connection, act_id: int) -> None:
     await conn.execute(
         f"""
         INSERT INTO {PREFIX}act_textblocks
-            (act_id, textblock_id, node_id, content, formatting)
-        VALUES ($1, 'txt-seed-1', 'txt-seed-1', 'Исходный текст блока.',
-                $2::jsonb)
+            (act_id, textblock_id, node_id, content)
+        VALUES ($1, 'txt-seed-1', 'txt-seed-1', 'Исходный текст блока.')
         """,
-        act_id, json.dumps({}),
+        act_id,
     )
 
 

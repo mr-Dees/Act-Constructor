@@ -222,6 +222,33 @@ class TestGreenplumSchemaCompatibility:
                 f"UNIQUE(act_id, node_id). Найдено: {uniques}"
             )
 
+    def test_act_textblocks_has_no_formatting_column_both_schemas(self):
+        """Директива владельца: колонка formatting вырезана из act_textblocks.
+
+        Схема и репозиторий синхронны — INSERT/SELECT текстблоков её не
+        упоминают. Регрессия на случай случайного возврата колонки без
+        поддержки в репозитории (INSERT упал бы на NOT NULL).
+        """
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            create_stmt = None
+            for raw in DatabaseAdapter._split_sql_statements(content):
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{PREFIX}act_textblocks" in cleaned
+                ):
+                    create_stmt = cleaned
+                    break
+            assert create_stmt is not None, (
+                f"{db_type}/schema.sql: CREATE TABLE act_textblocks не найдено"
+            )
+            assert not re.search(r'\bformatting\b', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка formatting в act_textblocks "
+                f"должна быть вырезана (директива владельца)"
+            )
+
     def test_no_pl_pgsql_triggers(self, gp_schema_files):
         """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
         UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний

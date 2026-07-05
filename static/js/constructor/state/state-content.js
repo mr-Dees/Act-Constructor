@@ -177,17 +177,13 @@ Object.assign(AppState, {
      * @returns {Object} Объект текстового блока
      */
     _createTextBlockObject(textBlockId, nodeId) {
-        const defaults = AppConfig.content.defaults;
-
+        // Форматирование целиком живёт в inline-HTML content (директива
+        // владельца): размер, выравнивание и начертание — в самом тексте,
+        // контейнерного объекта formatting больше нет.
         return {
             id: textBlockId,
             nodeId,
-            content: '',
-            // Начертание задаётся inline-HTML в content (B-1) — без полей.
-            formatting: {
-                fontSize: defaults.fontSize,
-                alignment: defaults.alignment
-            }
+            content: ''
         };
     },
 

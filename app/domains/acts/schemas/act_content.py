@@ -350,93 +350,41 @@ class TableSchema(BaseModel):
         return self
 
 
-@lru_cache(maxsize=1)
-def _textblock_font_bounds() -> tuple[int, int]:
-    """Границы размера шрифта текстблока (min, max) из настроек, с кэшем (B-35).
-
-    Валидатор размера зовётся на КАЖДЫЙ текстблок акта; настройки на старте
-    заполняются один раз и в рантайме не меняются (JupyterHub: процесс-на-юзера),
-    поэтому кэш безопасен. В тестах, инстанцирующих схему до заполнения реестра,
-    кэш сбрасывается autouse-фикстурой (_textblock_font_bounds.cache_clear()).
-    """
-    tb = _acts_settings().textblocks
-    return tb.font_size_min, tb.font_size_max
-
-
-class TextBlockFormattingSchema(BaseModel):
-    """
-    Схема форматирования текстового блока: контейнерные параметры абзаца.
-
-    Начертание (жирный/курсив/подчёркивание) хранится ИСКЛЮЧИТЕЛЬНО в inline-HTML
-    поля content (теги <b>/<i>/<u>), отдельных полей нет (B-1): прежние булевы
-    bold/italic/underline были мёртвыми (редактор в них не писал) и при чтении
-    давали двойное применение форматирования. Здесь — только базовый размер
-    абзаца и выравнивание.
-
-    Attributes:
-        fontSize: Базовый размер шрифта в пикселях (границы — по настройкам)
-        alignment: Выравнивание текста
-    """
-    model_config = ConfigDict(extra="forbid")
-
-    # Границы размера — по настройкам ACTS__TEXTBLOCKS__* (валидатор ниже),
-    # не Field-ом: env реально меняет лимит (UI-гейт → /limits → схема).
-    fontSize: int = Field(
-        default=14,
-        description="Базовый размер шрифта (границы — по настройкам)"
-    )
-    alignment: Literal["left", "center", "right", "justify"] = Field(
-        default="justify",
-        description="Выравнивание (дефолт — по ширине, как тело акта)"
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_legacy_format_fields(cls, data):
-        """Отбрасывает устаревшие поля bold/italic/underline (B-1).
-
-        Начертание теперь живёт только в content (inline-теги). Поля удалены из
-        схемы, но в БД и в версиях ранее сохранённых актов они ещё есть — при
-        extra="forbid" их наличие уронило бы экспорт/restore таких актов
-        (ActDataSchema пересобирается из stored-данных). Молча выкидываем их;
-        новые сохранения их не пишут.
-        """
-        if isinstance(data, dict):
-            for legacy in ("bold", "italic", "underline"):
-                data.pop(legacy, None)
-        return data
-
-    @model_validator(mode="after")
-    def validate_font_size(self) -> "TextBlockFormattingSchema":
-        """Проверяет размер шрифта по кэшированным границам ACTS__TEXTBLOCKS__*."""
-        font_min, font_max = _textblock_font_bounds()
-        if not (font_min <= self.fontSize <= font_max):
-            raise ValueError(
-                f"Размер шрифта ({self.fontSize}) вне допустимого диапазона "
-                f"{font_min}–{font_max}"
-            )
-        return self
-
-
 class TextBlockSchema(BaseModel):
     """
-    Схема текстового блока с форматированием.
+    Схема текстового блока.
+
+    Форматирование целиком живёт в inline-HTML поля content: начертание —
+    теги <b>/<i>/<u>, выравнивание — text-align блочных элементов, размер —
+    span'ы с font-size (базовый размер — единый дефолт настроек, не хранится
+    per-block). Прежний контейнерный объект formatting вырезан (директива
+    владельца): он писался только при создании блока и правками не обновлялся.
 
     Attributes:
         id: Уникальный идентификатор текстового блока
         nodeId: ID узла дерева, к которому привязан блок
         content: HTML-содержимое блока с inline-форматированием
-        formatting: Базовые параметры форматирования текста
     """
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(description="ID текстового блока")
     nodeId: str = Field(description="ID узла дерева")
     content: str = Field(default="", description="HTML-содержимое")
-    formatting: TextBlockFormattingSchema = Field(
-        default_factory=TextBlockFormattingSchema,
-        description="Базовое форматирование"
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_formatting(cls, data):
+        """Отбрасывает устаревшее поле formatting (директива владельца).
+
+        Контейнерные стили (размер/выравнивание) больше не хранятся отдельно.
+        Поле удалено из схемы, но в ранее сохранённых актах ещё встречается — при
+        extra="forbid" его наличие уронило бы restore/PUT такого акта
+        (ActDataSchema пересобирается из stored-данных). Молча выкидываем;
+        новые сохранения его не пишут.
+        """
+        if isinstance(data, dict):
+            data.pop("formatting", None)
+        return data
 
 
 class ViolationDescriptionListSchema(BaseModel):

@@ -86,8 +86,6 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_acts_validation_status_values": (
         "Недопустимое состояние валидации акта. Допустимые значения: ok, warning, error"
     ),
-    # ── acts: act_textblocks ─────────────────────────────────────────────────
-    "check_formatting_is_object": "Данные форматирования должны быть объектом JSON",
     # ── acts: act_violations ─────────────────────────────────────────────────
     "check_description_list_is_object_or_null": (
         "Поле description_list должно быть объектом JSON или отсутствовать"

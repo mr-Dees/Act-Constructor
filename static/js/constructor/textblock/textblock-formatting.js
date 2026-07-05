@@ -2,29 +2,19 @@
  * Расширение TextBlockManager для работы с форматированием
  */
 import { TextBlockManager } from './textblock-core.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
-     * Применяет сохранённое форматирование к элементу редактора
+     * Применяет базовый размер шрифта к редактору из /acts/limits (единый
+     * источник с превью и экспортом, EXP-2: дефолт 16px). Выравнивание здесь НЕ
+     * задаётся: оно живёт per-line в inline-HTML content (TB-1), дефолт по
+     * ширине — CSS-правилом на .textblock-editor.
      * @param {HTMLElement} editor - DOM-элемент редактора
-     * @param {Object} formatting - Объект с настройками форматирования
      */
-    applyFormatting(editor, formatting) {
-        if (!formatting) return;
-
-        if (formatting.fontSize) {
-            editor.style.fontSize = `${formatting.fontSize}px`;
-        }
-
-        if (formatting.alignment) {
-            const alignmentMap = {
-                'left': 'left',
-                'center': 'center',
-                'right': 'right',
-                'justify': 'justify'
-            };
-            editor.style.textAlign = alignmentMap[formatting.alignment] || 'left';
-        }
+    applyBaseFontSize(editor) {
+        if (!editor) return;
+        editor.style.fontSize = `${getStructureLimits().fontSizeDefault}px`;
     },
 
     /**

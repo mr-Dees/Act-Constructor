@@ -206,12 +206,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
     content TEXT NOT NULL,
-    formatting JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT check_formatting_is_object
-        CHECK (jsonb_typeof(formatting) = 'object'),
 
     UNIQUE(act_id, textblock_id)
 );

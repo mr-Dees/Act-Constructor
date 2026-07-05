@@ -56,6 +56,7 @@ async def get_acts_limits(
         "textblocks": {
             "font_size_min": textblocks.font_size_min,
             "font_size_max": textblocks.font_size_max,
+            "font_size_default": textblocks.font_size_default,
             "per_node": textblocks.per_node,
         },
         "sanitizer": {

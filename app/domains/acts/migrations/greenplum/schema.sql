@@ -277,14 +277,11 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
     content TEXT NOT NULL,
-    formatting JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
     PRIMARY KEY (act_id, id),
-    CONSTRAINT check_formatting_is_object
-        CHECK (jsonb_typeof(formatting) = 'object'),
 
     UNIQUE(act_id, textblock_id)
 )
@@ -297,8 +294,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.act_id IS 'Ссылка на �
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.textblock_id IS 'Уникальный ID текстового блока внутри акта';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.node_id IS 'ID узла в дереве, к которому привязан блок';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.node_number IS 'Номер узла (например, 2.1) для аналитики';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.content IS 'Текстовое содержимое блока';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.formatting IS 'JSONB объект с информацией о форматировании (стили, выравнивание и т.д.)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.content IS 'Текстовое содержимое блока (inline-HTML с форматированием)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.created_at IS 'Дата и время создания блока';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и время последнего изменения блока';
 

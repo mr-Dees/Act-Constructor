@@ -179,7 +179,7 @@ class ActContentRepository(BaseRepository):
         """Загружает текстовые блоки акта."""
         rows = await self.conn.fetch(
             f"""
-            SELECT textblock_id, node_id, content, formatting
+            SELECT textblock_id, node_id, content
             FROM {self.textblocks}
             WHERE act_id = $1
             """,
@@ -190,7 +190,6 @@ class ActContentRepository(BaseRepository):
                 'id': row['textblock_id'],
                 'nodeId': row['node_id'],
                 'content': row['content'],
-                'formatting': json.loads(row['formatting'])
             }
             for row in rows
         }
@@ -387,7 +386,6 @@ class ActContentRepository(BaseRepository):
                 node_id,
                 info.get("number"),
                 tb_data.content,
-                json.dumps(tb_data.formatting.model_dump()),
             ))
 
         if dropped:
@@ -401,9 +399,9 @@ class ActContentRepository(BaseRepository):
                 f"""
                 INSERT INTO {self.textblocks} (
                     act_id, audit_act_id, audit_point_id,
-                    textblock_id, node_id, node_number, content, formatting
+                    textblock_id, node_id, node_number, content
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 args,
             )

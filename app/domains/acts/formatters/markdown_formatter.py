@@ -10,7 +10,7 @@ from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
 from .tree_walker import WalkContext, collect_blocks, walk
-from .utils import HTMLUtils, TableUtils, FormattingUtils
+from .utils import HTMLUtils, TableUtils
 
 
 class MarkdownFormatter(BaseFormatter):
@@ -107,21 +107,8 @@ class MarkdownFormatter(BaseFormatter):
         if not content:
             return ""
 
-        formatting = textblock_data.get('formatting', {})
-
         # Используем HTML утилиту
-        clean_content = HTMLUtils.html_to_markdown(content)
-
-        result = []
-
-        # Используем formatting утилиту
-        meta = FormattingUtils.build_meta_description(formatting)
-        if meta:
-            result.append(f"<!-- {', '.join(meta)} -->")
-            result.append("")
-
-        result.append(clean_content)
-        return "\n".join(result)
+        return HTMLUtils.html_to_markdown(content)
 
     def _format_violation(self, violation_data: dict) -> str:
         """

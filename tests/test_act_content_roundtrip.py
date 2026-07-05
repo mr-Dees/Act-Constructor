@@ -4,14 +4,14 @@ Round-trip-страж контракта фронт↔бэк для данных
 Фикстура повторяет ТОЧНУЮ форму фронтового снимка AppState.exportData()
 (static/js/constructor/state/state-core.js, _serializeTree/_serializeTables/
 _serializeTextBlocks/_serializeViolations): дерево с разделами, обычная
-таблица с colWidths, текстблок с formatting, нарушение с descriptionList и
+таблица с colWidths, текстблок (content), нарушение с descriptionList и
 additionalContent. Прогон ActDataSchema.model_validate → model_dump обязан
 сохранить КАЖДОЕ поле фикстуры (рекурсивное сравнение): если схему изменят
 несинхронно с фронтом (переименуют/удалят поле, extra="ignore" молча выкинет
 ключ) — тест укажет на потерянное поле.
 
-Вторая часть — границы лимитов: 64×16 для grid и fontSize 8-72 обязаны
-совпадать с константами теста (зеркало AppConfig.limits во фронте,
+Вторая часть — границы лимитов: 64×16 для grid обязаны совпадать с
+константами теста (зеркало AppConfig.limits во фронте,
 static/js/shared/app-config.js; JS-страж — tests/js/table-cells-limits.test.mjs).
 """
 import pytest
@@ -20,14 +20,11 @@ from pydantic import ValidationError
 from app.domains.acts.schemas.act_content import (
     ActDataSchema,
     TableSchema,
-    TextBlockFormattingSchema,
 )
 
 # Контрактные константы (зеркало фронтового AppConfig.limits).
 MAX_TABLE_ROWS = 64
 MAX_TABLE_COLS = 16
-FONT_SIZE_MIN = 8
-FONT_SIZE_MAX = 72
 
 
 def _cell(row: int, col: int, **overrides) -> dict:
@@ -56,8 +53,8 @@ def _make_export_fixture() -> dict:
     Минимальный акт в точной форме exportData():
     дерево (root → раздел 5 → пункт с таблицей/текстблоком/нарушением),
     1 обычная таблица с colWidths и объединением, 1 риск-таблица с подвидом
-    kind (exportData сериализует kind только при не-'regular'), 1 текстблок
-    с formatting, 1 нарушение с descriptionList и additionalContent.
+    kind (exportData сериализует kind только при не-'regular'), 1 текстблок,
+    1 нарушение с descriptionList и additionalContent.
     """
     grid = _grid(3, 3)
     # Горизонтальное объединение в строке данных — spanOrigin переживает round-trip.
@@ -160,13 +157,6 @@ def _make_export_fixture() -> dict:
                 "id": "b1",
                 "nodeId": "5.1_tb_1",
                 "content": "<p>Текст блока</p>",
-                "formatting": {
-                    "bold": True,
-                    "italic": False,
-                    "underline": False,
-                    "fontSize": 14,
-                    "alignment": "justify",
-                },
             },
         },
         "violations": {
@@ -258,7 +248,7 @@ class TestExportDataRoundTrip:
 
 
 class TestLimitsMatchContractConstants:
-    """Границы схемы совпадают с контрактными константами (64×16, 8-72)."""
+    """Границы схемы совпадают с контрактными константами (grid 64×16)."""
 
     def test_grid_at_limit_validates(self):
         """Грид ровно 64×16 проходит валидацию."""
@@ -294,14 +284,3 @@ class TestLimitsMatchContractConstants:
         with pytest.raises(ValidationError):
             TableSchema.model_validate(table)
 
-    def test_font_size_bounds_accept_min_and_max(self):
-        """Границы fontSize включительны: 8 и 72 валидны."""
-        assert TextBlockFormattingSchema(fontSize=FONT_SIZE_MIN).fontSize == FONT_SIZE_MIN
-        assert TextBlockFormattingSchema(fontSize=FONT_SIZE_MAX).fontSize == FONT_SIZE_MAX
-
-    def test_font_size_out_of_bounds_rejected(self):
-        """За границами (7 и 73) — отказ."""
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=FONT_SIZE_MIN - 1)
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=FONT_SIZE_MAX + 1)

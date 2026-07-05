@@ -20,10 +20,15 @@
     background: var(--input-bg);
     min-height: var(--input-min-height);
     font-family: var(--font-family-base);
-    font-size: var(--font-size-sm);
+    /* EXP-2: базовый размер 16px — фолбэк до inline-стиля из /acts/limits
+       (applyBaseFontSize), синхронно с экранным дефолтом font_size_default. */
+    font-size: var(--font-size-base);
     /* B-22: единый line-height редактор↔превью через общий токен (fallback 1.75),
        чтобы будущие правки переменных не развели редактор и предпросмотр. */
     line-height: var(--textblock-line-height, 1.75);
+    /* TB-1: дефолт выравнивания блока без явного text-align — «по ширине»
+       (как тело акта); per-line выравнивание в content его переопределяет. */
+    text-align: justify;
     color: var(--input-text);
     transition: var(--transition-all);
     cursor: text;

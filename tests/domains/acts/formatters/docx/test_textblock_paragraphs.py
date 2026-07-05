@@ -1,12 +1,10 @@
 """TB-1: текстблок в DOCX — верхнеуровневые блочные элементы → отдельные w:p.
 
 Прежняя модель «один w:p + w:br на все блоки» не выражала per-line
-выравнивание: text-align жил в style блочных элементов content, а DOCX читал
-мёртвое formatting.alignment. Теперь каждый верхнеуровневый <div>/<p> —
-свой абзац Word со своим jc (дефолт justify); <br> и вложенные блочные теги
-внутри сегмента остаются мягкими переносами w:br; контент вне блочной
-разметки (голый текст/span — легаси) уходит в абзац с дефолтным justify,
-а не теряется.
+выравнивание. Теперь каждый верхнеуровневый <div>/<p> — свой абзац Word со
+своим jc (дефолт justify); <br> и вложенные блочные теги внутри сегмента
+остаются мягкими переносами w:br; контент вне блочной разметки (голый
+текст/span — легаси) уходит в абзац с дефолтным justify, а не теряется.
 """
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
@@ -20,12 +18,11 @@ from app.domains.acts.formatters.docx.builders.inline import (
 from app.domains.acts.schemas.act_content import TextBlockSchema
 
 
-def _render(doc, content, formatting=None):
+def _render(doc, content, formatter=None):
     """Рендерит текстблок в doc, возвращает ДОБАВЛЕННЫЕ абзацы."""
-    kwargs = {"formatting": formatting} if formatting is not None else {}
-    schema = TextBlockSchema(id="tb1", nodeId="n1", content=content, **kwargs)
+    schema = TextBlockSchema(id="tb1", nodeId="n1", content=content)
     before = len(doc.paragraphs)
-    DocxFormatter()._render_textblock(doc, schema)
+    (formatter or DocxFormatter())._render_textblock(doc, schema)
     return doc.paragraphs[before:]
 
 
@@ -265,23 +262,6 @@ def test_hyperlink_survives_block_split(doc):
     assert not paras[0]._p.findall(qn("w:hyperlink"))
 
 
-def test_formatting_alignment_no_longer_read(doc):
-    """Мёртвое formatting.alignment игнорируется: источник — только HTML."""
-    paras = _render(
-        doc, "Просто текст", formatting={"fontSize": 14, "alignment": "center"}
-    )
-    assert paras[0].alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
-
-
-def test_html_align_wins_over_formatting_alignment(doc):
-    paras = _render(
-        doc,
-        '<div style="text-align: center;">центр</div>',
-        formatting={"fontSize": 14, "alignment": "left"},
-    )
-    assert paras[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
-
-
 def test_empty_content_renders_single_empty_paragraph(doc):
     paras = _render(doc, "")
     assert len(paras) == 1
@@ -289,15 +269,21 @@ def test_empty_content_renders_single_empty_paragraph(doc):
     assert len(paras[0].runs) == 0
 
 
-def test_custom_font_size_applies_to_every_paragraph(doc):
-    """Базовый размер из formatting.fontSize (16px → 12pt) — каждому сегменту."""
-    paras = _render(
-        doc,
-        "<div>один</div><div>два</div>",
-        formatting={"fontSize": 16, "alignment": "justify"},
-    )
+def test_base_font_size_applies_to_every_paragraph(doc):
+    """Базовый размер — экранный дефолт настроек ×0.75 (16px → 12pt, EXP-2) —
+    применяется каждому сегменту (форматтер без настроек → фолбэк 16px)."""
+    paras = _render(doc, "<div>один</div><div>два</div>")
     for p in paras:
         assert p.runs[0].font.size == Pt(12)
+
+
+def test_base_font_size_follows_settings_default(doc):
+    """EXP-2: база = ACTS__TEXTBLOCKS__FONT_SIZE_DEFAULT ×0.75. 20px → 15pt."""
+    from app.domains.acts.settings import ActsSettings, TextblocksSettings
+    fmt = DocxFormatter(acts_settings=ActsSettings(
+        textblocks=TextblocksSettings(font_size_default=20)))
+    paras = _render(doc, "<div>текст</div>", formatter=fmt)
+    assert paras[0].runs[0].font.size == Pt(15)
 
 
 # --- вертикальная геометрия: спейсинг разбитого блока -------------------------

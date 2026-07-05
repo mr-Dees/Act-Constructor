@@ -97,8 +97,6 @@ class TestSaveContentUsesTransaction:
         tb_data = MagicMock()
         tb_data.nodeId = "n2"
         tb_data.content = "текст"
-        tb_data.formatting = MagicMock()
-        tb_data.formatting.model_dump.return_value = {}
 
         # Нарушение
         v_data = MagicMock()
@@ -330,8 +328,6 @@ def _make_textblock(node_id: str) -> MagicMock:
     tb = MagicMock()
     tb.nodeId = node_id
     tb.content = "текст"
-    tb.formatting = MagicMock()
-    tb.formatting.model_dump.return_value = {}
     return tb
 
 

@@ -9,7 +9,7 @@ from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
 from .tree_walker import WalkContext, collect_blocks, walk
-from .utils import HTMLUtils, TableUtils, FormattingUtils
+from .utils import HTMLUtils, TableUtils
 
 
 class TextFormatter(BaseFormatter):
@@ -148,8 +148,6 @@ class TextFormatter(BaseFormatter):
         if not content:
             return ""
 
-        formatting = textblock_data.get('formatting', {})
-
         # Используем HTML утилиту для очистки
         clean_content = HTMLUtils.clean_html(content)
 
@@ -157,15 +155,7 @@ class TextFormatter(BaseFormatter):
         lines = clean_content.split('\n')
         formatted_lines = [f"{indent}{line}" for line in lines]
 
-        result = []
-
-        # Используем formatting утилиту для метаданных
-        meta = FormattingUtils.build_meta_description(formatting)
-        if meta:
-            result.append(f"{indent}[{', '.join(meta)}]")
-
-        result.extend(formatted_lines)
-        return "\n".join(result)
+        return "\n".join(formatted_lines)
 
     def _format_violation(self, violation_data: dict) -> str:
         """

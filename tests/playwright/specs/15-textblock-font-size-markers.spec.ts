@@ -63,7 +63,7 @@ test.describe('Текстблок: тулбар при переходе межд
       const tbm = (window as any).textBlockManager;
       const ed1 = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
       // второй редактор через штатный createEditor (навешивает focus/blur)
-      const tb2 = { id: 'txt-live-2', content: 'Второй блок.', formatting: {} };
+      const tb2 = { id: 'txt-live-2', content: 'Второй блок.' };
       (window as any).AppState.textBlocks['txt-live-2'] = tb2;
       const ed2 = tbm.createEditor(tb2);
       ed1.parentElement!.appendChild(ed2);

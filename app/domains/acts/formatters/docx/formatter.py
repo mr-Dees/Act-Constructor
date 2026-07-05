@@ -31,14 +31,13 @@ from app.domains.acts.formatters.docx.styles import (
     apply_document_defaults,
     ensure_footnote_styles,
 )
-from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
-
-# Текстблок: размер — из formatting.fontSize (дефолт → body_pt 12pt, изменённый
-# → px→pt ×0.75), выравнивание — per-line из style="text-align" блочных
-# элементов content (TB-1: HTML — источник истины, мёртвое formatting.alignment
-# не читается). Начертание (жирный/курсив/подчёркивание) — только из
-# inline-тегов content (B-1).
-_DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
+# Текстблок: размер базы — единый экранный дефолт настроек
+# (ACTS__TEXTBLOCKS__FONT_SIZE_DEFAULT, 16px) через px→pt ×0.75 = 12pt (EXP-2);
+# выравнивание — per-line из style="text-align" блочных элементов content
+# (TB-1: HTML — источник истины). Начертание (жирный/курсив/подчёркивание) —
+# только из inline-тегов content (B-1).
+# Фолбэк размера, когда форматтер собран без настроек (юнит-тесты DocxFormatter()).
+_DEFAULT_TB_FONT_SIZE_PX = 16
 
 # px → pt (16px → 12pt) — единый источник в builders/inline.py (_PX_TO_PT).
 
@@ -101,9 +100,9 @@ class DocxFormatter:
         """Текстблок: верхнеуровневые блочные элементы content → отдельные w:p.
 
         Выравнивание — per-line из style="text-align" каждого верхнеуровневого
-        <div>/<p> через _TB_ALIGNMENT_MAP (TB-1: источник истины — HTML,
-        чтение мёртвого formatting.alignment убрано). Блок без text-align и
-        контент вне блочной разметки (голый текст/span — легаси) получают
+        <div>/<p> через _TB_ALIGNMENT_MAP (TB-1: источник истины — HTML). Блок
+        без text-align и контент вне блочной разметки (голый текст/span — легаси)
+        получают
         дефолт JUSTIFY — как прежний «нетронутый» рендер; <br> внутри блока
         остаётся мягким переносом w:br. Вертикальная геометрия — как у прежней
         одноабзацной модели: промежуточным w:p обнуляется space_after (граница
@@ -111,18 +110,18 @@ class DocxFormatter:
         Normal-спейсинг (3pt after) сохраняет только последний w:p блока —
         расстояние до следующего контента не меняется.
 
-        Размер: дефолтный fontSize → body_pt (12pt), изменённый → px→pt
-        (×0.75) — смена только выравнивания шрифт НЕ уменьшает (#9).
-        Начертание (жирный/курсив/подчёркивание) задаётся ИСКЛЮЧИТЕЛЬНО
-        inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html выставляет
-        run.bold/italic/underline per-run; базового применения из formatting нет.
+        Размер базы — единый экранный дефолт настроек ×0.75 (EXP-2: 16px → 12pt);
+        span'ы с собственным font-size конвертируются тем же ×0.75 в
+        apply_inline_html. Начертание (жирный/курсив/подчёркивание) задаётся
+        ИСКЛЮЧИТЕЛЬНО inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html
+        выставляет run.bold/italic/underline per-run.
         """
-        fmt = schema.formatting
-        base_size_pt = (
-            Sizes.body_pt
-            if fmt.fontSize == _DEFAULT_TB_FORMATTING.fontSize
-            else fmt.fontSize * _PX_TO_PT
+        base_px = (
+            self._acts_settings.textblocks.font_size_default
+            if self._acts_settings is not None
+            else _DEFAULT_TB_FONT_SIZE_PX
         )
+        base_size_pt = base_px * _PX_TO_PT
         segments = split_block_segments(schema.content)
         if not segments:
             # Пустой контент — пустой абзац-строка, как прежний единственный w:p.

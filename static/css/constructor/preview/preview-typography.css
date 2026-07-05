@@ -76,6 +76,9 @@
    (--textblock-line-height), чтобы редактор и предпросмотр не разъезжались. */
 .preview-textblock-content {
     line-height: var(--textblock-line-height, 1.75);
+    /* TB-1: дефолт выравнивания блока без явного text-align — «по ширине»
+       (как в редакторе и теле акта); per-line text-align в content переопределяет. */
+    text-align: justify;
 }
 
 /* Первый абзац после заголовка */

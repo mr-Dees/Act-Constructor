@@ -83,7 +83,7 @@ Object.assign(TextBlockManager.prototype, {
             this.installCapsuleObserver(editor);
         }
 
-        this.applyFormatting(editor, textBlock.formatting);
+        this.applyBaseFontSize(editor);
 
         return editor;
     },

@@ -168,9 +168,10 @@ def test_textblock_default_formatting_keeps_legacy_defaults():
     assert not para.runs[0].underline
 
 
-def test_textblock_custom_formatting_applied():
-    """Размер — из formatting.fontSize; выравнивание — из style="text-align"
-    блочного элемента content (TB-1); начертание — из inline-тегов (B-1/B-37)."""
+def test_textblock_inline_formatting_applied():
+    """Начертание — из inline-тегов content (B-1/B-37); выравнивание — из
+    style="text-align" блочного элемента (TB-1); базовый размер — экранный
+    дефолт настроек ×0.75 (16px → 12pt, EXP-2)."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
     fmt = DocxFormatter()
@@ -188,14 +189,13 @@ def test_textblock_custom_formatting_applied():
             # выравнивание — text-align блочного элемента (TB-1).
             content='<div style="text-align: center;">'
                     "<b><i><u>Форматированный блок</u></i></b></div>",
-            formatting={"fontSize": 16, "alignment": "center"},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
     para = next(p for p in doc.paragraphs if "Форматированный блок" in p.text)
     assert para.alignment == WD_ALIGN_PARAGRAPH.CENTER
     run = para.runs[0]
-    assert run.font.size == Pt(12)  # 16px × 0.75
+    assert run.font.size == Pt(12)  # база 16px × 0.75
     assert run.bold is True
     assert run.italic is True
     assert run.underline is True
@@ -216,7 +216,6 @@ def test_textblock_html_left_alignment_applied():
         textBlocks={"tb1": TextBlockSchema(
             id="tb1", nodeId="1.1",
             content='<div style="text-align: left;"><b>Левый блок</b></div>',
-            formatting={"fontSize": 14},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
@@ -225,40 +224,10 @@ def test_textblock_html_left_alignment_applied():
     assert para.runs[0].bold is True
 
 
-def test_textblock_formatting_alignment_dead_html_wins():
-    """TB-1: мёртвое formatting.alignment не читается — выравнивание берётся
-    ТОЛЬКО из style="text-align" блочного элемента content (явный left
-    не подменяется ни дефолтом justify, ни значением из formatting).
-    """
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    fmt = DocxFormatter()
-    section = {
-        "id": "1", "label": "Раздел 1",
-        "children": [
-            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
-        ],
-    }
-    content = ActDataSchema(
-        tree={"id": "root", "label": "Акт", "children": [section]},
-        textBlocks={"tb1": TextBlockSchema(
-            id="tb1", nodeId="1.1",
-            content='<div style="text-align: left;">Явно левый блок</div>',
-            # Противоречащее значение в мёртвом поле — не должно влиять.
-            formatting={"fontSize": 14, "alignment": "center", "bold": False,
-                        "italic": False, "underline": False},
-        )},
-    )
-    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
-    para = next(p for p in doc.paragraphs if "Явно левый блок" in p.text)
-    assert para.alignment == WD_ALIGN_PARAGRAPH.LEFT
-
-
 def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
-    """#9: смена только выравнивания при дефолтном fontSize=14 НЕ уменьшает шрифт.
-
-    Выравнивание (теперь — text-align блочного элемента content, TB-1)
-    применяется независимо от размера: дефолтный fontSize сохраняет body_pt
-    (12pt), а не прогоняется через fontSize*0.75 (14→10.5pt).
+    """База текстблока = экранный дефолт настроек ×0.75 = 12pt (=body_pt, EXP-2);
+    смена только выравнивания (center) размер не трогает (прежний спец-кейс
+    «14px→12pt» удалён — база берётся из настроек единообразно).
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
@@ -275,14 +244,12 @@ def test_textblock_default_size_with_custom_alignment_keeps_body_pt():
         textBlocks={"tb1": TextBlockSchema(
             id="tb1", nodeId="1.1",
             content='<div style="text-align: center;">Центрированный блок</div>',
-            formatting={"fontSize": 14, "bold": False,
-                        "italic": False, "underline": False},
         )},
     )
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
     para = next(p for p in doc.paragraphs if "Центрированный блок" in p.text)
     assert para.alignment == WD_ALIGN_PARAGRAPH.CENTER
-    assert para.runs[0].font.size == Pt(Sizes.body_pt)  # 12pt, НЕ 10.5pt
+    assert para.runs[0].font.size == Pt(Sizes.body_pt)  # 12pt
 
 
 def test_item_content_rendered_as_plain_text():
