@@ -163,3 +163,42 @@ test('canInsertTextBlockSubtree: лимит не задан (не число) �
     const newTextBlock = { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] };
     assert.equal(ValidationTree.canInsertTextBlockSubtree('p', newTextBlock).valid, true);
 });
+
+test('canInsertTextBlockSubtree: move/reorder — node уже физически среди children родителя, не считается дважды', () => {
+    getStructureLimits().textBlocksPerNode = 2;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+                { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    // p уже "на лимите" (2/2), но tb1 — один из ЭТИХ ЖЕ двух детей (drag ещё
+    // не вырезал его из children) — проверка родителя того же узла не должна
+    // отказывать (иначе обычный reorder внутри родителя ложно бы блокировался).
+    const tb1 = AppState.findNodeById('p').children[0];
+    const result = ValidationTree.canInsertTextBlockSubtree('p', tb1);
+    assert.equal(result.valid, true, 'узел не должен учитываться дважды относительно самого себя');
+});
+
+test('canInsertTextBlockSubtree: move в ДРУГОЙ родитель на лимите → отказ (чужой узел туда ещё не входит)', () => {
+    getStructureLimits().textBlocksPerNode = 1;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'src', label: 'Источник', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+            ] },
+            { id: 'dst', label: 'Назначение', children: [
+                { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const tb1 = AppState.findNodeById('src').children[0];
+    const result = ValidationTree.canInsertTextBlockSubtree('dst', tb1);
+    assert.equal(result.valid, false, 'dst уже на лимите своим собственным tb2 — чужой узел не помещается');
+});

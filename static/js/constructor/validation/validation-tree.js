@@ -153,22 +153,27 @@ export const ValidationTree = {
 
     /**
      * Проверяет лимит текстблоков-на-узел при вставке ГОТОВОГО поддерева
-     * (PERSIST-2: undo восстановления удалённого блока, paste). insertNodeAt —
-     * официальный мутатор для таких вставок — в отличие от addTextBlockToNode
-     * не зовёт canAddContent, поэтому без этой проверки узел мог получить
-     * N+1 текстблоков, и сервер отклонял бы уже сохранение всего акта.
+     * (PERSIST-2: undo восстановления удалённого блока, paste, drag-and-drop
+     * перемещение). insertNodeAt/_performMove — мутаторы для таких вставок —
+     * в отличие от addTextBlockToNode не зовут canAddContent, поэтому без этой
+     * проверки узел мог получить N+1 текстблоков, и сервер отклонял бы уже
+     * сохранение всего акта.
      *
      * Проверяются две вещи:
      *  - целевой родитель: если сам корень поддерева — textblock, его +1 не
      *    должен превысить лимит родителя (тот же лимит, что у «Добавить
-     *    текстовый блок»);
+     *    текстовый блок»). Сам node ИСКЛЮЧАЕТСЯ из подсчёта родителя по id:
+     *    для paste/undo node ещё не среди children родителя (id не совпадёт —
+     *    no-op), а для drag reorder ВНУТРИ одного родителя node уже физически
+     *    в его children (drag ещё не вырезал узел оттуда) — без исключения
+     *    он засчитался бы дважды и лимит отказывал бы обычному reorder;
      *  - самосогласованность поддерева: число текстблоков-детей на каждом его
      *    узле не должно превышать ТЕКУЩИЙ лимит — поддерево скопировано/удалено
      *    раньше и могло стать невалидным, если лимит с тех пор снизился
      *    (буфер обмена в localStorage переживает перезагрузку страницы).
      *
      * @param {string} parentId - ID узла, в children которого встанет node
-     * @param {Object} node - Вставляемый узел (возможно, с поддеревом)
+     * @param {Object} node - Вставляемый/перемещаемый узел (возможно, с поддеревом)
      * @returns {Object} Результат с полями valid, message
      */
     canInsertTextBlockSubtree(parentId, node) {
@@ -180,7 +185,9 @@ export const ValidationTree = {
 
         const parent = AppState.findNodeById(parentId);
         if (parent && node.type === AppConfig.nodeTypes.TEXTBLOCK) {
-            const existingCount = TreeUtils.countChildrenByType(parent, AppConfig.nodeTypes.TEXTBLOCK);
+            const existingCount = (parent.children || []).filter(
+                c => c.type === AppConfig.nodeTypes.TEXTBLOCK && c.id !== node.id
+            ).length;
             if (existingCount + 1 > limit) return fail();
         }
 
