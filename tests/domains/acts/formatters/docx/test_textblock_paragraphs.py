@@ -262,11 +262,12 @@ def test_hyperlink_survives_block_split(doc):
     assert not paras[0]._p.findall(qn("w:hyperlink"))
 
 
-def test_empty_content_renders_single_empty_paragraph(doc):
-    paras = _render(doc, "")
-    assert len(paras) == 1
-    assert paras[0].alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
-    assert len(paras[0].runs) == 0
+def test_empty_content_renders_nothing(doc):
+    """EXP-4: пустой текстблок не печатает пустой абзац — гейт тем же критерием,
+    что превью (_hasContent). Раньше пустой content давал висячий пустой w:p."""
+    assert _render(doc, "") == []
+    assert _render(doc, "   ") == []
+    assert _render(doc, "\n\t ") == []
 
 
 def test_base_font_size_applies_to_every_paragraph(doc):

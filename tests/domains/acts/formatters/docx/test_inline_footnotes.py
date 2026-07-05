@@ -8,6 +8,7 @@
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.shared import Pt
 
 from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
 
@@ -184,3 +185,35 @@ def test_footnote_span_without_text_renders_plain():
     )
     assert "только якорь" in para.text
     assert para._p.findall(f".//{qn('w:footnoteReference')}") == []
+
+
+def test_footnote_span_whitespace_text_renders_plain():
+    """EXP-3: сноска с пробельным телом (data-footnote-text='   ') сноской НЕ
+    становится — критерий пустоты payload.strip() (зеркало фронт-нумерации
+    numberFootnotes: text.trim()). Раньше truthy-payload создавал сноску."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="   ">якорь</span>',
+        base_size_pt=12.0,
+    )
+    assert "якорь" in para.text
+    assert para._p.findall(f".//{qn('w:footnoteReference')}") == []
+
+
+def test_footnote_span_font_size_applies_to_anchor():
+    """EXP-1: капсула-сноска со своим font-size экспортирует ВИДИМЫЙ якорь этим
+    кеглем, а не базовым (20px → 15pt). Раньше размер капсулы игнорировался."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" style="font-size: 20px" '
+        'data-footnote-text="прим">якорь</span>',
+        base_size_pt=12.0,
+    )
+    anchor = next(r for r in para.runs if r.text == "якорь")
+    assert anchor.font.size == Pt(15)
+    # Сноска при этом создана (размер якоря не мешает footnoteReference).
+    assert len(para._p.findall(f".//{qn('w:footnoteReference')}")) == 1

@@ -116,6 +116,12 @@ class DocxFormatter:
         ИСКЛЮЧИТЕЛЬНО inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html
         выставляет run.bold/italic/underline per-run.
         """
+        # EXP-4: пустой текстблок не печатает пустой абзац — гейт тем же
+        # критерием, что превью (_hasContent = content.trim() истинно). Пустой
+        # или пробельный content не даёт ни одного w:p (раньше — пустой
+        # абзац-строка, «висевшая» в DOCX там, где превью блок не рисует).
+        if not schema.content or not schema.content.strip():
+            return
         base_px = (
             self._acts_settings.textblocks.font_size_default
             if self._acts_settings is not None
@@ -124,7 +130,8 @@ class DocxFormatter:
         base_size_pt = base_px * _PX_TO_PT
         segments = split_block_segments(schema.content)
         if not segments:
-            # Пустой контент — пустой абзац-строка, как прежний единственный w:p.
+            # Контент непуст (прошёл гейт), но без верхнеуровневых сегментов —
+            # один пустой абзац-строка (паритет с превью, рендерящим блок).
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             return

@@ -153,6 +153,12 @@ Object.assign(TextBlockManager.prototype, {
                 return;
             }
             resolvedValue = verdict.url;
+        } else {
+            // EXP-3: тело сноски триммим перед записью в data-footnote-text —
+            // «пробельная» сноска не должна возникать. Критерий пустоты бэка
+            // (inline.py payload.strip()) и нумерации (numberFootnotes .trim())
+            // одинаков; без трима обёрточные пробелы разъехались бы с экспортом.
+            resolvedValue = value.trim();
         }
 
         const range = selection.getRangeAt(0);

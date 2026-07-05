@@ -119,6 +119,38 @@ def test_tel_url_creates_external_hyperlink():
     assert para.part.rels[hyperlink.get(qn("r:id"))].is_external
 
 
+def test_link_span_font_size_applies_to_run():
+    """EXP-1: капсула-ссылка со своим font-size экспортирует текст этим кеглем.
+    Run внутри w:hyperlink строится прямым oxml → размер лежит в w:sz = кегль×2
+    (20px → 15pt → val 30). Раньше ссылка игнорировала свой font-size."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" style="font-size: 20px" '
+        'data-link-url="https://a.b/">крупно</span>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    sz = hyperlink.find(qn("w:r")).find(qn("w:rPr")).find(qn("w:sz"))
+    assert sz.get(qn("w:val")) == "30"
+
+
+def test_link_span_without_size_uses_base():
+    """EXP-1-регресс: ссылка без собственного font-size экспортируется базовым
+    кеглем (base_size_pt=12 → w:sz val 24), а не сбрасывается в дефолт 12pt×2."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="https://a.b/">обычная</span>',
+        base_size_pt=13.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    sz = hyperlink.find(qn("w:r")).find(qn("w:rPr")).find(qn("w:sz"))
+    assert sz.get(qn("w:val")) == "26"
+
+
 def test_anchor_url_creates_internal_hyperlink():
     """BUG-4: якорь '#...' → внутренняя ссылка (w:anchor), без external r:id."""
     doc = Document()

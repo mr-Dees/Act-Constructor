@@ -171,12 +171,19 @@ class _InlineParser(HTMLParser):
             self._footnote_run_before = existing_runs[-1] if existing_runs else None
             # Якорь рендерим обычным текстом; сноску добавим при закрытии.
             self._span_kinds.append(("footnote", attrs.get("data-footnote-text")))
-            self.stack.append(current)
+            # EXP-1: капсула-сноска со своим font-size (увеличенная/уменьшенная) —
+            # видимый якорь экспортируется этим кеглем, а не базовым.
+            size = _extract_size_pt(attrs)
+            self.stack.append(replace(current, size_pt=size) if size else current)
             return
         url = attrs.get("data-link-url", "")
         if "text-link" in cls and url and self._open_hyperlink(url):
             self._span_kinds.append(("link", None))
-            self.stack.append(replace(current, underline=True))
+            # EXP-1: капсула-ссылка со своим font-size — текст ссылки
+            # экспортируется этим кеглем (w:sz run'а внутри w:hyperlink).
+            size = _extract_size_pt(attrs)
+            state = replace(current, underline=True)
+            self.stack.append(replace(state, size_pt=size) if size else state)
             return
         size = _extract_size_pt(attrs)
         self._span_kinds.append(("plain", None))
@@ -195,7 +202,10 @@ class _InlineParser(HTMLParser):
             self._close_hyperlink()
         if tag == "span" and self._span_kinds:
             kind, payload = self._span_kinds.pop()
-            if kind == "footnote" and payload:
+            # EXP-3: критерий пустоты тела сноски — payload.strip() (зеркало
+            # фронт-нумерации numberFootnotes: text.trim()). «Пробельная» сноска
+            # сноской не становится — иначе экспорт и превью разошлись бы.
+            if kind == "footnote" and payload and payload.strip():
                 # BUG-3: хвостовой обычный пробел ВНУТРИ якоря (например из
                 # вставки Word) дал бы растяжимую щель между якорем и номером
                 # под justify — срезаем его перед добавлением сноски.
@@ -366,7 +376,13 @@ class _InlineParser(HTMLParser):
     def _open_hyperlink(self, href: str) -> bool:
         """Создаёт w:hyperlink. Якорь '#...' → внутренняя ссылка (w:anchor),
         безопасная внешняя схема → external relationship (r:id). Небезопасный
-        протокол (javascript: и т.п.) отклоняется → текст останется plain."""
+        протокол (javascript: и т.п.) отклоняется → текст останется plain.
+
+        Ссылка строится прямым oxml (не нативным API): python-docx 1.2.0 умеет
+        гиперссылки только на ЧТЕНИЕ (Paragraph.hyperlinks / класс Hyperlink),
+        метода записи add_hyperlink нет. К тому же ссылка-капсула несёт свои
+        run'ы с форматированием (цвет, кегль EXP-1, начертание) — простой
+        текст+URL их бы не выразил. См. task-6-report.md."""
         href = href.strip()
         hyperlink = OxmlElement("w:hyperlink")
         if href.startswith("#"):
