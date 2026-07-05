@@ -490,7 +490,10 @@ Object.assign(TextBlockManager.prototype, {
         const markerAncestor = (node) => {
             let el = node?.nodeType === 3 ? node.parentElement : node;
             while (el && el !== this.activeEditor && this.activeEditor?.contains(el)) {
-                if (el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) {
+                // Капсула в inline-правке (editing-mode) — обычный редактируемый
+                // контент, за её границы диапазон НЕ расширяем (CARET-1).
+                if ((el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) &&
+                        !this._isEditingCapsule(el)) {
                     return el;
                 }
                 el = el.parentElement;

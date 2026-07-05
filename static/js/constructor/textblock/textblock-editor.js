@@ -388,6 +388,14 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик ввода с debounce
      */
     handleEditorInput(editor, textBlock) {
+        // CARET-1: пока капсула редактируется inline (двойной клик, класс
+        // editing-mode), автосток редактора на паузе — его finalizeEdit сбросил
+        // бы contenteditable редактируемой капсулы (normalizeMarkers) и сохранил
+        // бы служебный класс editing-mode в content. Событие input долетает сюда
+        // всплытием из капсулы; финальное сохранение делает finishEditing на
+        // выходе из режима (→ finalizeEdit).
+        if (editor.querySelector('.editing-mode')) return;
+
         // B-26: пустоту определяем синхронно при каждом вводе — мгновенный
         // показ/скрытие placeholder, без зависимости от save-debounce.
         this._toggleEmptyClass(editor);

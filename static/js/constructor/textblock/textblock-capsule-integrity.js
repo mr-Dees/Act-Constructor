@@ -108,6 +108,21 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private Капсула в режиме inline-правки (двойной клик — enableInlineEditing):
+     * временно contenteditable='true' + класс 'editing-mode'. В этом режиме её тело —
+     * обычный редактируемый текст, поэтому слои целостности (beforeinput, expand,
+     * observer) НЕ трактуют её как атомарный contenteditable=false-атом: не расширяют
+     * за неё диапазон, не перенаправляют ввод, не удаляют целиком, не откатывают
+     * contenteditable. Единый предикат «капсула в правке» для ВСЕХ слоёв (CARET-1) —
+     * тот же критерий, что использует observer.
+     * @param {Node} node
+     * @returns {boolean}
+     */
+    _isEditingCapsule(node) {
+        return this._isCapsule(node) && node.classList.contains('editing-mode');
+    },
+
+    /**
      * Слой 1 (prevent): перехват нативных правок ДО мутации DOM. Останавливает
      * порчу капсул — атомарное удаление, ввод снаружи, неклипающее удаление.
      * @param {InputEvent} e
@@ -192,11 +207,12 @@ Object.assign(TextBlockManager.prototype, {
         const sc = range.startContainer, so = range.startOffset;
         const ec = range.endContainer, eo = range.endOffset;
 
-        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом).
+        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Капсулу в
+        // режиме inline-правки пропускаем — её тело сейчас обычный текст (CARET-1).
         const insideCapsule = (node) => {
             let el = node && node.nodeType === 3 ? node.parentElement : node;
             while (el && el !== editor) {
-                if (this._isCapsule(el)) return el;
+                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
                 el = el.parentElement;
             }
             return null;
@@ -223,8 +239,13 @@ Object.assign(TextBlockManager.prototype, {
                 after = this._isInsignificantText(rawAfter)
                     ? this._significantSibling(rawAfter, 'nextSibling') : rawAfter;
             }
-            if (this._isCapsule(before)) return { capsule: before, side: 'after' };  // капсула слева
-            if (this._isCapsule(after)) return { capsule: after, side: 'before' };   // капсула справа
+            // Капсула в inline-правке к атомарному удалению не относится (CARET-1).
+            if (this._isCapsule(before) && !this._isEditingCapsule(before)) {
+                return { capsule: before, side: 'after' };  // капсула слева
+            }
+            if (this._isCapsule(after) && !this._isEditingCapsule(after)) {
+                return { capsule: after, side: 'before' };   // капсула справа
+            }
         }
         return null;
     },
@@ -296,12 +317,13 @@ Object.assign(TextBlockManager.prototype, {
                 });
             } else if (rec.type === 'attributes') {
                 // contenteditable сброшен с капсулы → чиним. НО пропускаем
-                // капсулу в режиме inline-правки (#1): enableInlineEditing по
+                // капсулу в режиме inline-правки (#1/CARET-1): enableInlineEditing по
                 // двойному клику НАМЕРЕННО ставит contenteditable='true' + класс
                 // 'editing-mode'; откат на 'false' убил бы правку текста
                 // ссылки/сноски (focus попадал бы в уже не редактируемый span).
+                // Единый предикат _isEditingCapsule — тот же, что и в слоях 1/2.
                 if (this._isCapsule(rec.target) &&
-                        !rec.target.classList.contains('editing-mode') &&
+                        !this._isEditingCapsule(rec.target) &&
                         rec.target.getAttribute('contenteditable') !== 'false') {
                     capsulesToFix.push(rec.target);
                 }
@@ -377,7 +399,8 @@ Object.assign(TextBlockManager.prototype, {
         const ancestor = (node) => {
             let el = node && node.nodeType === 3 ? node.parentElement : node;
             while (el && el !== editor) {
-                if (this._isCapsule(el)) return el;
+                // Капсула в inline-правке — обычный контент, за неё не расширяем (CARET-1).
+                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
                 el = el.parentElement;
             }
             return null;

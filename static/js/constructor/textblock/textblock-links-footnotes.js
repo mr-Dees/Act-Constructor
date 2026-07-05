@@ -213,6 +213,18 @@ Object.assign(TextBlockManager.prototype, {
      */
     enableInlineEditing(element) {
         const originalText = element.textContent;
+        // Редактор капсулы фиксируем сразу: this.activeEditor к моменту выхода из
+        // правки мог обнулиться (blur-очистка тулбара по таймауту при фокусе на
+        // capsule), а finalizeEdit требует конкретный редактор (требование №2).
+        const editor = element.closest('.textblock-editor');
+
+        // CARET-1: гасим висящий автосток редактора — таймер, взведённый вводом
+        // в редактор прямо перед двойным кликом, иначе выстрелит во время
+        // inline-правки и сбросит contenteditable капсулы (normalizeMarkers).
+        if (editor && editor.saveTimeout) {
+            clearTimeout(editor.saveTimeout);
+            editor.saveTimeout = null;
+        }
 
         element.classList.add('editing-mode');
         element.contentEditable = 'true';
@@ -238,11 +250,12 @@ Object.assign(TextBlockManager.prototype, {
 
                 if (!newText) {
                     element.textContent = originalText;
-                } else {
-                    if (this.activeEditor) {
-                        const textBlockId = this.activeEditor.dataset.textBlockId;
-                        this.saveContent(textBlockId, this.activeEditor.innerHTML);
-                    }
+                } else if (editor) {
+                    // Единый сток вместо прямого saveContent (Task 1, требование №2):
+                    // editing-mode уже снят выше, поэтому normalizeMarkers вернёт
+                    // капсуле contenteditable=false и пере-расставит caret-guard'ы,
+                    // а saveContent запишет правку (перенумерация — по счётчику).
+                    this.finalizeEdit(editor);
                 }
             } else {
                 element.textContent = originalText;

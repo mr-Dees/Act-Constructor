@@ -347,3 +347,180 @@ test.describe('capsule-integrity: самоочистка guard при удале
     expect(after.hasGuard).toBe(false);  // осиротевший guard вычищен самоочисткой (Fix 1)
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 2 (CARET-1): inline-правка капсулы (двойной клик, editing-mode) — слои 1/2
+// целостности трактуют её как обычный редактируемый контент. Печать/Backspace
+// правят ТЕЛО капсулы, а не удаляют её целиком и не уходят наружу; после выхода
+// правка сохранена, служебный класс editing-mode в content не утекает.
+// ---------------------------------------------------------------------------
+
+/** @returns снимок состояния капсулы txt-seed-1 из живого DOM. */
+async function capsuleState(page) {
+  return await page.evaluate(() => {
+    const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+    const cap = ed ? ed.querySelector('.text-link') : null;
+    return {
+      alive: !!cap,
+      text: cap ? cap.textContent : null,
+      ce: cap ? cap.getAttribute('contenteditable') : null,
+      editing: cap ? cap.classList.contains('editing-mode') : false,
+      linkUrl: cap ? cap.getAttribute('data-link-url') : null,
+      editorText: ed ? ed.textContent : null,
+    };
+  });
+}
+
+test.describe('capsule-integrity: inline-правка капсулы (editing-mode)', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('dblclick → печать/Backspace правят ТЕЛО капсулы; пауза не сбивает режим; выход сохраняет данные', async ({ page }) => {
+    await focusSeededTextblockWithCapsule(page); // 'до <link>ссылка</link> после'
+
+    // Двойной клик → editing-mode + выделение всего тела капсулы (setTimeout 0).
+    await page.locator(`${EDITOR_SEL} .text-link`).dblclick();
+    await page.waitForFunction(() => {
+      const cap = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"] .text-link',
+      );
+      const sel = window.getSelection();
+      return !!(cap && cap.classList.contains('editing-mode') &&
+        cap.getAttribute('contenteditable') === 'true' &&
+        sel && sel.rangeCount > 0 && !sel.isCollapsed &&
+        cap.contains(sel.getRangeAt(0).commonAncestorContainer));
+    }, { timeout: 2000 });
+    // outside/key-listeners навешиваются в setTimeout(100) — ждём их для Enter-выхода.
+    await page.waitForTimeout(150);
+
+    // Печать по выделению заменяет ТЕЛО капсулы (было "ссылка"), не уходит наружу.
+    await page.keyboard.type('НОВЫ');
+    const afterType = await capsuleState(page);
+    expect(afterType.alive).toBe(true);
+    expect(afterType.text).toBe('НОВЫ');            // тело заменено
+    expect(afterType.linkUrl).toBe('https://a.ru'); // атрибут капсулы цел
+    expect(afterType.editorText).toContain('до ');   // текст снаружи не тронут
+    expect(afterType.editorText).toContain(' после');
+    expect(afterType.editorText).not.toContain('ссылка'); // старое тело ушло
+
+    // Backspace удаляет символ ВНУТРИ, капсула не «съедается» целиком (слой 1).
+    await page.keyboard.press('Backspace');
+    const afterBksp = await capsuleState(page);
+    expect(afterBksp.alive).toBe(true);
+    expect(afterBksp.text).toBe('НОВ');
+
+    // Пауза дольше input-debounce (500мс): автосток редактора НЕ должен сбросить
+    // contenteditable капсулы и НЕ должен утечь editing-mode в сохранённый content.
+    await page.waitForTimeout(700);
+    const afterPause = await capsuleState(page);
+    expect(afterPause.alive).toBe(true);
+    expect(afterPause.editing).toBe(true);  // режим правки не слетел
+    expect(afterPause.ce).toBe('true');     // НЕ склобберено normalizeMarkers
+    const leaked = await page.evaluate(() => {
+      const tb = (window as any).AppState?.textBlocks?.['txt-seed-1'];
+      return tb?.content || '';
+    });
+    expect(leaked).not.toContain('editing-mode'); // служебный класс не сохранён
+
+    // Выход по Enter → finishEditing снимает режим и вызывает finalizeEdit(editor).
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => {
+      const cap = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"] .text-link',
+      );
+      return !!(cap && !cap.classList.contains('editing-mode') &&
+        cap.getAttribute('contenteditable') === 'false');
+    }, { timeout: 2000 });
+
+    const saved = await page.evaluate(() => {
+      const tb = (window as any).AppState?.textBlocks?.['txt-seed-1'];
+      return tb?.content || '';
+    });
+    const finalState = await capsuleState(page);
+    expect(finalState.linkUrl).toBe('https://a.ru');           // данные капсулы целы
+    expect(finalState.text).toBe('НОВ');
+    expect(saved).toContain('data-link-url="https://a.ru"');   // правка в сохранённом content
+    expect(saved).toContain('>НОВ<');
+    expect(saved).not.toContain('editing-mode');               // класс не утёк и на выходе
+    expect(saved).not.toContain('contenteditable');            // рантайм-атрибут стрипнут
+  });
+
+  test('полное удаление текста внутри editing-mode капсулы оставляет редактор чистым (без битой капсулы/сирот-guard); observer не вмешивается', async ({ page }) => {
+    // Требование №3: пустое тело капсулы в режиме правки не должно приводить к её
+    // удалению observer'ом. Наши слои её не трогают (editing-mode), а нативный
+    // Delete Chromium сам убирает опустевший inline-span (ссылка «разворачивается»
+    // в plain-text — то же поведение, что у removeLinkOrFootnote с пустым значением).
+    // Проверяем инвариант устойчиво к браузеру: после выхода нет ни битой капсулы
+    // (пустой data-link-url), ни осиротевших caret-guard'ов, текст вокруг цел.
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await focusSeededTextblockWithCapsule(page);
+    await page.locator(`${EDITOR_SEL} .text-link`).dblclick();
+    await page.waitForFunction(() => {
+      const cap = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"] .text-link',
+      );
+      return !!(cap && cap.classList.contains('editing-mode') &&
+        cap.getAttribute('contenteditable') === 'true');
+    }, { timeout: 2000 });
+    await page.waitForTimeout(150);
+
+    // Выделяем всё тело капсулы и удаляем.
+    await page.evaluate(() => {
+      const cap = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"] .text-link',
+      );
+      const r = document.createRange();
+      r.selectNodeContents(cap);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Delete');
+    // Ждём дольше цикла observer + возможного debounce.
+    await page.waitForTimeout(400);
+    // Выход по Enter (finishEditing снимает режим).
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+
+    const clean = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      const caps = [...ed.querySelectorAll('.text-link, .text-footnote')];
+      const GUARD = '\uFEFF';
+      let orphanGuards = 0;
+      const adj = (n) => n && n.nodeType === 1 &&
+        (n.classList.contains('text-link') || n.classList.contains('text-footnote'));
+      const walk = (node) => {
+        if (node.nodeType === 3 && node.data === GUARD &&
+            !adj(node.previousSibling) && !adj(node.nextSibling)) orphanGuards++;
+        node.childNodes.forEach(walk);
+      };
+      walk(ed);
+      return {
+        brokenCaps: caps.filter(c => !(c.getAttribute('data-link-url') || '').trim()).length,
+        text: ed.textContent.replace(/[\uFEFF\u200B]/g, ''),
+        orphanGuards,
+      };
+    });
+    expect(clean.brokenCaps).toBe(0);        // ни одной пустой/битой капсулы
+    expect(clean.orphanGuards).toBe(0);      // осиротевших guard-узлов нет
+    expect(clean.text).toContain('до');      // текст вокруг капсулы цел
+    expect(clean.text).toContain('после');
+    expect(errors).toEqual([]);              // никаких исключений на детач-узле
+  });
+
+  test('обычная (не-editing) капсула сохраняет атомарность: Backspace справа удаляет целиком', async ({ page }) => {
+    // Регресс-гейт требования №4: критерий editing-mode НЕ ослабил обычные капсулы.
+    await focusSeededTextblockWithCapsule(page);
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      const cap = ed.querySelector('.text-link');
+      const r = document.createRange();
+      r.setStartAfter(cap); r.collapse(true);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Backspace');
+    const gone = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      return ed.querySelector('.text-link') === null;
+    });
+    expect(gone).toBe(true); // обычная капсула удалена целиком (атомарность цела)
+  });
+});
