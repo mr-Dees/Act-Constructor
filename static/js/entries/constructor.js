@@ -60,6 +60,7 @@ import '../constructor/context-menu/context-menu-links-footnotes.js';
 
 // Services
 import '../constructor/services/id-generator.js';
+import '../constructor/services/editor-telemetry.js';
 
 // State (state-tree/state-content делают Object.assign(AppState))
 import '../constructor/state/state-core.js';

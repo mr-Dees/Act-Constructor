@@ -92,6 +92,11 @@ export function loadImageLimits() {
             if (data && data.sanitizer) {
                 applyActsAllowlist(data.sanitizer);
             }
+            // §6.8: kill-switch телеметрии редактора из той же выдачи. false →
+            // модуль перестаёт слать батчи (бэк и так ответит 204 без записи).
+            if (data && typeof data.editor_telemetry_enabled === 'boolean') {
+                window.EditorTelemetry?.setEnabled?.(data.editor_telemetry_enabled);
+            }
         } catch (_) {
             // Сеть/CORS — дефолты, серверная валидация прикроет.
         }

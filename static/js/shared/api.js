@@ -853,6 +853,9 @@ export class APIClient {
 
         } catch (err) {
             console.error('Ошибка сохранения акта в БД:', err);
+            // §6.8: сохранение в БД не удалось — фиксируем в телеметрии редактора
+            // (фоновые сбои сохранения иначе молчат).
+            window.EditorTelemetry?.track?.('save_failure');
             // Для LockLostError не показываем toast — вызывающая сторона сделает
             // редирект на список с плашкой autoExit (одинаковый UX с фоновым autoExit'ом).
             // Для периодического (фонового) сохранения toast на каждый тик не
@@ -957,6 +960,11 @@ export class APIClient {
                 window.StorageManager.removeSnapshot(actId);
             }
             return result;
+        } catch (err) {
+            // §6.8: аварийное сохранение в БД не удалось — фиксируем в телеметрии
+            // редактора и пробрасываем (UX-решение принимает StorageManager).
+            window.EditorTelemetry?.track?.('save_failure');
+            throw err;
         } finally {
             APIClient._saveInFlight = false;
         }

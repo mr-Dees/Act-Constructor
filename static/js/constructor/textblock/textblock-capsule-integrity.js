@@ -41,6 +41,9 @@ Object.assign(TextBlockManager.prototype, {
         const tpl = document.createElement('template');
         tpl.innerHTML = html;
         const changed = this._repairCapsulesInRoot(tpl.content);
+        // §6.8: валидатор реально чинил капсулу (пустая развёрнута / клон склеен /
+        // дубль-id переназначен) — фиксируем в телеметрии.
+        if (changed) window.EditorTelemetry?.track?.('capsule_repair');
         return { html: tpl.innerHTML, changed };
     },
 
@@ -91,6 +94,9 @@ Object.assign(TextBlockManager.prototype, {
                 span.setAttribute(idAttr, fresh);
                 seen.set(fresh, span);
                 changed = true;
+                // §6.8: детерминированная починка дубль-id — отдельный счётчик
+                // (подмножество capsule_repair, детализация в телеметрии).
+                window.EditorTelemetry?.track?.('dup_id_fix');
                 return;
             }
             if (id) seen.set(id, span);
@@ -383,6 +389,10 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         if (!guardNodeToRestore && !needGuardRestore && !capsulesToFix.length) return;
+
+        // §6.8: observer реально чинит целостность капсул — фиксируем в телеметрии
+        // (self-heal молчит, иначе о поломках узнаём только от пользователей).
+        window.EditorTelemetry?.track?.('observer_heal');
 
         editor.__healing = true;
         try {

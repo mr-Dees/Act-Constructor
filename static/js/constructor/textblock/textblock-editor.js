@@ -544,6 +544,10 @@ Object.assign(TextBlockManager.prototype, {
             if (plain) {
                 document.execCommand('insertText', false, plain);
                 this.finalizeEdit(editor);
+            } else {
+                // §6.8: и HTML санитизирован в ноль, и plain пуст — вставка
+                // ничего не даёт (частый кейс «Копировать изображение» в текст).
+                window.EditorTelemetry?.track?.('empty_paste');
             }
             return;
         }
