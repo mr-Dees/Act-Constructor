@@ -417,7 +417,32 @@ Object.assign(TextBlockManager.prototype, {
      */
     handleEditorBlur(editor, textBlock) {
         const s = this._stripGuards(editor.innerHTML);
-        textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
+        // CORE-2b: сериализуем с признаком РЕАЛЬНОЙ починки капсул. Косметика
+        // (снятие contenteditable, ре-сериализация) меняет строку всегда, поэтому
+        // сравнивать repaired!==s нельзя — берём changed из отчёта валидатора.
+        const report = (typeof this._repairCapsulesReport === 'function')
+            ? this._repairCapsulesReport(s)
+            : { html: s, changed: false };
+        textBlock.content = report.html;
+
+        // Валидатор реально чинил капсулу (дубль-id, расщеплённый клон, пустая
+        // капсула) → живой DOM разошёлся с сохранённым content: возвращаем
+        // починенный HTML в редактор (renderActContent, Task 8), иначе до
+        // ре-рендера пользователь видит битую капсулу. Только на blur (не во
+        // время печати). Гард __healing глушит observer, чтобы write-back не
+        // вызвал heal-шторм; finalizeEdit (Task 1) нормализует guard'ы/нумерацию
+        // по починенному DOM и запишет content. Каретку не восстанавливаем —
+        // фокуса на blur уже нет.
+        if (report.changed) {
+            editor.__healing = true;
+            try {
+                renderActContent(editor, report.html);
+                this.finalizeEdit(editor);
+            } finally {
+                if (editor.__capsuleObserver) editor.__capsuleObserver.takeRecords();
+                editor.__healing = false;
+            }
+        }
 
         // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
         // успеть сработать, и превью оставалось бы с устаревшим текстом до
@@ -958,7 +983,12 @@ Object.assign(TextBlockManager.prototype, {
             // wrap-продолжении; _isCaretOnCapsuleRow не даёт телепортировать мимо
             // native Home для этого случая.
             const first = this._currentLineFirstNode(range, editor);
-            if (this._isCapsule(first) && this._isCaretOnCapsuleRow(range, first)) {
+            // CARET-1 (симметрия Task 2): капсула в inline-правке (dblclick,
+            // editing-mode) — обычный редактируемый контент; Home внутри её тела
+            // должен работать нативно, а не выдёргивать каретку в ведущий guard.
+            // Тот же предикат _isEditingCapsule, что и в слоях целостности.
+            if (this._isCapsule(first) && !this._isEditingCapsule(first) &&
+                    this._isCaretOnCapsuleRow(range, first)) {
                 e.preventDefault();
                 this._placeCaretBesideMarker(first, false);
                 return true;

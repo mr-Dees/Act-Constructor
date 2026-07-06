@@ -18,25 +18,45 @@ Object.assign(TextBlockManager.prototype, {
      * @returns {string}
      */
     validateAndRepairCapsules(html) {
-        if (typeof html !== 'string') return html;
+        return this._repairCapsulesReport(html).html;
+    },
+
+    /**
+     * @private CORE-2b: как validateAndRepairCapsules, но возвращает ещё и
+     * признак РЕАЛЬНОЙ структурной починки (дубль-id / расщеплённый клон /
+     * пустая капсула), НЕ считая косметику — снятие contenteditable, стрип
+     * guard'ов, ре-сериализацию <template> (они меняют строку всегда, поэтому
+     * сравнение repaired!==input ненадёжно). Нужен write-back'у на blur: живой
+     * DOM синхронизируем с починенным content ТОЛЬКО когда валидатор реально
+     * чинил капсулу, иначе — DOM-шторм на каждом blur.
+     * @param {string} html
+     * @returns {{html: string, changed: boolean}}
+     */
+    _repairCapsulesReport(html) {
+        if (typeof html !== 'string') return { html, changed: false };
         if (html.indexOf('text-link') === -1 && html.indexOf('text-footnote') === -1) {
-            return this._stripGuards ? this._stripGuards(html) : html;
+            const stripped = this._stripGuards ? this._stripGuards(html) : html;
+            return { html: stripped, changed: false };
         }
         const tpl = document.createElement('template');
         tpl.innerHTML = html;
-        this._repairCapsulesInRoot(tpl.content);
-        return tpl.innerHTML;
+        const changed = this._repairCapsulesInRoot(tpl.content);
+        return { html: tpl.innerHTML, changed };
     },
 
     /**
      * @private Починка капсул внутри root-узла (DocumentFragment ИЛИ живой
      * editor). Общая логика для валидатора и слоя-observer (DRY).
      * @param {DocumentFragment|HTMLElement} root
+     * @returns {boolean} была ли СТРУКТУРНАЯ починка (пустая капсула развёрнута,
+     *   расщеплённый клон склеен, дубль-id переназначен). Косметика (снятие
+     *   contenteditable, стрип guard'ов) сюда НЕ входит — нужно write-back'у.
      */
     _repairCapsulesInRoot(root) {
         const guardChar = this.CAP_GUARD_CHAR;
         // id → первая встреченная капсула с этим id (в document order)
         const seen = new Map();
+        let changed = false;
         root.querySelectorAll('.text-link, .text-footnote').forEach(span => {
             const isLink = span.classList.contains('text-link');
             const idAttr = isLink ? 'data-link-id' : 'data-footnote-id';
@@ -53,6 +73,7 @@ Object.assign(TextBlockManager.prototype, {
             if (!val || !val.trim()) {
                 const text = document.createTextNode(span.textContent || '');
                 if (span.parentNode) span.parentNode.replaceChild(text, span);
+                changed = true;
                 return;
             }
 
@@ -63,16 +84,19 @@ Object.assign(TextBlockManager.prototype, {
                 if (this._areAdjacentSplit(first, span, valAttr)) {
                     first.textContent = (first.textContent || '') + (span.textContent || '');
                     if (span.parentNode) span.parentNode.removeChild(span);
+                    changed = true;
                     return;
                 }
-                const fresh = this._freshMarkerId();
+                const fresh = this._derivedDuplicateId(id, seen);
                 span.setAttribute(idAttr, fresh);
                 seen.set(fresh, span);
+                changed = true;
                 return;
             }
             if (id) seen.set(id, span);
         });
         if (this._cleanCapGuards) this._cleanCapGuards(root);
+        return changed;
     },
 
     /**
@@ -96,15 +120,24 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * @private Свежий id маркера.
-     * Схема совпадает с createLinkMarker и _createOrEditInlineMarker:
-     * prefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9).
-     * Префикс 'm_' (generic) — намеренно: де-дуплицируем и ссылки, и сноски,
-     * поэтому не 'link_'/'footnote_'.
+     * @private CORE-2: ДЕТЕРМИНИРОВАННЫЙ id для дубля капсулы. Прежний
+     * _freshMarkerId (Date.now()+Math.random()) давал на каждом save РАЗНЫЙ id —
+     * если необработанный ввод оставлял в DOM дубль-id, каждое сохранение писало
+     * иной content («вечно грязный» акт), а живой DOM расходился с сохранённым до
+     * ре-рендера. Дериватив от исходного id + порядкового номера дубля: тот же
+     * вход → побайтно тот же выход; после первой починки дубля уже нет, повторный
+     * прогон валидатора ничего не трогает (идемпотентность). Суффикс '_d<n>'
+     * держит id opaque (нигде не парсится) и проходит DOMPurify (значение data-*
+     * не ограничено). Коллизию с реально существующим id обходим инкрементом n,
+     * сохраняя детерминизм (порядок обхода — document order).
+     * @param {string} baseId дублирующийся id
+     * @param {Map} seen уже занятые id в документе
      * @returns {string}
      */
-    _freshMarkerId() {
-        return 'm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    _derivedDuplicateId(baseId, seen) {
+        let n = 1;
+        while (seen.has(baseId + '_d' + n)) n += 1;
+        return baseId + '_d' + n;
     },
 
     /**
@@ -282,6 +315,17 @@ Object.assign(TextBlockManager.prototype, {
             attributeFilter: ['contenteditable'],
         });
         editor.__capsuleObserver = observer;
+
+        // CARET-8: на время IME-композиции observer буферизует mutation-records и
+        // НЕ обрабатывает — heal под активной композицией (мутация узла-цели
+        // insertCompositionText) сорвал бы ввод. По compositionend накопленное
+        // прогоняется обычным pipeline. Слушатели вешаем один раз на элемент
+        // (флаг), в тон idempotent-disconnect выше; editor берётся замыканием.
+        if (!editor.__compositionBound) {
+            editor.__compositionBound = true;
+            editor.addEventListener('compositionstart', () => this._onCompositionStart(editor));
+            editor.addEventListener('compositionend', () => this._flushComposition(editor));
+        }
     },
 
     /**
@@ -298,6 +342,14 @@ Object.assign(TextBlockManager.prototype, {
      */
     _onCapsuleMutations(records, editor) {
         if (editor.__healing) return;
+        // CARET-8: во время IME-композиции копим records без обработки (мутация
+        // узла под активной композицией сорвала бы ввод); прогон — по
+        // compositionend через _flushComposition.
+        if (editor.__composing) {
+            if (!editor.__composingRecords) editor.__composingRecords = [];
+            records.forEach(rec => editor.__composingRecords.push(rec));
+            return;
+        }
         const guardChar = this.CAP_GUARD_CHAR;
         let needGuardRestore = false;
         const capsulesToFix = [];
@@ -360,6 +412,36 @@ Object.assign(TextBlockManager.prototype, {
             if (editor.__capsuleObserver) editor.__capsuleObserver.takeRecords();
             editor.__healing = false;
         }
+    },
+
+    /**
+     * @private CARET-8: начало IME-композиции — переводим observer в режим
+     * буферизации (_onCapsuleMutations копит records без обработки). Буфер
+     * лениво инициализируем: повторный compositionstart поверх недослитого
+     * буфера просто продолжает накопление (слив — на следующем compositionend).
+     * @param {HTMLElement} editor
+     */
+    _onCompositionStart(editor) {
+        editor.__composing = true;
+        if (!editor.__composingRecords) editor.__composingRecords = [];
+    },
+
+    /**
+     * @private CARET-8: конец IME-композиции — снимаем режим буферизации и
+     * прогоняем накопленные records (плюс ещё не доставленные observer'ом —
+     * takeRecords) обычным pipeline. Реальный IME в node/UT недоступен: путь
+     * покрыт имитацией через прямой вызов _onCompositionStart/_flushComposition +
+     * синтетические records.
+     * @param {HTMLElement} editor
+     */
+    _flushComposition(editor) {
+        editor.__composing = false;
+        const observer = editor.__capsuleObserver;
+        const pending = observer ? observer.takeRecords() : [];
+        const buffered = editor.__composingRecords || [];
+        editor.__composingRecords = null;
+        const all = buffered.length ? buffered.concat(pending) : pending;
+        if (all.length) this._onCapsuleMutations(all, editor);
     },
 
     /**
