@@ -931,8 +931,14 @@ export class APIClient {
             // PERSIST-6: keepalive только если тело влезает в лимит — иначе
             // fetch с keepalive бросит синхронно. Крупное тело (типичный кейс
             // переполнения LS) уходит обычным fetch как best-effort.
-            const useKeepalive = keepalive
-                && new Blob([body]).size <= KEEPALIVE_MAX_BODY_BYTES;
+            const bodyBytes = new Blob([body]).size;
+            if (keepalive && bodyBytes > KEEPALIVE_MAX_BODY_BYTES) {
+                // Без этого предупреждения деградация в обычный fetch молчалива —
+                // о том, что аварийное сохранение не переживёт закрытие вкладки,
+                // никто не узнаёт до потери правок.
+                console.warn('Черновик больше 60КБ — сохранение при закрытии вкладки не гарантировано.');
+            }
+            const useKeepalive = keepalive && bodyBytes <= KEEPALIVE_MAX_BODY_BYTES;
 
             const resp = await this._fetchWithTimeout(
                 AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`),

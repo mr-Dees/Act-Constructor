@@ -53,22 +53,28 @@ export const EditorTelemetry = {
      * @param {string} eventType один из KNOWN_EVENTS
      */
     track(eventType) {
-        if (!this._enabled) return;
-        if (!KNOWN_EVENTS.has(eventType)) return;
-        // actId — из глобала конструктора; приводим к числу (payload → int).
-        const actId = Number(window.currentActId);
-        if (!actId || Number.isNaN(actId)) return;
+        try {
+            if (!this._enabled) return;
+            if (!KNOWN_EVENTS.has(eventType)) return;
+            // actId — из глобала конструктора; приводим к числу (payload → int).
+            const actId = Number(window.currentActId);
+            if (!actId || Number.isNaN(actId)) return;
 
-        const key = actId + '|' + eventType;
-        const entry = this._pending.get(key);
-        if (entry) {
-            entry.count += 1;
-        } else {
-            this._pending.set(key, { event_type: eventType, act_id: actId, count: 1 });
+            const key = actId + '|' + eventType;
+            const entry = this._pending.get(key);
+            if (entry) {
+                entry.count += 1;
+            } else {
+                this._pending.set(key, { event_type: eventType, act_id: actId, count: 1 });
+            }
+            this._totalPending += 1;
+            this._ensureTimer();
+            if (this._totalPending >= FLUSH_AT) this.flush();
+        } catch (_) {
+            // телеметрия никогда не роняет редактор: 2 из 5 точек вызова стоят
+            // в catch-ветках сохранения, гипотетический throw подменил бы
+            // реальную ошибку сохранения.
         }
-        this._totalPending += 1;
-        this._ensureTimer();
-        if (this._totalPending >= FLUSH_AT) this.flush();
     },
 
     /**

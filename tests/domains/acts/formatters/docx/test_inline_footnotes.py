@@ -217,3 +217,19 @@ def test_footnote_span_font_size_applies_to_anchor():
     assert anchor.font.size == Pt(15)
     # Сноска при этом создана (размер якоря не мешает footnoteReference).
     assert len(para._p.findall(f".//{qn('w:footnoteReference')}")) == 1
+
+
+def test_footnote_span_without_size_uses_base_size():
+    """EXP-1-регресс: сноска без собственного font-size экспортирует ВИДИМЫЙ
+    якорь базовым кеглем (base_size_pt=13 → Pt(13)), а не сбрасывается в
+    дефолт 12pt (зеркало test_link_span_without_size_uses_base)."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-footnote" data-footnote-text="прим">якорь</span>',
+        base_size_pt=13.0,
+    )
+    anchor = next(r for r in para.runs if r.text == "якорь")
+    assert anchor.font.size == Pt(13)
+    assert len(para._p.findall(f".//{qn('w:footnoteReference')}")) == 1

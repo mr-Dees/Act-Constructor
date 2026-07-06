@@ -315,6 +315,9 @@ Object.assign(TextBlockManager.prototype, {
      * (материализация «размера на каретке» из applyFontSize), ПОД КАРЕТКОЙ
      * которых уже никого нет (пользователь ушёл, не напечатав). Без этого якоря
      * копятся в content годами: дают ложный смешанный размер и раздувают разметку.
+     * Заодно чистит ГОЛЫЕ текстовые узлы из одного U+200B без span-обёртки —
+     * removeFormat разворачивает якорь именно в такой узел (селектор
+     * span[style] его уже не находит).
      *
      * B-2 (регрессия ЗАПРЕЩЕНА): якорь, ВНУТРИ которого стоит текущая каретка, —
      * это «живая» материализация размера, обязанная пережить сохранение; его НЕ
@@ -337,6 +340,28 @@ Object.assign(TextBlockManager.prototype, {
             // B-2: каретка внутри якоря → это живая материализация размера, не трогаем.
             if (caretNode && typeof span.contains === 'function' && span.contains(caretNode)) return;
             span.remove();
+        });
+
+        // removeFormat-unwrap: тот же якорь, но БЕЗ span-обёртки — голый
+        // текстовый узел из одного U+200B. U+FEFF (caret-guard) сюда НЕ входит,
+        // его чистит _cleanCapGuards отдельно. Каретка внутри текстового узла —
+        // это сам узел (startContainer), поэтому сравниваем по ссылке (B-2).
+        const bareAnchors = [];
+        const walk = (node) => {
+            let child = node.firstChild;
+            while (child) {
+                if (child.nodeType === Node.TEXT_NODE && /^[\u200B]+$/.test(child.data)) {
+                    bareAnchors.push(child);
+                } else if (child.nodeType === Node.ELEMENT_NODE && child.firstChild) {
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        };
+        walk(editor);
+        bareAnchors.forEach(t => {
+            if (t === caretNode) return;
+            if (t.parentNode) t.parentNode.removeChild(t);
         });
     },
 
@@ -416,6 +441,12 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
+        // Если фокус ушёл ДО compositionend (IME прервана внешне) — буфер
+        // __composingRecords иначе провисит до следующего ввода в этот
+        // редактор. Идемпотентно: при штатном compositionend __composing уже
+        // false и буфер уже слит — повторный вызов ничего не находит.
+        if (typeof this._flushComposition === 'function') this._flushComposition(editor);
+
         const s = this._stripGuards(editor.innerHTML);
         // CORE-2b: сериализуем с признаком РЕАЛЬНОЙ починки капсул. Косметика
         // (снятие contenteditable, ре-сериализация) меняет строку всегда, поэтому
