@@ -122,3 +122,46 @@ test('PERSIST-4: флаг in-flight снят после сохранения (с
   assert.equal(APIClient._saveInFlight, false, 'in-flight гард снят');
   assert.equal(APIClient._saveInFlightPromise, null, 'промис завершения сброшен');
 });
+
+// ─── forceSaveToDb (аварийная эскалация) — тот же эпоха-гейт ─────────────────
+
+test('PERSIST-4: правка во время forceSaveToDb-PUT — акт остаётся dirty, снимок не удалён', async () => {
+  // Во время await PUT пользователь печатает → markAsUnsaved (трекинг включён
+  // обратно после exportActData) → эпоха растёт.
+  APIClient._fetchWithTimeout = async () => {
+    StorageManager.markAsUnsaved();
+    return okResponse();
+  };
+
+  await APIClient.forceSaveToDb(7);
+
+  assert.notEqual(StorageManager._state, 'saved',
+    'эпоха выросла за время PUT → forceSaveToDb НЕ помечает синхронизированным');
+  assert.equal(removeCalls, 0, 'снимок-черновик не снят — правки дошлёт следующий цикл');
+});
+
+test('PERSIST-4: forceSaveToDb без правок во время PUT — акт синхронизирован, снимок удалён', async () => {
+  APIClient._fetchWithTimeout = async () => okResponse();
+
+  await APIClient.forceSaveToDb(7);
+
+  assert.equal(StorageManager._state, 'saved', 'эпоха не изменилась → акт синхронизирован');
+  assert.equal(removeCalls, 1, 'снимок-черновик снят (eviction) после успешного PUT');
+});
+
+test('PERSIST-4: flush внутри forceSaveToDb не поднимает эпоху сам (нет вечно-грязного акта)', async () => {
+  // exportActData здесь застаблен, но настоящий flush дёргал бы markAsUnsaved.
+  // Проверяем, что трекинг выключается вокруг exportActData: markAsUnsaved,
+  // вызванный ВНУТРИ exportActData, не должен поднять эпоху и сорвать sync.
+  StorageManager.exportActData = () => {
+    StorageManager.markAsUnsaved(); // имитируем flush активного редактора
+    return { tree: {}, tables: {}, textBlocks: {}, violations: {}, invoiceNodeIds: [] };
+  };
+  APIClient._fetchWithTimeout = async () => okResponse();
+
+  await APIClient.forceSaveToDb(7);
+
+  assert.equal(StorageManager._state, 'saved',
+    'flush внутри exportActData под disableTracking не сорвал синхронизацию');
+  assert.equal(removeCalls, 1, 'снимок снят — эпоха не выросла от flush');
+});

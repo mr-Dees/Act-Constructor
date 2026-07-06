@@ -905,8 +905,22 @@ export class APIClient {
         }
         APIClient._saveInFlight = true;
         try {
+            // PERSIST-4: та же эпоха грязности, что в saveActContent. Запоминаем
+            // ДО сериализации; трекинг выключаем только вокруг синхронного
+            // exportActData (flush активного редактора внутри него не должен
+            // поднять эпоху — эти правки уходят в data). Без гейта
+            // markAsSyncedWithDB хоронил бы символы, напечатанные во время PUT
+            // (body уже собран exportActData) → потеря при reload.
+            const epochBeforeSave = window.StorageManager.getDirtyEpoch();
+
             // flush+сериализация одной воронкой (B-16).
-            const data = window.StorageManager.exportActData();
+            window.StorageManager.disableTracking();
+            let data;
+            try {
+                data = window.StorageManager.exportActData();
+            } finally {
+                window.StorageManager.enableTracking();
+            }
             data.saveType = 'manual';
             data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
 
@@ -932,7 +946,16 @@ export class APIClient {
             }
             const result = await resp.json();
             if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
-            window.StorageManager.markAsSyncedWithDB();
+            // PERSIST-4: правки, напечатанные во время PUT (эпоха выросла), в
+            // отправленную data не попали — НЕ помечаем синхронизированным и НЕ
+            // снимаем снимок (акт остаётся dirty, дошлётся следующим циклом).
+            // Иначе фиксируем синхронизацию и освобождаем LS. Eviction снимка
+            // перенесён сюда из _escalateQuotaToDb — снятие снимка атомарно с
+            // гейтом синхронизации (как в saveActContent).
+            if (window.StorageManager.getDirtyEpoch() === epochBeforeSave) {
+                window.StorageManager.markAsSyncedWithDB();
+                window.StorageManager.removeSnapshot(actId);
+            }
             return result;
         } finally {
             APIClient._saveInFlight = false;

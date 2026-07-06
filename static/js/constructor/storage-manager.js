@@ -774,7 +774,9 @@ export class StorageManager {
         this._quotaEscalationInFlight = true;
         APIClient.forceSaveToDb(actId, { keepalive: opts.keepalive })
             .then(() => {
-                this.removeSnapshot(actId); // eviction: освободить LS
+                // Eviction (removeSnapshot) теперь внутри forceSaveToDb, под
+                // эпоха-гейтом PERSIST-4: снимок снимается только если за время
+                // PUT не появилось новых правок (иначе черновик ещё нужен).
                 // #5: тост только один раз на серию переполнений — иначе крупный
                 // акт спамил бы «сохранено в БД» на каждую правку. Флаг сбросится,
                 // когда обычная запись снимка в LS снова пройдёт (вернулись в норму).
