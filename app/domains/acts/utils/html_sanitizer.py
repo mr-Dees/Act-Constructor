@@ -143,6 +143,59 @@ class _BlockStyleFilter(Filter):
             yield token
 
 
+# TB-6: мягкий кламп font-size к [min,max] из настроек. Только px (редактор
+# эмитит именно px; em/%/pt оставляем как есть). Значение в диапазоне остаётся
+# дословным — паритетные фикстуры (font-size: 20px) не переформатируются.
+_FONT_SIZE_PX_RE = re.compile(
+    r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*px",
+    re.IGNORECASE,
+)
+
+
+def _clamp_font_size_px(style: str, min_px: int, max_px: int) -> str:
+    """Зажимает каждое font-size:<N>px в style-строке к [min_px, max_px].
+
+    В диапазоне — возвращает исходное совпадение без изменений (не
+    переформатирует). Вне — переписывает границей (целое из настроек).
+    """
+
+    def _repl(match: re.Match) -> str:
+        value = float(match.group(1))
+        clamped = min(float(max_px), max(float(min_px), value))
+        if clamped == value:
+            return match.group(0)
+        num = int(clamped) if clamped == int(clamped) else clamped
+        return f"font-size: {num}px"
+
+    return _FONT_SIZE_PX_RE.sub(_repl, style)
+
+
+class _FontSizeClampFilter(Filter):
+    """Пост-фильтр токенов bleach: мягко зажимает font-size в inline-style к
+    границам [font_size_min, font_size_max] из настроек (TB-6).
+
+    Числовой проход после bleach/CSSSanitizer: легаси-контент, прямой API или
+    внешняя вставка могли принести размер вне диапазона редактора — санитайзер
+    приводит его к границе, а НЕ отвергает акт (после вырезания formatting-
+    объекта серверная схема размер не валидирует). Границы читаются из настроек
+    на каждый clean (реестр уже жив на save-пути; в тестах — дефолты 8/72).
+    div/p сюда доходят уже без font-size (его снял _BlockStyleFilter), поэтому
+    практически затрагивает span.
+    """
+
+    def __iter__(self):
+        tb = _acts_settings().textblocks
+        min_px, max_px = tb.font_size_min, tb.font_size_max
+        for token in super().__iter__():
+            if token.get("type") in ("StartTag", "EmptyTag"):
+                data = token.get("data") or {}
+                key = (None, "style")
+                style = data.get(key)
+                if style and "font-size" in style.lower():
+                    data[key] = _clamp_font_size_px(style, min_px, max_px)
+            yield token
+
+
 def sanitize_html(html: str | None) -> str:
     """
     Чистит произвольный HTML до безопасного подмножества.
@@ -179,7 +232,9 @@ def sanitize_html(html: str | None) -> str:
         protocols=ALLOWED_PROTOCOLS,
         css_sanitizer=_css_sanitizer_for(tuple(cfg.allowed_css_properties)),
         strip=True,
-        filters=[_BlockStyleFilter],
+        # _BlockStyleFilter первым (снимает font-size с div/p), затем кламп
+        # оставшихся (на span) к границам настроек — TB-6.
+        filters=[_BlockStyleFilter, _FontSizeClampFilter],
     )
     return cleaner.clean(html)
 
