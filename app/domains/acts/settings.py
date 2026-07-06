@@ -188,3 +188,7 @@ class ActsSettings(BaseModel):
     tables: TablesSettings = TablesSettings()
     textblocks: TextblocksSettings = TextblocksSettings()
     sanitizer: SanitizerSettings = SanitizerSettings()
+    # Kill-switch телеметрии здоровья редактора (§6.8). Выключено → эндпоинт
+    # /acts/editor-telemetry отвечает 204 без записи, а фронт (получив флаг
+    # через GET /acts/limits) перестаёт слать батчи.
+    editor_telemetry_enabled: bool = Field(default=True)

@@ -16,6 +16,7 @@ from app.db.connection import get_db
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.repositories.act_content_version import ActContentVersionRepository
+from app.domains.acts.repositories.act_editor_telemetry import ActEditorTelemetryRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.services.act_crud_service import ActCrudService
@@ -95,6 +96,12 @@ async def get_invoice_service(
             acts_settings=_get_acts_settings(),
             ua_tables=get_factory("ua_data.invoice_table_names")(),
         )
+
+
+async def get_editor_telemetry_repo() -> AsyncGenerator[ActEditorTelemetryRepository, None]:
+    """Создаёт репозиторий телеметрии редактора с подключением из пула."""
+    async with get_db() as conn:
+        yield ActEditorTelemetryRepository(conn)
 
 
 async def get_audit_log_deps() -> AsyncGenerator[tuple[AccessGuard, ActAuditLogRepository, ActContentVersionRepository], None]:

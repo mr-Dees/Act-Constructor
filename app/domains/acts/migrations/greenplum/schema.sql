@@ -469,6 +469,34 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.violations_data IS 'Сн
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Время создания версии';
 
 -- ============================================================================
+-- ТАБЛИЦА ТЕЛЕМЕТРИИ ЗДОРОВЬЯ РЕДАКТОРА (§6.8)
+-- ============================================================================
+-- Минимальная наблюдаемость самовосстановлений редактора: фронт копит счётчики
+-- событий (self-heal observer'а, починки капсул, ошибки сохранения, пустой
+-- paste) и батчами шлёт их сюда. Read-API нет — данные смотрим SQL'ем.
+-- PK (id, act_id) ⊇ DISTRIBUTED BY (act_id); id ведущий, но lookups не делаем
+-- (таблица только пишется). FK на acts нет — как у audit_log (лог-таблица).
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_editor_telemetry (
+    id VARCHAR(36) NOT NULL,
+    act_id INTEGER NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    event_type VARCHAR(32) NOT NULL,
+    event_count INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    PRIMARY KEY (id, act_id),
+    CONSTRAINT check_editor_telemetry_event_type_values
+        CHECK (event_type IN ('observer_heal', 'capsule_repair', 'dup_id_fix',
+                              'save_failure', 'empty_paste'))
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (act_id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_editor_telemetry IS 'Счётчики событий здоровья редактора актов (self-heal, починки капсул, ошибки сохранения)';
+
+-- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- Примечание: CREATE INDEX без IF NOT EXISTS — GP 6.x (PG 9.4) не поддерживает
 -- IF NOT EXISTS для индексов. Обработка дублей — на уровне адаптера.

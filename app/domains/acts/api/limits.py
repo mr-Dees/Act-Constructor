@@ -64,4 +64,7 @@ async def get_acts_limits(
             "allowed_css_properties": sanitizer.allowed_css_properties,
             "allowed_data_attrs": sanitizer.allowed_data_attrs,
         },
+        # §6.8: kill-switch телеметрии редактора. Фронт кэширует ответ /limits
+        # и, получив false, перестаёт слать батчи в /acts/editor-telemetry.
+        "editor_telemetry_enabled": acts_cfg.editor_telemetry_enabled,
     }

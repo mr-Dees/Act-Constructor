@@ -201,3 +201,23 @@ class TestActsLimitsEndpoint:
         # 422 означал бы int-парсинг "limits" как act_id
         assert resp.status_code != 422
         assert resp.status_code == 200
+
+    def test_limits_includes_editor_telemetry_flag(self):
+        """§6.8: kill-switch телеметрии редактора отдаётся фронту (дефолт true)."""
+        app = _build_app()
+        with TestClient(app) as client:
+            body = client.get("/api/v1/acts/limits").json()
+        assert body["editor_telemetry_enabled"] is True
+
+    def test_editor_telemetry_flag_reflects_settings(self):
+        """Флаг телеметрии отражает настройку ACTS__EDITOR_TELEMETRY_ENABLED."""
+        app = FastAPI()
+        for router, prefix, _tags in get_api_routers():
+            app.include_router(router, prefix=f"/api/v1{prefix}")
+        app.dependency_overrides[get_username] = lambda: USERNAME
+        app.dependency_overrides[_get_acts_settings] = lambda: ActsSettings(
+            editor_telemetry_enabled=False,
+        )
+        with TestClient(app) as client:
+            body = client.get("/api/v1/acts/limits").json()
+        assert body["editor_telemetry_enabled"] is False
