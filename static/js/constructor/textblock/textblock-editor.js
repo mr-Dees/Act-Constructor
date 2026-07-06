@@ -310,6 +310,37 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private TB-4: снимает ОСИРОТЕВШИЕ якоря размера из ЖИВОГО DOM перед
+     * сериализацией — span'ы с inline font-size, чьё содержимое ТОЛЬКО U+200B
+     * (материализация «размера на каретке» из applyFontSize), ПОД КАРЕТКОЙ
+     * которых уже никого нет (пользователь ушёл, не напечатав). Без этого якоря
+     * копятся в content годами: дают ложный смешанный размер и раздувают разметку.
+     *
+     * B-2 (регрессия ЗАПРЕЩЕНА): якорь, ВНУТРИ которого стоит текущая каретка, —
+     * это «живая» материализация размера, обязанная пережить сохранение; его НЕ
+     * трогаем. Каретку читаем из живого Selection; её ZWSP-узел переживает
+     * normalizeMarkers (та чистит только U+FEFF), поэтому проверка надёжна и
+     * после нормализации капсул. Идемпотентно.
+     * @param {HTMLElement} editor
+     */
+    _cleanOrphanSizeAnchors(editor) {
+        if (!editor || typeof editor.querySelectorAll !== 'function') return;
+        if (typeof this._isZeroWidthNode !== 'function'
+            || typeof this._isCapsule !== 'function') return;
+        const sel = (typeof window !== 'undefined' && typeof window.getSelection === 'function')
+            ? window.getSelection() : null;
+        const caretNode = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0).startContainer : null;
+        editor.querySelectorAll('span[style]').forEach(span => {
+            if (this._isCapsule(span) || !span.style || !span.style.fontSize) return;
+            // Якорь = span, содержимое которого — только zero-width (U+200B).
+            if (!this._isZeroWidthNode(span)) return;
+            // B-2: каретка внутри якоря → это живая материализация размера, не трогаем.
+            if (caretNode && typeof span.contains === 'function' && span.contains(caretNode)) return;
+            span.remove();
+        });
+    },
+
+    /**
      * Привязывает tooltip-обработчики к ссылкам/сноскам при начальном рендере
      * Обработчики будут заменены полным набором при фокусе редактора
      * @private

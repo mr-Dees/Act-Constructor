@@ -156,6 +156,13 @@ export class TextBlockManager {
         // (в) Класс пустоты (placeholder).
         this._toggleEmptyClass(editor);
 
+        // (в.1) TB-4: снять осиротевшие якоря размера (пустой span из одного
+        // U+200B без каретки внутри) ДО сериализации — иначе копятся в content.
+        // Якорь ПОД КАРЕТКОЙ переживает save (B-2). Метод — в textblock-editor.js.
+        if (typeof this._cleanOrphanSizeAnchors === 'function') {
+            this._cleanOrphanSizeAnchors(editor);
+        }
+
         // (г) Запись в state.content + точечный патч превью (changelog — внутри
         // saveContent, общий для всех путей правки).
         this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
