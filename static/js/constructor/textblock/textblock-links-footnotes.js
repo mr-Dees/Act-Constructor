@@ -387,6 +387,13 @@ Object.assign(TextBlockManager.prototype, {
             formattedSpan.style.fontSize = fontSize;
         }
 
+        // B-25: гасим слушатели капсулы ДО replaceChild — иначе AbortController
+        // остаётся «живым» на узле, который уже покинул DOM. Пересоздавать его
+        // не нужно: element полностью выбрасывается, новый маркер на его место
+        // не встаёт.
+        if (element._lfAbort) {
+            element._lfAbort.abort();
+        }
         element.parentNode.replaceChild(formattedSpan, element);
 
         if (this.activeEditor) {
