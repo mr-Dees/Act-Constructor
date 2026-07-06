@@ -268,19 +268,68 @@ def sanitize_tree_nodes(node: dict) -> None:
             sanitize_tree_nodes(child)
 
 
-def _sanitize_content_item_dict(item: dict) -> None:
-    """Чистит одну запись additionalContent.items[] в dict-форме (с guard'ами).
+def _dict_has(obj, name) -> bool:
+    """B-36: dict-accessor — есть ли ключ `name` (не dict-контейнер → нет)."""
+    return isinstance(obj, dict) and name in obj
 
-    Общая для dict-пути восстановления версий (sanitize_act_content_dict).
-    content — HTML, caption/filename — plain. url СОЗНАТЕЛЬНО не трогаем
+
+def _dict_get(obj, name):
+    """B-36: dict-accessor — значение по ключу `name` (не dict → None)."""
+    return obj.get(name) if isinstance(obj, dict) else None
+
+
+def _dict_set(obj, name, value) -> None:
+    """B-36: dict-accessor — пишет по ключу `name`, если obj — dict (иначе no-op)."""
+    if isinstance(obj, dict):
+        obj[name] = value
+
+
+def _obj_has(obj, name) -> bool:
+    """B-36: accessor для Pydantic-объекта — поле гарантировано схемой."""
+    return True
+
+
+def _sanitize_content_item(item, get, set_, has) -> None:
+    """Чистит одну запись additionalContent.items[]: content — HTML,
+    caption/filename — plain. get/set_/has абстрагируют доступ к полю от
+    представления (атрибут объекта vs ключ dict, B-36) — общая для
+    sanitize_act_data и sanitize_act_content_dict. url СОЗНАТЕЛЬНО не трогаем
     (data:image-whitelist валидирует схема, bleach исказил бы base64).
     """
-    if "content" in item:
-        item["content"] = sanitize_html(item["content"])
-    if "caption" in item:
-        item["caption"] = sanitize_plain_text(item["caption"])
-    if "filename" in item:
-        item["filename"] = sanitize_plain_text(item["filename"])
+    if has(item, "content"):
+        set_(item, "content", sanitize_html(get(item, "content")))
+    if has(item, "caption"):
+        set_(item, "caption", sanitize_plain_text(get(item, "caption")))
+    if has(item, "filename"):
+        set_(item, "filename", sanitize_plain_text(get(item, "filename")))
+
+
+def _sanitize_violation_fields(violation, get, set_, has) -> None:
+    """B-36: общая обработка HTML/plain-полей ОДНОГО нарушения — единая логика
+    для Pydantic-объекта (sanitize_act_data: get=getattr, set_=setattr,
+    has=_obj_has) и dict-формы восстановления версий (sanitize_act_content_dict:
+    get=_dict_get, set_=_dict_set, has=_dict_has). Состав полей — из общих
+    кортежей _VIOLATION_*_FIELDS (парность зафиксирована test_sanitizer_parity).
+    """
+    for field in _VIOLATION_HTML_FIELDS:
+        if has(violation, field):
+            set_(violation, field, sanitize_html(get(violation, field)))
+
+    dl = get(violation, "descriptionList")
+    items = get(dl, "items")
+    if isinstance(items, list):
+        set_(dl, "items", [sanitize_plain_text(item) for item in items])
+
+    ac = get(violation, "additionalContent")
+    ac_items = get(ac, "items")
+    if isinstance(ac_items, list):
+        for item in ac_items:
+            _sanitize_content_item(item, get, set_, has)
+
+    for field in _VIOLATION_OPTIONAL_HTML_FIELDS:
+        container = get(violation, field)
+        if has(container, "content"):
+            set_(container, "content", sanitize_html(get(container, "content")))
 
 
 def sanitize_act_data(data) -> None:
@@ -299,23 +348,15 @@ def sanitize_act_data(data) -> None:
     url элементов additionalContent СОЗНАТЕЛЬНО не чистится bleach'ем:
     его формат (data:image-whitelist + лимит длины) валидирует
     ViolationContentItemSchema, а bleach исказил бы base64-данные.
+
+    Обработка нарушений — через _sanitize_violation_fields (B-36, общая с
+    sanitize_act_content_dict).
     """
     for block in data.textBlocks.values():
         block.content = sanitize_html(block.content)
 
     for violation in data.violations.values():
-        for html_field in _VIOLATION_HTML_FIELDS:
-            setattr(violation, html_field, sanitize_html(getattr(violation, html_field)))
-        violation.descriptionList.items = [
-            sanitize_plain_text(item) for item in violation.descriptionList.items
-        ]
-        for item in violation.additionalContent.items:
-            item.content = sanitize_html(item.content)
-            item.caption = sanitize_plain_text(item.caption)
-            item.filename = sanitize_plain_text(item.filename)
-        for field_name in _VIOLATION_OPTIONAL_HTML_FIELDS:
-            field = getattr(violation, field_name)
-            field.content = sanitize_html(field.content)
+        _sanitize_violation_fields(violation, getattr, setattr, _obj_has)
 
     sanitize_tree_nodes(data.tree)
 
@@ -329,6 +370,9 @@ def sanitize_act_content_dict(content: dict) -> None:
     полей тот же. Таблицы НЕ трогаются — ячейки хранятся дословно (инвариант
     «всё на текст», см. TestSaveContentTableCellsStoredVerbatim). Изменяет
     dict на месте; отсутствующие ключи пропускает, новых не добавляет.
+
+    Обработка нарушений — через _sanitize_violation_fields (B-36, общая с
+    sanitize_act_data).
     """
     if not isinstance(content, dict):
         return
@@ -340,21 +384,7 @@ def sanitize_act_content_dict(content: dict) -> None:
     for violation in (content.get("violations") or {}).values():
         if not isinstance(violation, dict):
             continue
-        for html_field in _VIOLATION_HTML_FIELDS:
-            if html_field in violation:
-                violation[html_field] = sanitize_html(violation[html_field])
-        dl = violation.get("descriptionList")
-        if isinstance(dl, dict) and isinstance(dl.get("items"), list):
-            dl["items"] = [sanitize_plain_text(item) for item in dl["items"]]
-        ac = violation.get("additionalContent")
-        if isinstance(ac, dict) and isinstance(ac.get("items"), list):
-            for item in ac["items"]:
-                if isinstance(item, dict):
-                    _sanitize_content_item_dict(item)
-        for field_name in _VIOLATION_OPTIONAL_HTML_FIELDS:
-            field = violation.get(field_name)
-            if isinstance(field, dict) and "content" in field:
-                field["content"] = sanitize_html(field["content"])
+        _sanitize_violation_fields(violation, _dict_get, _dict_set, _dict_has)
 
     tree = content.get("tree")
     if isinstance(tree, dict):
