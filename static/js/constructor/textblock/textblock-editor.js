@@ -218,6 +218,26 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private CARET-3: DOM-строка (между <br>) может визуально ПЕРЕНОСИТЬСЯ на
+     * несколько экранных рядов в узком блоке. Капсула — первый узел строки —
+     * физически лежит только на ПЕРВОМ ряду; на wrap-продолжении Home должен
+     * вести к началу ТЕКУЩЕГО экранного ряда (нативное поведение), а не
+     * телепортировать к капсуле. Сравниваем нижнюю границу ряда капсулы с
+     * верхней точкой каретки: каретка ниже — она на другом (wrap) ряду. Если
+     * измерить не удалось — не блокируем штатное поведение #12.
+     * @param {Range} range схлопнутая каретка
+     * @param {Element} first капсула — первый узел DOM-строки
+     * @returns {boolean}
+     */
+    _isCaretOnCapsuleRow(range, first) {
+        const capRect = first.getClientRects()[0];
+        if (!capRect) return true;
+        const caretRect = range.getClientRects()[0] || range.getBoundingClientRect();
+        if (!caretRect) return true;
+        return caretRect.top < capRect.bottom - 1;
+    },
+
+    /**
      * @private Снимает caret-guard'ы: чистые U+FEFF-узлы удаляет, а U+FEFF
      * ВНУТРИ текста с реальными символами (guard, в который успели напечатать)
      * срезает, сохраняя текст. Идемпотентно. U+200B (якорь размера) не трогает.
@@ -816,6 +836,12 @@ Object.assign(TextBlockManager.prototype, {
             return;
         }
 
+        // CARET-4: guard прозрачен для голого Backspace/Delete (без модификаторов —
+        // Ctrl+Backspace словом наружу этой задачей не покрыт).
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            this._skipGuardOnDelete(e);
+        }
+
         // BUG-6: Enter у границы inline-маркера (contenteditable=false). Нативный
         // SplitBlock расщепляет/клонирует маркер — фантомные пустые капсулы и
         // задвоение нумерации сносок. Перехватываем и вставляем перенос вручную,
@@ -895,9 +921,13 @@ Object.assign(TextBlockManager.prototype, {
         if (e.key === 'Home') {
             // ТЕКУЩАЯ визуальная строка начинается капсулой → каретка перед ней
             // (в guard). Берём первый узел строки каретки, а не всего блока (#12):
-            // иначе Home на строке-N прыгал бы к капсуле строки 1.
+            // иначе Home на строке-N прыгал бы к капсуле строки 1. CARET-3: строка
+            // может быть длиннее блока и переноситься на несколько экранных рядов —
+            // первый узел DOM-строки всё равно капсула, хотя каретка физически на
+            // wrap-продолжении; _isCaretOnCapsuleRow не даёт телепортировать мимо
+            // native Home для этого случая.
             const first = this._currentLineFirstNode(range, editor);
-            if (this._isCapsule(first)) {
+            if (this._isCapsule(first) && this._isCaretOnCapsuleRow(range, first)) {
                 e.preventDefault();
                 this._placeCaretBesideMarker(first, false);
                 return true;
@@ -964,5 +994,56 @@ Object.assign(TextBlockManager.prototype, {
         const isMarker = (n) => n && n.nodeType === Node.ELEMENT_NODE && n.classList &&
             (n.classList.contains('text-link') || n.classList.contains('text-footnote'));
         return { before: isMarker(beforeNode) ? beforeNode : null, after: isMarker(afterNode) ? afterNode : null };
-    }
+    },
+
+    /**
+     * @private CARET-4: guard-узел (U+FEFF) в направлении удаления с данной
+     * схлопнутой каретки — если Backspace/Delete упёрся бы именно в него.
+     * Guard всегда длиной 1, поэтому граница — либо каретка ВНУТРИ самого
+     * guard'а (offset 0 или 1), либо guard — непосредственный сосед контейнера
+     * каретки с нужной стороны.
+     * @param {Range} range схлопнутая каретка
+     * @param {boolean} forward true — Delete (вперёд), false — Backspace (назад)
+     * @returns {Text|null}
+     */
+    _guardInDeleteDirection(range, forward) {
+        const c = range.startContainer, o = range.startOffset;
+        if (this._isGuardNode(c)) {
+            return (forward ? o === 0 : o === c.data.length) ? c : null;
+        }
+        if (c.nodeType === Node.TEXT_NODE) {
+            if (forward ? o !== c.data.length : o !== 0) return null;
+            const sib = forward ? c.nextSibling : c.previousSibling;
+            return this._isGuardNode(sib) ? sib : null;
+        }
+        const sib = c.childNodes[forward ? o : o - 1] || null;
+        return this._isGuardNode(sib) ? sib : null;
+    },
+
+    /**
+     * CARET-4: guard прозрачен для Backspace/Delete. Реальный Backspace/Delete
+     * ПО guard-символу опустошает его text-node и тут же роняет узел (браузер,
+     * один батч мутаций) — MutationObserver (_onCapsuleMutations) молча
+     * восстанавливает guard, а слияние строк/удаление настоящего содержимого
+     * требует ВТОРОГО нажатия. keydown срабатывает раньше нативного удаления —
+     * сдвигаем каретку ЗА guard (сам guard не трогаем, DOM не мутируем) и НЕ
+     * вызываем preventDefault: нативная команда получает цель уже без guard'а
+     * между ней и кареткой (перенос, край блока или соседняя капсула — её
+     * атомарное удаление отрабатывает существующий слой beforeinput).
+     * @param {KeyboardEvent} e
+     * @private
+     */
+    _skipGuardOnDelete(e) {
+        if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+        const sel = window.getSelection();
+        if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return;
+        const forward = e.key === 'Delete';
+        const guard = this._guardInDeleteDirection(sel.getRangeAt(0), forward);
+        if (!guard) return;
+        const range = document.createRange();
+        range.setStart(guard, forward ? guard.data.length : 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    },
 });

@@ -25,8 +25,8 @@ async function setupEditor(page, html: string) {
   }, html);
 }
 
-const FOOTNOTE = (text = 'сноска') =>
-  `<span class="text-footnote" data-footnote-id="F1" data-footnote-text="прим"` +
+const FOOTNOTE = (text = 'сноска', id = 'F1') =>
+  `<span class="text-footnote" data-footnote-id="${id}" data-footnote-text="прим"` +
   ` contenteditable="false">${text}</span>`;
 
 test.describe('caret-guards у границ визуальных строк (_placeCapGuards)', () => {
@@ -249,5 +249,174 @@ test.describe('смена размера шрифта не ломает caret-gu
     }, GUARD);
     expect(r.leading).toBe(true);
     expect(r.trailing).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 11: CARET-3 (Home на wrap-строке) и CARET-4 (guard прозрачен для
+// Backspace/Delete), плюс контроль CARET-5/CARET-7 (закрыты Task 1).
+// ---------------------------------------------------------------------------
+
+test.describe('CARET-3: Home на wrap-строке абзаца, начинающегося капсулой', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('узкий блок, каретка на wrap-продолжении → Home остаётся на ТЕКУЩЕМ экранном ряду', async ({ page }) => {
+    // Немного слов — весь абзац укладывается в несколько рядов ЦЕЛИКОМ в
+    // пределах вьюпорта: сравнение viewport-relative rect'ов до/после Home
+    // некорректно, если между измерениями браузер проскроллит каретку в вид.
+    const long = 'слово '.repeat(10).trim();
+    await setupEditor(page, FOOTNOTE() + ' ' + long);
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      ed.style.width = '160px'; // форсируем перенос длинной строки на несколько рядов
+      (window as any).textBlockManager.normalizeMarkers(ed);
+    });
+
+    // Каретка в САМОМ конце текста — заведомо на последнем wrap-ряду.
+    const pre = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const cap = ed.querySelector('.text-footnote')!;
+      const textNode = ed.lastChild as Text;
+      const r = document.createRange();
+      r.setStart(textNode, textNode.length);
+      r.collapse(true);
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+      const capRect = cap.getClientRects()[0];
+      const caretRect = r.getClientRects()[0] || r.getBoundingClientRect();
+      return { onWrapRow: caretRect.top > capRect.bottom - 1, caretTop: caretRect.top };
+    });
+    expect(pre.onWrapRow).toBe(true); // предусловие теста: каретка ДЕЙСТВИТЕЛЬНО на другом экранном ряду
+
+    await page.keyboard.press('Home');
+
+    const post = await page.evaluate((prevTop: number) => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const cap = ed.querySelector('.text-footnote')!;
+      const s = getSelection()!;
+      const r = s.getRangeAt(0);
+      const caretRect = r.getClientRects()[0] || r.getBoundingClientRect();
+      return {
+        sameRow: Math.abs(caretRect.top - prevTop) < 2,
+        landedBesideCapsule: s.anchorNode === cap.previousSibling,
+      };
+    }, pre.caretTop);
+
+    expect(post.landedBesideCapsule).toBe(false); // НЕ телепортировало к капсуле строки 1
+    expect(post.sameRow).toBe(true);               // Home сработал нативно — тот же wrap-ряд
+  });
+});
+
+test.describe('CARET-4: guard прозрачен для Backspace — слияние строк с первого нажатия', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('каретка перед капсулой строки 2 (в guard) → Backspace сразу убирает перенос со строкой 1', async ({ page }) => {
+    await setupEditor(page, 'строка1<br>' + FOOTNOTE() + '<br>строка3');
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const tbm = (window as any).textBlockManager;
+      tbm.normalizeMarkers(ed);
+      const cap = ed.querySelector('.text-footnote')!;
+      // Та же позиция каретки, что и после Home на строке 2 (вплотную перед капсулой).
+      tbm._placeCaretBesideMarker(cap, false);
+    });
+
+    await page.keyboard.press('Backspace');
+
+    const r = await page.evaluate((guard) => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const cap = ed.querySelector('.text-footnote')!;
+      const g = cap.previousSibling as any;
+      let n: any = g;
+      while (n && n.nodeType === 3 && n.data === guard) n = n.previousSibling;
+      return {
+        brCount: ed.querySelectorAll('br').length,
+        guardSurvived: !!(g && g.nodeType === 3 && g.data === guard),
+        mergedWithLine1: n === ed.firstChild,
+      };
+    }, GUARD);
+
+    expect(r.brCount).toBe(1);            // <br> между «строка1» и капсулой исчез — слияние с ОДНОГО нажатия
+    expect(r.guardSurvived).toBe(true);   // guard не уничтожен наблюдателем — каретка просто перешагнула
+    expect(r.mergedWithLine1).toBe(true); // капсула примыкает к «строка1» без разделителя
+  });
+});
+
+test.describe('CARET-5 (контроль Task 1): Enter у капсулы → вертикальная навигация сразу работает', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('Enter перед капсулой, следом ArrowUp без паузы попадает на строку выше', async ({ page }) => {
+    await setupEditor(page, 'текст' + FOOTNOTE());
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const t = ed.firstChild as Text; // «текст»
+      const r = document.createRange();
+      r.setStart(t, t.length); r.collapse(true); // каретка между «текст» и капсулой
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+    });
+
+    await page.keyboard.press('Enter');   // капсула уходит на строку 2; finalizeEdit ДО каретки (CARET-5)
+    await page.keyboard.press('ArrowUp'); // без паузы — гоняем сразу вслед за Enter
+
+    const landing = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const sel = getSelection()!;
+      return {
+        onLine1: sel.anchorNode === ed.firstChild,
+        brCount: ed.querySelectorAll('br').length,
+      };
+    });
+    expect(landing.brCount).toBe(1);    // перенос действительно есть (капсула ушла на строку 2)
+    expect(landing.onLine1).toBe(true); // ArrowUp сразу увёл на строку 1 — guard'ы уже на месте
+  });
+});
+
+test.describe('CARET-7 (контроль Task 1): нативное удаление сноски мимо явных потоков → номер обновляется по debounce', () => {
+  test.beforeEach(async ({ page }) => { await openAct(page, SEED_ACTS.withContent); });
+
+  test('выделение целиком вокруг капсулы (не клипающее её) + Backspace: номер соседней сноски пересчитан после debounce', async ({ page }) => {
+    await setupEditor(page, 'до ' + FOOTNOTE('сн1', 'F1') + ' меж ' + FOOTNOTE('сн2', 'F2') + ' после');
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      // finalizeEdit (не голый renumberAllFootnotes) — чтобы __lastFootnoteCount
+      // тоже был проставлен в кэш, как в реальном потоке.
+      (window as any).textBlockManager.finalizeEdit(ed, { renumber: true });
+    });
+    const before = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      return {
+        count: ed.querySelectorAll('.text-footnote').length,
+        nums: [...ed.querySelectorAll('.text-footnote')].map(n => n.getAttribute('data-footnote-number')),
+      };
+    });
+    expect(before.count).toBe(2);
+    expect(before.nums).toEqual(['1', '2']);
+
+    // Выделение ГРАНИЦАМИ в реальном тексте СНАРУЖИ капсулы (не внутри её тела) —
+    // beforeinput-слой (_staticRangeTouchesCapsule) его не распознаёт: удаление
+    // идёт целиком нативно, мимо removeLinkOrFootnote и мимо атомарного beforeinput.
+    await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      const before = ed.childNodes[0] as Text; // «до »
+      const after = ed.childNodes[2] as Text;  // « меж »
+      const r = document.createRange();
+      r.setStart(before, before.length);
+      r.setEnd(after, 0);
+      const s = getSelection()!; s.removeAllRanges(); s.addRange(r);
+    });
+    await page.keyboard.press('Backspace');
+
+    const immediate = await page.evaluate(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]') as HTMLElement;
+      return ed.querySelectorAll('.text-footnote').length;
+    });
+    expect(immediate).toBe(1); // сноска F1 физически удалена нативным Backspace
+
+    // Debounce handleEditorInput (500мс) → finalizeEdit ловит несовпадение числа
+    // сносок с кэшем __lastFootnoteCount и перенумеровывает (CARET-7).
+    await page.waitForFunction(() => {
+      const ed = document.querySelector('.textblock-editor[data-text-block-id="txt-seed-1"]');
+      const remaining = ed && ed.querySelector('.text-footnote');
+      return !!(remaining && remaining.getAttribute('data-footnote-number') === '1');
+    }, { timeout: 2000 });
   });
 });
