@@ -7,11 +7,13 @@
 
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 
 import asyncpg
 
 from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
+from app.domains.ck_fin_res.exceptions import FRGroupConflictError
 from app.domains.ck_fin_res.schemas.fr_validation import FRValidationView
 from app.domains.ck_fin_res.schemas.requests import FilterSpec
 from app.domains.ck_fin_res.settings import CkFinResSettings
@@ -151,6 +153,16 @@ def _norm_key_value(col: str, value):
     if col == "act_sub_number_id":
         return -1 if value is None else value
     return "" if value is None else value
+
+
+def _norm_cmp(field: str, value):
+    """Значение поля в каноничном виде для сравнения «изменилась ли строка»."""
+    v = _coerce(field, value)
+    if isinstance(v, Decimal):
+        return v.quantize(Decimal("0.01"))
+    if field == "metric_amount_rubles" and v is not None:
+        return Decimal(str(v)).quantize(Decimal("0.01"))
+    return v
 
 
 class FRValidationRepository(BaseRepository):
@@ -481,6 +493,177 @@ class FRValidationRepository(BaseRepository):
                 "divergent_fields": divergent,
             })
         return items, int(total or 0)
+
+    # ------------------------------------------------------------------
+    # ГРУППОВОЕ СОХРАНЕНИЕ (дифференциальное) И УДАЛЕНИЕ
+    # ------------------------------------------------------------------
+
+    def _key_where(self, group_key: dict) -> tuple[str, list]:
+        """WHERE по нормализованному ключу группы (bind-параметры)."""
+        clauses = []
+        params: list = []
+        for i, col in enumerate(GROUP_KEY_COLS, start=1):
+            clauses.append(f"{_GROUP_KEY_EXPR[col]} = ${i}")
+            params.append(_norm_key_value(col, group_key.get(col)))
+        return " AND ".join(clauses), params
+
+    async def _load_group_rows(self, group_key: dict) -> list[dict]:
+        where, params = self._key_where(group_key)
+        rows = await self.conn.fetch(
+            f"SELECT * FROM {self.table} WHERE {where} AND is_actual = true",
+            *params,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _row_unchanged(row: dict, common: dict, want: dict) -> bool:
+        """Строка не требует новой версии: групповые поля и per-ТБ значения совпали."""
+        for f in GROUP_FIELDS:
+            if _norm_cmp(f, row.get(f)) != _norm_cmp(f, common.get(f)):
+                return False
+        if _norm_cmp("metric_amount_rubles", row.get("metric_amount_rubles")) != \
+                _norm_cmp("metric_amount_rubles", want.get("metric_amount_rubles")):
+            return False
+        if int(row.get("metric_element_counts") or 0) != int(want.get("metric_element_counts") or 0):
+            return False
+        return True
+
+    def _build_version_values(
+        self, common: dict, want: dict, username: str, old_row: dict | None,
+    ) -> list:
+        """Значения INSERT новой версии строки (порядок — _INSERT_FIELDS).
+
+        Системные поля — «как прежний batch-update, но осознанно»:
+        application_status/applied_into_ua копируются из прежней строки ТБ
+        (для нового ТБ — из common / false); etl_loading_id → NULL и
+        row_hash → '' — версия создана приложением, не ETL.
+        """
+        values: list = []
+        for field in _INSERT_FIELDS:
+            if field == "created_by":
+                values.append(username)
+            elif field in PER_TB_FIELDS:
+                values.append(_coerce(field, want.get(field)))
+            elif field == "application_status":
+                if old_row is not None:
+                    values.append(old_row.get("application_status") or "")
+                else:
+                    values.append(_coerce(field, common.get(field)))
+            elif field == "applied_into_ua":
+                values.append(bool(old_row["applied_into_ua"]) if old_row is not None else False)
+            elif field == "etl_loading_id":
+                values.append(None)
+            elif field == "row_hash":
+                values.append("")
+            else:
+                values.append(_coerce(field, common.get(field)))
+        return values
+
+    async def group_save(
+        self,
+        *,
+        group_key: dict,
+        expected_row_ids: list[int],
+        common: dict,
+        breakdown: list[dict],
+        username: str,
+    ) -> dict:
+        """Дифференциальное сохранение группы: версионируются только изменённые
+        строки; удалённые из развертки ТБ деактивируются; новые — вставляются.
+        Несовпадение набора актуальных строк с ожидаемым — FRGroupConflictError
+        (409): группу изменили параллельно, фронт должен перечитать данные.
+        """
+        async with self.conn.transaction():
+            current_rows = await self._load_group_rows(group_key)
+            current_ids = {r["id"] for r in current_rows}
+            if current_ids != set(expected_row_ids):
+                raise FRGroupConflictError(
+                    "Запись изменена другим пользователем — обновите данные",
+                )
+
+            by_tb = {r["neg_finder_tb_id"]: r for r in current_rows}
+            desired = {b["neg_finder_tb_id"]: b for b in breakdown}
+
+            to_deactivate: list[int] = []
+            to_insert: list[list] = []
+            skipped = 0
+
+            for tb, row in by_tb.items():
+                want = desired.get(tb)
+                if want is None:
+                    to_deactivate.append(row["id"])  # ТБ убран из развертки
+                    continue
+                if self._row_unchanged(row, common, want):
+                    skipped += 1  # строка не менялась — сохраняет ETL-происхождение
+                    continue
+                to_deactivate.append(row["id"])
+                to_insert.append(self._build_version_values(common, want, username, old_row=row))
+
+            for tb, want in desired.items():
+                if tb not in by_tb:
+                    to_insert.append(self._build_version_values(common, want, username, old_row=None))
+
+            if to_deactivate:
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(to_deactivate)))
+                result = await self.conn.execute(
+                    f"UPDATE {self.table} "
+                    f"SET updated_at = now(), is_actual = false, updated_by = $1 "
+                    f"WHERE id IN ({placeholders}) AND is_actual = true",
+                    username, *to_deactivate,
+                )
+                if (int(result.split()[-1]) if result else 0) != len(to_deactivate):
+                    raise FRGroupConflictError(
+                        "Запись изменена другим пользователем — обновите данные",
+                    )
+            if to_insert:
+                columns = ", ".join(_INSERT_FIELDS)
+                ph = ", ".join(f"${i}" for i in range(1, len(_INSERT_FIELDS) + 1))
+                await self.conn.executemany(
+                    f"INSERT INTO {self.table} ({columns}) VALUES ({ph})",
+                    to_insert,
+                )
+
+        logger.info(
+            "Групповое сохранение ЦКФР %s: деактивировано=%s, вставлено=%s, "
+            "нетронуто=%s, пользователь %s",
+            group_key, len(to_deactivate), len(to_insert), skipped, username,
+        )
+        return {
+            "deactivated": len(to_deactivate),
+            "inserted": len(to_insert),
+            "skipped": skipped,
+        }
+
+    async def group_delete(
+        self, *, group_key: dict, expected_row_ids: list[int], username: str,
+    ) -> int:
+        """Групповое удаление: деактивация всех строк группы с deleted_at."""
+        async with self.conn.transaction():
+            current_rows = await self._load_group_rows(group_key)
+            current_ids = {r["id"] for r in current_rows}
+            if current_ids != set(expected_row_ids):
+                raise FRGroupConflictError(
+                    "Запись изменена другим пользователем — обновите данные",
+                )
+            if not current_ids:
+                return 0
+            ids = sorted(current_ids)
+            placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
+            result = await self.conn.execute(
+                f"UPDATE {self.table} "
+                f"SET is_actual = false, deleted_at = now(), updated_at = now(), "
+                f"updated_by = $1 "
+                f"WHERE id IN ({placeholders}) AND is_actual = true",
+                username, *ids,
+            )
+            count = int(result.split()[-1]) if result else 0
+            if count != len(ids):
+                raise FRGroupConflictError(
+                    "Запись изменена другим пользователем — обновите данные",
+                )
+        logger.info("Групповое удаление ЦКФР %s: %s строк, пользователь %s",
+                    group_key, count, username)
+        return count
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID
