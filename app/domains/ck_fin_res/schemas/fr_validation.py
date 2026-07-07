@@ -43,6 +43,7 @@ class FRValidationCreate(BaseModel):
     assigment_recommendation: str = Field(default="", max_length=10000)
     execution_deadline: Optional[datetime] = None
     used_pm_lib: str = Field(default="", max_length=200)
+    tb_leader: str = Field(default="", max_length=200)
     etl_loading_id: Optional[int] = None
     row_hash: str = Field(default="", max_length=500)
     applied_into_ua: bool = False

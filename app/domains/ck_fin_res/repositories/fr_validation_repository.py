@@ -94,6 +94,7 @@ _INSERT_FIELDS = (
     "assigment_recommendation",
     "execution_deadline",
     "used_pm_lib",
+    "tb_leader",
     "etl_loading_id",
     "row_hash",
     "applied_into_ua",
