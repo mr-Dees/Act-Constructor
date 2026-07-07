@@ -17,3 +17,10 @@ class FRValidationError(AppError):
 
     status_code = 400
     code: ClassVar[str] = "ck-fin-res-validation"
+
+
+class FRGroupConflictError(AppError):
+    """Группа изменена параллельно: набор актуальных строк не совпал с ожидаемым."""
+
+    status_code = 409
+    code: ClassVar[str] = "ck-fin-res-group-conflict"
