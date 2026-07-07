@@ -12,7 +12,7 @@
 
 Почему bleach, а не DOMPurify: node-тесты бегут в стабе без DOM, UMD-DOMPurify в
 них не поднимается. Фронтовая сторона паритета пинит чистые функции/конфиги
-allowlist на тех же фикстурах (см. node-файл). Обоснование — task-6-report.md.
+allowlist на тех же фикстурах (см. node-файл).
 """
 import json
 from pathlib import Path

@@ -382,7 +382,7 @@ class _InlineParser(HTMLParser):
         гиперссылки только на ЧТЕНИЕ (Paragraph.hyperlinks / класс Hyperlink),
         метода записи add_hyperlink нет. К тому же ссылка-капсула несёт свои
         run'ы с форматированием (цвет, кегль EXP-1, начертание) — простой
-        текст+URL их бы не выразил. См. task-6-report.md."""
+        текст+URL их бы не выразил."""
         href = href.strip()
         hyperlink = OxmlElement("w:hyperlink")
         if href.startswith("#"):

@@ -479,7 +479,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Врем�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_editor_telemetry (
     id VARCHAR(36) NOT NULL,
-    act_id INTEGER NOT NULL,
+    act_id BIGINT NOT NULL,
     username VARCHAR(50) NOT NULL,
     event_type VARCHAR(32) NOT NULL,
     event_count INTEGER NOT NULL,

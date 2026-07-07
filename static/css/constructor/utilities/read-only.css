@@ -90,16 +90,6 @@ body.read-only-mode .resize-handle {
     display: none;
 }
 
-/* Текстовые блоки в режиме просмотра */
-body.read-only-mode .textblock-content {
-    cursor: default;
-}
-
-body.read-only-mode .textblock-content:focus {
-    outline: none;
-    box-shadow: none;
-}
-
 /* Нарушения в режиме просмотра */
 body.read-only-mode .violation-field {
     cursor: default;

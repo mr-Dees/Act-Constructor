@@ -501,8 +501,9 @@ Object.assign(TextBlockManager.prototype, {
             el = el.parentElement;
         }
         const fb = probe?.nodeType === 3 ? probe.parentElement : probe;
+        // Фолбэк — дефолт из лимитов (EXP-2, 16px), не хардкод старой базы (14px).
         return fb && this.activeEditor?.contains(fb)
-            ? parseInt(window.getComputedStyle(fb).fontSize) : 14;
+            ? parseInt(window.getComputedStyle(fb).fontSize) : getStructureLimits().fontSizeDefault;
     },
 
     /**
