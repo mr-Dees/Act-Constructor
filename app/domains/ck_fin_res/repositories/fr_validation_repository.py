@@ -102,6 +102,57 @@ _INSERT_FIELDS = (
 )
 
 
+# ------------------------------------------------------------------
+# ГРУППИРОВКА ПО ТБ: одна логическая строка = (суб-акт, КМ, пункт, метрика)
+# ------------------------------------------------------------------
+
+GROUP_KEY_COLS = ("act_sub_number_id", "km_id", "act_item_number", "metric_code")
+
+# NULL-нормализация ключа: NULL-значения участвуют в GROUP BY/IN одинаково
+# в обеих фазах (row-value IN с NULL иначе не матчится).
+_GROUP_KEY_EXPR = {
+    "act_sub_number_id": "COALESCE(act_sub_number_id, -1)",
+    "km_id": "COALESCE(km_id, '')",
+    "act_item_number": "COALESCE(act_item_number, '')",
+    "metric_code": "COALESCE(metric_code, '')",
+}
+
+# Per-ТБ поля (варьируются внутри группы) — их источник breakdown, не common.
+PER_TB_FIELDS = ("neg_finder_tb_id", "metric_amount_rubles", "metric_element_counts")
+
+# Групповые бизнес-поля: синхронизируются на все строки группы при сохранении,
+# участвуют в детекте рассинхрона (divergent_fields).
+GROUP_FIELDS = tuple(
+    f for f in _INSERT_FIELDS
+    if f not in PER_TB_FIELDS + (
+        "application_status", "etl_loading_id", "row_hash", "applied_into_ua", "created_by",
+    )
+)
+
+# Фильтры по суммам/количествам применяются к ИТОГУ группы (HAVING по SUM).
+AGG_FILTER_EXPR = {
+    "metric_amount_rubles": "SUM(metric_amount_rubles)",
+    "total_amount": "SUM(metric_amount_rubles)",
+    "metric_element_counts": "SUM(metric_element_counts)",
+    "total_counts": "SUM(metric_element_counts)",
+}
+
+# Сортировка по виртуальным агрегатным колонкам.
+AGG_SORT_EXPR = {
+    "total_amount": "SUM(metric_amount_rubles)",
+    "total_counts": "SUM(metric_element_counts)",
+    "tb_count": "COUNT(*)",
+    "updated_at": "MAX(updated_at)",
+}
+
+
+def _norm_key_value(col: str, value):
+    """Значение ключа группы в НОРМАЛИЗОВАННОМ виде (зеркало _GROUP_KEY_EXPR)."""
+    if col == "act_sub_number_id":
+        return -1 if value is None else value
+    return "" if value is None else value
+
+
 class FRValidationRepository(BaseRepository):
     """Операции с записями FR-валидации в БД."""
 
@@ -246,6 +297,190 @@ class FRValidationRepository(BaseRepository):
             len(params), len(order_parts),
         )
         return [dict(r) for r in rows], int(total or 0)
+
+    # ------------------------------------------------------------------
+    # ГРУППОВОЙ ПОИСК (консолидация по ТБ)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _split_filters(
+        filters: dict[str, FilterSpec] | None,
+    ) -> tuple[dict[str, FilterSpec], dict[str, FilterSpec]]:
+        """Делит фильтры на строчные (WHERE) и агрегатные (HAVING по SUM)."""
+        row_filters: dict[str, FilterSpec] = {}
+        agg_filters: dict[str, FilterSpec] = {}
+        for column, spec in (filters or {}).items():
+            if column in AGG_FILTER_EXPR:
+                agg_filters[column] = spec
+            else:
+                row_filters[column] = spec
+        return row_filters, agg_filters
+
+    @staticmethod
+    def _build_having(
+        agg_filters: dict[str, FilterSpec], start_idx: int,
+    ) -> tuple[str, list, int]:
+        """HAVING по агрегатам группы. Семантика op — как в _build_filter_where,
+        но выражение — SUM(...) вместо колонки (фильтр по итогу группы)."""
+        conditions: list[str] = []
+        params: list = []
+        idx = start_idx
+        for column, spec in agg_filters.items():
+            expr = AGG_FILTER_EXPR[column]
+            op = spec.op
+            if op == "contains":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"CAST({expr} AS TEXT) ILIKE ${idx}")
+                params.append(f"%{value}%")
+                idx += 1
+            elif op == "eq":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"CAST({expr} AS TEXT) = ${idx}")
+                params.append(value)
+                idx += 1
+            elif op == "range":
+                frm, to = spec.from_, spec.to
+                if frm is not None and str(frm).strip() != "":
+                    conditions.append(f"{expr} >= CAST(${idx} AS NUMERIC)")
+                    params.append(frm)
+                    idx += 1
+                if to is not None and str(to).strip() != "":
+                    conditions.append(f"{expr} <= CAST(${idx} AS NUMERIC)")
+                    params.append(to)
+                    idx += 1
+        having = f" HAVING {' AND '.join(conditions)}" if conditions else ""
+        return having, params, idx
+
+    async def search_groups(
+        self,
+        *,
+        filters: dict[str, FilterSpec] | None = None,
+        sort: list[tuple[str, str]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Страница ЛОГИЧЕСКИХ строк: группы (суб-акт, КМ, пункт, метрика).
+
+        Двухфазно (PG 9.4 / GP 6.x, без json_agg):
+        A) страница групп: GROUP BY ключ + SUM/COUNT, HAVING для фильтров по
+           итогам, ORDER BY по агрегатам/MIN(col); total — COUNT по подзапросу;
+        B) добор физических строк групп страницы одним row-value IN; сборка
+           групп в Python: common — из строки с max(updated_at, id),
+           tb_breakdown — по возрастанию ТБ, divergent_fields — групповые поля,
+           разъехавшиеся между строками (ETL-рассинхрон).
+        """
+        row_filters, agg_filters = self._split_filters(filters)
+        where, params, idx = self._build_filter_where(row_filters)
+        having, having_params, idx = self._build_having(agg_filters, idx)
+        params = params + having_params
+
+        key_select = ", ".join(
+            f"{_GROUP_KEY_EXPR[c]} AS {c}" for c in GROUP_KEY_COLS
+        )
+        group_by = ", ".join(_GROUP_KEY_EXPR[c] for c in GROUP_KEY_COLS)
+
+        order_parts: list[str] = []
+        for column, direction in (sort or []):
+            dir_sql = "DESC" if str(direction).lower() == "desc" else "ASC"
+            if column in AGG_SORT_EXPR:
+                order_parts.append(f"{AGG_SORT_EXPR[column]} {dir_sql}")
+            elif column in _GROUP_KEY_EXPR:
+                order_parts.append(f"{_GROUP_KEY_EXPR[column]} {dir_sql}")
+            elif column in ALLOWED_COLUMNS:
+                # Групповые поля равны внутри группы; MIN даёт детерминизм
+                # и при ETL-рассинхроне.
+                order_parts.append(f"MIN({column}) {dir_sql}")
+            else:
+                raise ValueError(f"Недопустимая колонка сортировки: {column}")
+        # Стабильный хвост — ключ группировки (детерминированная пагинация).
+        order_parts.extend(f"{_GROUP_KEY_EXPR[c]} ASC" for c in GROUP_KEY_COLS)
+        order_by = "ORDER BY " + ", ".join(order_parts)
+
+        total = await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM ("
+            f"SELECT 1 FROM {self.view}{where} GROUP BY {group_by}{having}"
+            f") AS grouped_total",
+            *params,
+        )
+
+        page_rows = await self.conn.fetch(
+            f"SELECT {key_select}, "
+            f"SUM(metric_amount_rubles) AS total_amount, "
+            f"SUM(metric_element_counts) AS total_counts, "
+            f"COUNT(*) AS tb_count, MAX(updated_at) AS max_updated_at "
+            f"FROM {self.view}{where} GROUP BY {group_by}{having} "
+            f"{order_by} LIMIT ${idx} OFFSET ${idx + 1}",
+            *params, limit, offset,
+        )
+        if not page_rows:
+            return [], int(total or 0)
+
+        # Фаза B: добор строк групп страницы (ключи уже нормализованы фазой A).
+        key_tuple_sql = "(" + ", ".join(_GROUP_KEY_EXPR[c] for c in GROUP_KEY_COLS) + ")"
+        in_params: list = []
+        tuples_sql: list[str] = []
+        p = 1
+        for g in page_rows:
+            tuples_sql.append(f"(${p}, ${p + 1}, ${p + 2}, ${p + 3})")
+            in_params.extend(g[c] for c in GROUP_KEY_COLS)
+            p += 4
+        detail_rows = await self.conn.fetch(
+            f"SELECT * FROM {self.view} "
+            f"WHERE {key_tuple_sql} IN ({', '.join(tuples_sql)})",
+            *in_params,
+        )
+
+        by_key: dict[tuple, list[dict]] = {}
+        for r in detail_rows:
+            row = dict(r)
+            key = tuple(_norm_key_value(c, row.get(c)) for c in GROUP_KEY_COLS)
+            by_key.setdefault(key, []).append(row)
+
+        items: list[dict] = []
+        for g in page_rows:
+            key = tuple(g[c] for c in GROUP_KEY_COLS)
+            rows = sorted(
+                by_key.get(key, []),
+                key=lambda r: str(r.get("neg_finder_tb_id") or ""),
+            )
+            if not rows:
+                continue  # группа исчезла между фазами (гонка) — пропускаем
+            src = max(
+                rows,
+                key=lambda r: (
+                    r.get("updated_at") or r.get("created_at") or datetime.min,
+                    r.get("id") or 0,
+                ),
+            )
+            common = {k: v for k, v in src.items() if k not in PER_TB_FIELDS}
+            divergent = [
+                f for f in GROUP_FIELDS
+                if len({str(r.get(f)) for r in rows}) > 1
+            ]
+            items.append({
+                "group_key": {c: g[c] for c in GROUP_KEY_COLS},
+                "row_ids": [r["id"] for r in rows],
+                "common": common,
+                "tb_breakdown": [
+                    {
+                        "row_id": r["id"],
+                        "neg_finder_tb_id": r.get("neg_finder_tb_id"),
+                        "metric_amount_rubles": r.get("metric_amount_rubles"),
+                        "metric_element_counts": r.get("metric_element_counts"),
+                    }
+                    for r in rows
+                ],
+                "total_amount": g["total_amount"],
+                "total_counts": g["total_counts"],
+                "tb_count": g["tb_count"],
+                "updated_at": g["max_updated_at"],
+                "divergent_fields": divergent,
+            })
+        return items, int(total or 0)
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID

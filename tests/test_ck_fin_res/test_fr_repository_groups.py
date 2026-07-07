@@ -1,0 +1,130 @@
+"""Тесты группового поиска ЦКФР (SQL строится на мок-соединении)."""
+
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.core import settings_registry
+from app.domains.ck_fin_res.repositories.fr_validation_repository import (
+    FRValidationRepository,
+)
+from app.domains.ck_fin_res.schemas.requests import FilterSpec
+from app.domains.ck_fin_res.settings import CkFinResSettings
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings():
+    """Сброс реестра настроек между тестами."""
+    settings_registry.reset()
+    settings_registry.register("ck_fin_res", CkFinResSettings)
+    yield
+    settings_registry.reset()
+
+
+@pytest.fixture(autouse=True)
+def _mock_adapter():
+    """Автouse-патч get_adapter — репозиторий конструируется прямо в тестах."""
+    mock_adapter = MagicMock()
+    mock_adapter.qualify_table_name = lambda name, schema="": name
+    with patch("app.db.repositories.base.get_adapter", return_value=mock_adapter):
+        yield
+
+
+def _row(rid, tb, amount, counts, item="5.1.1", metric="2002", **over):
+    base = {
+        "id": rid, "act_sub_number_id": 1, "km_id": "КМ-09-41726",
+        "act_item_number": item, "metric_code": metric,
+        "neg_finder_tb_id": tb,
+        "metric_amount_rubles": Decimal(amount),
+        "metric_element_counts": counts,
+        "metric_name": "Некорректный расчет", "deviation_description": "Описание",
+        "ck_comment": "", "tb_leader": "14", "application_status": "На рассмотрении",
+        "updated_at": datetime(2026, 7, 1, 12, 0, 0), "created_at": datetime(2026, 6, 1),
+        "act_sub_number": "ЦА 36-мо0255",
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_search_groups_two_phases_and_assembly(mock_conn):
+    repo = FRValidationRepository(mock_conn)
+    # Фаза A: одна группа; total; Фаза B: две строки группы
+    phase_a = [{
+        "act_sub_number_id": 1, "km_id": "КМ-09-41726",
+        "act_item_number": "5.1.1", "metric_code": "2002",
+        "total_amount": Decimal("1195000.00"), "total_counts": 11,
+        "tb_count": 2, "max_updated_at": datetime(2026, 7, 1, 12, 0, 0),
+    }]
+    phase_b = [
+        _row(101, "7", "980000.00", 8),
+        _row(102, "8", "215000.00", 3,
+             updated_at=datetime(2026, 7, 2, 9, 0, 0), ck_comment="правка"),
+    ]
+    mock_conn.fetch.side_effect = [phase_a, phase_b]
+    mock_conn.fetchval.return_value = 1
+
+    items, total = await repo.search_groups(
+        filters={"km_id": FilterSpec(op="contains", value="41726")},
+        sort=[("total_amount", "desc")], limit=50, offset=0,
+    )
+
+    assert total == 1
+    g = items[0]
+    assert g["group_key"]["metric_code"] == "2002"
+    assert g["row_ids"] == [101, 102]
+    assert g["tb_count"] == 2
+    assert str(g["total_amount"]) == "1195000.00"
+    # tb_breakdown отсортирован по ТБ, per-ТБ поля на месте
+    assert [b["neg_finder_tb_id"] for b in g["tb_breakdown"]] == ["7", "8"]
+    assert g["tb_breakdown"][0]["row_id"] == 101
+    # common — из строки с максимальным (updated_at, id) → строка 102
+    assert g["common"]["ck_comment"] == "правка"
+    assert "neg_finder_tb_id" not in g["common"]
+    # ck_comment разъехался между строками → divergent
+    assert "ck_comment" in g["divergent_fields"]
+
+    # SQL фазы A: группировка + сортировка по агрегату + HAVING нет
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "GROUP BY" in sql_a
+    assert "SUM(metric_amount_rubles) AS total_amount" in sql_a
+    assert "ORDER BY SUM(metric_amount_rubles) DESC" in sql_a
+    # SQL фазы B: row-value IN по нормализованным ключам
+    sql_b = mock_conn.fetch.call_args_list[1].args[0]
+    assert "IN ((" in sql_b
+
+
+@pytest.mark.asyncio
+async def test_amount_filter_goes_to_having(mock_conn):
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(
+        filters={"metric_amount_rubles": FilterSpec(op="range", from_="1000", to=None, cast="numeric")},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "HAVING" in sql_a
+    assert "SUM(metric_amount_rubles) >= CAST($1 AS NUMERIC)" in sql_a
+    # В WHERE фильтр по сумме НЕ попал
+    assert "WHERE" not in sql_a.split("GROUP BY")[0] or "metric_amount_rubles" not in sql_a.split("GROUP BY")[0]
+
+
+@pytest.mark.asyncio
+async def test_sort_by_plain_column_uses_min(mock_conn):
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+    await repo.search_groups(filters=None, sort=[("inspection_name", "asc")], limit=10, offset=0)
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "MIN(inspection_name) ASC" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_sort_rejects_unknown_column(mock_conn):
+    repo = FRValidationRepository(mock_conn)
+    with pytest.raises(ValueError):
+        await repo.search_groups(filters=None, sort=[("evil; DROP", "asc")], limit=10, offset=0)
