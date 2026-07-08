@@ -49,12 +49,6 @@ class FRValidationCreate(BaseModel):
     applied_into_ua: bool = False
 
 
-class FRValidationBatchItem(FRValidationCreate):
-    """Элемент пакетного обновления FR-валидации (id обязателен)."""
-
-    id: int
-
-
 class FRValidationRecord(FRValidationCreate):
     """Запись FR-валидации из БД (с системными полями)."""
 

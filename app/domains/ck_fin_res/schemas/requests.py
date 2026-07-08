@@ -43,10 +43,8 @@ class ValidationSearchRequest(BaseModel):
     # фильтра. Имена колонок валидируются против whitelist в репозитории
     # (защита от инъекций в имена колонок).
     filters: dict[str, FilterSpec] = Field(default_factory=dict)
-    sort_by: Optional[str] = None
-    sort_dir: Literal["asc", "desc"] = "asc"
-    # Многоколоночная сортировка по приоритету (перекрывает sort_by/sort_dir,
-    # если непустая). Имена колонок валидируются против whitelist в репозитории.
+    # Многоколоночная сортировка по приоритету. Имена колонок валидируются
+    # против whitelist в репозитории.
     sort: list[SortSpec] = Field(default_factory=list)
     # Верхняя граница страницы определяется working_set_cap домена (сервис
     # клампит limit), поэтому жёсткого потолка в схеме нет.
