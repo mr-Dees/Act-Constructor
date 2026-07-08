@@ -1,0 +1,546 @@
+/*
+ * Модалка распределения суммы метрики по ТБ (ЦК Фин.Рез).
+ * Портирована из прототипа scratchpad/ck-fr-tb-breakdown-prototype.html,
+ * значения переведены на токены приложения.
+ */
+
+.fr-breakdown-editor {
+    width: 820px;
+    max-width: 96vw;
+    max-height: 92vh;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* --- Шапка --- */
+.frb-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing);
+    padding: var(--spacing-xl) var(--spacing-2xl) var(--spacing-md);
+    flex: none;
+}
+
+.frb-title {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+}
+
+.frb-sub {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    margin-top: 0.2rem;
+}
+
+.frb-close {
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 1.15rem;
+    line-height: 1;
+    border-radius: var(--radius-sm);
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.frb-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.frb-close:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+}
+
+/* --- Верх: режим + общая сумма + бар + поля пункта --- */
+.frb-top {
+    padding: 0 var(--spacing-2xl) var(--spacing-md);
+    border-bottom: 1px solid var(--border-light);
+    flex: none;
+}
+
+.frb-mode-switch {
+    display: inline-flex;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius);
+    padding: 3px;
+    gap: 2px;
+}
+
+.frb-mode-switch button {
+    border: none;
+    background: transparent;
+    padding: 0.35rem 0.8rem;
+    border-radius: calc(var(--radius) - 3px);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.frb-mode-switch button[aria-pressed="true"] {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-weight: 600;
+    box-shadow: var(--shadow-xs);
+}
+
+.frb-total-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+    flex-wrap: wrap;
+    margin-top: var(--spacing-md);
+}
+
+.frb-total-row label {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.frb-total-wrap {
+    position: relative;
+}
+
+.frb-total-input {
+    width: 200px;
+    padding: 0.45rem 1.9rem 0.45rem 0.75rem;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-primary);
+}
+
+.frb-total-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.frb-total-input[readonly] {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-style: dashed;
+}
+
+.frb-rub {
+    position: absolute;
+    right: 0.7rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+    pointer-events: none;
+}
+
+.frb-auto-badge {
+    font-size: var(--font-size-xs);
+    background: var(--primary-subtle);
+    color: var(--primary-hover);
+    border-radius: var(--radius-full);
+    padding: 0.15rem 0.6rem;
+}
+
+/* Бар распределения */
+.frb-bar-wrap {
+    margin-top: var(--spacing-md);
+}
+
+.frb-bar {
+    position: relative;
+    height: 16px;
+    border-radius: var(--radius-full);
+    background: var(--gray-100);
+    overflow: hidden;
+}
+
+.frb-bar-target {
+    position: absolute;
+    inset: 0;
+    background: var(--primary-subtle);
+    opacity: 0.55;
+}
+
+.frb-bar-segs {
+    position: absolute;
+    inset: 0;
+    display: flex;
+}
+
+.frb-bar .seg {
+    height: 100%;
+    min-width: 0;
+    box-shadow: inset -2px 0 0 var(--bg-primary);
+    transition: width var(--transition-fast);
+}
+
+.frb-bar .seg:last-child {
+    box-shadow: none;
+}
+
+.frb-bar.overflow {
+    box-shadow: 0 0 0 2px var(--error-subtle), 0 0 0 3px var(--error);
+}
+
+.frb-legend {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--spacing);
+    margin-top: 0.45rem;
+    font-size: var(--font-size-sm);
+    flex-wrap: wrap;
+}
+
+.frb-legend-left {
+    color: var(--text-secondary);
+}
+
+.frb-num {
+    font-variant-numeric: tabular-nums;
+}
+
+.frb-legend .frb-num {
+    font-weight: 600;
+}
+
+.frb-rest-pill {
+    padding: 0.1rem 0.6rem;
+    border-radius: var(--radius-full);
+    font-variant-numeric: tabular-nums;
+}
+
+.frb-rest-pill.warn {
+    background: var(--warning-subtle);
+    color: #8a5a1d;
+}
+
+.frb-rest-pill.ok {
+    background: var(--success-subtle);
+    color: #2c6e4a;
+}
+
+.frb-rest-pill.over {
+    background: var(--error-subtle);
+    color: var(--error);
+    font-weight: 600;
+}
+
+/* Индикация «лимит исчерпан» — красное мигание бара и фразы «Распределено» */
+@keyframes overPulse {
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 0 2px var(--error-subtle), 0 0 0 3px var(--error); }
+}
+
+.bar-flash {
+    animation: overPulse 0.65s ease-in-out 2;
+}
+
+.legend-flash,
+.legend-flash .frb-num {
+    color: var(--error) !important;
+}
+
+/* Поля пункта (групповые флаги) */
+.frb-group-flags {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-md);
+    padding: 0.55rem 0.8rem;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    flex-wrap: wrap;
+}
+
+.frb-group-flags__cap {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+}
+
+.frb-group-flags label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.frb-group-flags input {
+    accent-color: var(--primary);
+    width: 1rem;
+    height: 1rem;
+}
+
+/* --- Строки ТБ --- */
+.frb-rows {
+    overflow-y: auto;
+    padding: var(--spacing-sm) var(--spacing-2xl);
+    flex: 1;
+    min-height: 0;
+}
+
+.frb-row {
+    display: grid;
+    grid-template-columns: 158px 1fr 140px 72px 46px;
+    gap: var(--spacing-sm);
+    align-items: center;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.frb-row:hover {
+    background: var(--bg-secondary);
+}
+
+.frb-rows.mode-sum .frb-row {
+    grid-template-columns: 158px 140px 72px 46px;
+}
+
+.frb-rows.mode-sum .frb-row input[type="range"] {
+    display: none;
+}
+
+.frb-row.zero .frb-name {
+    color: var(--text-tertiary);
+}
+
+.frb-name {
+    font-size: var(--font-size-sm);
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.frb-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: var(--radius-full);
+    flex: none;
+}
+
+.frb-nm {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.frb-row input[type="range"] {
+    width: 100%;
+    accent-color: var(--primary);
+    height: 1.1rem;
+}
+
+.frb-row input[type="range"]:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-full);
+}
+
+.frb-amount {
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-primary);
+}
+
+.frb-amount:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.frb-amount::placeholder {
+    color: var(--gray-300);
+}
+
+.frb-count {
+    width: 100%;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-primary);
+}
+
+.frb-count:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.frb-count::placeholder {
+    color: var(--gray-300);
+}
+
+.frb-row input[disabled] {
+    pointer-events: none;
+    opacity: 0.45;
+    background: var(--bg-tertiary);
+}
+
+.frb-pct {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.frb-rows-note {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    padding: 0.35rem 0.5rem 0;
+}
+
+/* --- Футер --- */
+.frb-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-2xl) var(--spacing-xl);
+    border-top: 1px solid var(--border-light);
+    flex: none;
+}
+
+.frb-foot-spacer {
+    flex: 1;
+}
+
+.frb-reason {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+}
+
+.frb-reason.err {
+    color: var(--error);
+}
+
+/* --- Слои поверх диалога: confirm (сценарий «от сумм») и among (Поровну между…) --- */
+.frb-confirm-layer {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: var(--radius-xl);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-2xl);
+    text-align: center;
+}
+
+.frb-confirm-layer.visible {
+    display: flex;
+}
+
+.frb-confirm-card {
+    max-width: 460px;
+}
+
+.frb-confirm-card h3 {
+    font-size: var(--font-size-base);
+    margin-bottom: var(--spacing-sm);
+}
+
+.frb-confirm-card p {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.frb-confirm-list {
+    text-align: left;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    max-height: 220px;
+    overflow: auto;
+    font-size: var(--font-size-sm);
+}
+
+.frb-confirm-list > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--spacing-lg);
+    padding: 0.15rem 0;
+}
+
+.frb-confirm-list .total {
+    border-top: 1px solid var(--border);
+    margin-top: 0.3rem;
+    padding-top: 0.4rem;
+    font-weight: 600;
+}
+
+.frb-confirm-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: center;
+}
+
+.frb-among-list {
+    text-align: left;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 0.35rem;
+    margin-bottom: var(--spacing-md);
+    max-height: 260px;
+    overflow: auto;
+}
+
+.frb-among-list label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.frb-among-list label:hover {
+    background: var(--bg-hover);
+}
+
+.frb-among-list label.has-sum {
+    background: var(--primary-subtle);
+}
+
+.frb-among-list .cur {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-tertiary);
+    font-size: var(--font-size-xs);
+}
+
+.frb-among-list input {
+    accent-color: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fr-breakdown-editor .frb-bar .seg,
+    .fr-breakdown-editor .bar-flash,
+    .fr-breakdown-editor .legend-flash {
+        transition: none;
+        animation: none;
+    }
+}

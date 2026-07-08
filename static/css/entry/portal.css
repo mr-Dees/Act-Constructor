@@ -38,6 +38,7 @@
 @import '../portal/ck/ck-table.css';
 @import '../portal/ck/ck-form.css';
 @import '../portal/ck/ck-process-picker.css';
+@import '../portal/ck/ck-breakdown-editor.css';
 
 /* SQL-агент (встроенный iframe + баннер «недоступен») */
 @import '../portal/sqlagent/sqlagent.css';
