@@ -111,6 +111,8 @@ export class DataTable {
    * видно как placeholder/мини-метка; активный фильтр подсвечивает `.dt-th--filtered`.
    * Активная сортировка помечается `aria-sort` только на ВЕДУЩЕЙ колонке набора.
    * Колонка с `noFilter: true` — только подпись и сортировка, без фильтр-контрола.
+   * Колонка с `noSort: true` — без кнопки/обработчика сортировки и индикаторов
+   * (ключ колонки неизвестен бэкенду, например pivot-колонки ТБ и чипы tb_breakdown).
    */
   _buildHeaderCell(col) {
     const th = document.createElement('th');
@@ -121,29 +123,34 @@ export class DataTable {
     cell.className = 'dt-th-cell';
 
     // Сортировка строится ДО ветки noFilter — она нужна и обычным, и
-    // noFilter-колонкам (блок зависит только от col и this._sort).
-    const sortBtn = document.createElement('button');
-    sortBtn.type = 'button';
-    sortBtn.className = 'dt-th-sort';
-    sortBtn.title = 'Клик добавляет колонку к сортировке (клики накапливаются)';
-    sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
-    sortBtn.addEventListener('click', () => this.setSort(col.key));
-
-    const si = this._sort.findIndex(s => s.key === col.key);
-    const dir = si >= 0 ? this._sort[si].dir : null;
-    if (dir) {
-      th.classList.add('dt-th--sorted');
-      sortBtn.classList.add('active');
-      if (si === 0) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
-    }
-    sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
-
+    // noFilter-колонкам (блок зависит только от col и this._sort). Колонка с
+    // noSort: true сортировку не получает вовсе — кнопка/обработчик/индикаторы
+    // (dt-th--sorted, aria-sort) остаются null/не проставляются.
+    let sortBtn = null;
     let priorityEl = null;
-    if (si >= 0 && this._sort.length >= 2) {
-      priorityEl = document.createElement('span');
-      priorityEl.className = 'dt-th-priority';
-      priorityEl.textContent = String(si + 1);
-      priorityEl.setAttribute('aria-hidden', 'true');
+    if (!col.noSort) {
+      sortBtn = document.createElement('button');
+      sortBtn.type = 'button';
+      sortBtn.className = 'dt-th-sort';
+      sortBtn.title = 'Клик добавляет колонку к сортировке (клики накапливаются)';
+      sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
+      sortBtn.addEventListener('click', () => this.setSort(col.key));
+
+      const si = this._sort.findIndex(s => s.key === col.key);
+      const dir = si >= 0 ? this._sort[si].dir : null;
+      if (dir) {
+        th.classList.add('dt-th--sorted');
+        sortBtn.classList.add('active');
+        if (si === 0) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+      }
+      sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+
+      if (si >= 0 && this._sort.length >= 2) {
+        priorityEl = document.createElement('span');
+        priorityEl.className = 'dt-th-priority';
+        priorityEl.textContent = String(si + 1);
+        priorityEl.setAttribute('aria-hidden', 'true');
+      }
     }
 
     // Колонки без серверного смысла фильтра (например, pivot-колонки ТБ)
@@ -154,7 +161,7 @@ export class DataTable {
       span.textContent = col.label;
       span.title = col.description || col.label;
       cell.appendChild(span);
-      cell.appendChild(sortBtn);
+      if (sortBtn) cell.appendChild(sortBtn);
       if (priorityEl) cell.appendChild(priorityEl);
       th.appendChild(cell);
       return th;
@@ -202,7 +209,7 @@ export class DataTable {
     field.appendChild(control);
     cell.appendChild(field);
     cell.appendChild(clearBtn);
-    cell.appendChild(sortBtn);
+    if (sortBtn) cell.appendChild(sortBtn);
     if (priorityEl) cell.appendChild(priorityEl);
     th.appendChild(cell);
 

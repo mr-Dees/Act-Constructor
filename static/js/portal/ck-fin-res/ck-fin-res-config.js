@@ -109,7 +109,7 @@ export class CkFinResConfig {
             const id = String(t.tb_id);
             return {
                 key: `piv:${id}`, label: this.tbAbbr(id, dicts), type: 'number',
-                align: 'right', width: 120, hidden: true, noFilter: true,
+                align: 'right', width: 120, hidden: true, noFilter: true, noSort: true,
                 description: t.full_name || t.short_name,
                 render: (raw, record) => {
                     const span = document.createElement('span');
@@ -131,7 +131,7 @@ export class CkFinResConfig {
      * `total_counts` — чистые read-only display-колонки (extra, поля в форме
      * нет). `tb_breakdown` — ЕСТЬ как поле формы (тип `amount-breakdown`,
      * секция «Метрика»), поэтому его табличное представление (чипы ТБ,
-     * noFilter, своя ширина) задаётся через `overrides`, а не `extra` —
+     * noFilter, noSort, своя ширина) задаётся через `overrides`, а не `extra` —
      * иначе `buildColumns` собрал бы ДВЕ колонки с одним и тем же ключом
      * (одну — из `extra`, другую — автовыведенную из `fields`).
      */
@@ -165,6 +165,7 @@ export class CkFinResConfig {
                     type: 'text',
                     width: 320,
                     noFilter: true,
+                    noSort: true,
                     render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
                 },
                 real_loss: { label: 'Реальные потери' },
