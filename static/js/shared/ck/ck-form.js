@@ -17,6 +17,7 @@ export class CkForm {
      * @param {Object} config.dictionaries - справочники {metrics: [...], terbanks: [...], ...}
      * @param {HTMLElement} config.containerEl - контейнер формы
      * @param {Function} [config.onProcessPick] - callback для открытия picker-а процесса
+     * @param {Function} [config.onBreakdownEdit] - callback для открытия модалки развёртки суммы по ТБ
      */
     static init(config) {
         this._config = config;
@@ -77,6 +78,9 @@ export class CkForm {
                     data[field.paired] = el.dataset.pairedValue || '';
                 }
                 // paired_extras не отправляются — они вычисляются на бэке через JOIN
+            } else if (field.type === 'amount-breakdown') {
+                try { data[field.key] = JSON.parse(el.dataset.value || '[]'); }
+                catch { data[field.key] = []; }
             } else if (field.type === 'readonly-text') {
                 // Пустое значение опускаем — пусть {...record, ...data} сохранит исходное
                 // (важно для Optional[int]-полей вроде reestr_metric_id: '' не парсится в int)
@@ -102,6 +106,9 @@ export class CkForm {
             let isEmpty = false;
             if (field.type === 'process-picker') {
                 isEmpty = !el.dataset.value;
+            } else if (field.type === 'amount-breakdown') {
+                try { isEmpty = !(JSON.parse(el.dataset.value || '[]').length); }
+                catch { isEmpty = true; }
             } else if (field.type === 'readonly-text') {
                 isEmpty = !(el.dataset.value || '').trim();
             } else if (field.type === 'checkbox') {
@@ -288,6 +295,19 @@ export class CkForm {
             label.appendChild(trigger);
         }
 
+        // Trigger для amount-breakdown
+        if (field.type === 'amount-breakdown') {
+            const trigger = document.createElement('span');
+            trigger.className = 'ck-form__picker-trigger';
+            trigger.textContent = 'изменить ▸';
+            trigger.addEventListener('click', () => {
+                if (this._config.onBreakdownEdit) {
+                    this._config.onBreakdownEdit(field);
+                }
+            });
+            label.appendChild(trigger);
+        }
+
         wrapper.appendChild(label);
 
         // Input element
@@ -381,6 +401,14 @@ export class CkForm {
                 input.textContent = field.placeholder || '—';
                 break;
 
+            case 'amount-breakdown':
+                // Развертка суммы по ТБ: readonly-итог + триггер модалки распределения
+                input = document.createElement('div');
+                input.className = 'ck-form__readonly ck-form__breakdown';
+                input.dataset.value = '[]';
+                input.textContent = '— не распределено —';
+                break;
+
             default:
                 input = document.createElement('input');
                 input.type = 'text';
@@ -443,6 +471,9 @@ export class CkForm {
                         extraEl.textContent = extraVal || (extra.placeholder || '—');
                     }
                 }
+            } else if (f.type === 'amount-breakdown') {
+                const breakdown = Array.isArray(record[f.key]) ? record[f.key] : [];
+                CkForm.setBreakdownValue(f.key, breakdown);
             } else if (f.type === 'readonly-text') {
                 const v = val || '';
                 el.dataset.value = v;
@@ -495,6 +526,25 @@ export class CkForm {
                 extraEl.textContent = v || (extra.placeholder || '—');
             }
         }
+    }
+
+    /** Записывает развертку по ТБ в поле формы и обновляет readonly-итог. */
+    static setBreakdownValue(fieldKey, breakdown) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return;
+        const list = Array.isArray(breakdown) ? breakdown : [];
+        el.dataset.value = JSON.stringify(list);
+        const totalKop = list.reduce((s, b) => s + Math.round(Number(b.metric_amount_rubles || 0) * 100), 0);
+        el.textContent = list.length
+            ? `${(totalKop / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽ · ТБ: ${list.length}`
+            : '— не распределено —';
+        el.classList.remove('ck-form__input--error');
+    }
+
+    static getBreakdownValue(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return [];
+        try { return JSON.parse(el.dataset.value || '[]'); } catch { return []; }
     }
 
     /**

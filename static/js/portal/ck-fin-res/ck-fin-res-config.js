@@ -11,7 +11,7 @@ export class CkFinResConfig {
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Финансовый Результат';
     static storageKey = 'ck:ck-fin-res:view:v2';
-    static sectionStateKey = 'ck:ck-fin-res:form-sections:v2';
+    static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
 
     static formatDate(val) {
@@ -94,7 +94,7 @@ export class CkFinResConfig {
                 { key: 'rev_start_dt', label: 'Начало ревизуемого периода', type: 'date' },
                 { key: 'rev_end_dt', label: 'Конец ревизуемого периода', type: 'date' },
             ]},
-            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
+            { key: 'tb_leader', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         ]},
         // 2. Процесс и владельцы — без «Кармана» и «Вида риска».
         { section: 'Процесс и владельцы', key: 'process', fields: [
@@ -118,17 +118,14 @@ export class CkFinResConfig {
                 { key: 'used_pm_lib', label: 'Использование PM', type: 'dictionary', dict: 'used_pm_options' },
             ]},
         ]},
-        // 4. Метрика — показатели + код метрики и её название.
+        // 4. Метрика — код метрики и развертка суммы по ТБ.
         { section: 'Метрика', key: 'metric', fields: [
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-            { row: [
-                { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
-                { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0,
-                  description: 'Сумма выявленных возможностей финансового результата банка' },
-            ]},
+            { key: 'tb_breakdown', label: 'Сумма по ТБ (руб.)', type: 'amount-breakdown', required: true,
+              description: 'Сумма выявленных возможностей финансового результата банка — итог и развертка по ТБ' },
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },
-                { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox' },
+                { key: 'is_sent_to_top_brass', label: 'На наблюдательный совет', type: 'checkbox' },
             ]},
             { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
         ]},

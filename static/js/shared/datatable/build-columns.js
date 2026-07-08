@@ -14,7 +14,7 @@
 /** Дефолтные ширины (px) по типу колонки. */
 export const DEFAULT_WIDTHS = {
   id: 70, number: 110, date: 110, dictionary: 90, checkbox: 80,
-  text: 160, textarea: 240, 'readonly-text': 160, 'process-picker': 200,
+  text: 160, textarea: 240, 'readonly-text': 160, 'process-picker': 200, 'amount-breakdown': 220,
 };
 
 function alignFor(type) {
