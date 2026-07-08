@@ -572,3 +572,52 @@
         animation: none;
     }
 }
+
+/* --- Ячейки таблицы ЦКФР: «Сумма — итого» (мини-бар по ТБ), чипы ТБ, pivot-колонки --- */
+.frb-cell-total {
+    font-variant-numeric: tabular-nums;
+}
+
+.frb-cell-minibar {
+    display: flex;
+    height: 4px;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: var(--gray-200);
+    margin-top: .3rem;
+    max-width: 190px;
+}
+
+.frb-cell-minibar span {
+    box-shadow: inset -2px 0 0 var(--bg-primary);
+}
+
+.frb-cell-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.frb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.frb-chip-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: var(--radius-full);
+    flex: none;
+}
+
+.frb-cell-zero {
+    color: var(--gray-300);
+}

@@ -12,6 +12,7 @@ import { TableViewState } from '../../shared/datatable/table-view-state.js';
 import { ColumnVisibility } from '../../shared/datatable/column-visibility.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
+import { FRBreakdownEditor } from './fr-breakdown-editor.js';
 
 export class CkFinResPage {
     static _dictionaries = {};
@@ -39,7 +40,9 @@ export class CkFinResPage {
 
     static _initComponents() {
         const cfg = CkFinResConfig;
-        const columns = cfg.columns;
+        // Pivot-колонки (одна на ТБ словаря) добавляются к базовым — переключаются
+        // видимостью вместе с чипами через вид развертки (_applyTbView).
+        const columns = [...cfg.columns, ...cfg.tbPivotColumns(this._dictionaries)];
 
         // Состояние представления (видимость/ширины) с persist в localStorage
         this._viewState = new TableViewState({
@@ -48,17 +51,21 @@ export class CkFinResPage {
             storage: window.localStorage,
         });
 
-        // Адаптивный источник данных (client/server по факту полноты загрузки)
+        // Адаптивный источник данных (client/server по факту полноты загрузки).
+        // Ответ search — ГРУППЫ (пункт × метрика); на плоские строки таблицы
+        // разворачивает _flattenGroup.
         this._dataSource = new DataSource({
             pageSize: 50,
             workingSetCap: cfg.workingSetCap,
-            fetchPage: ({ filters, sort, limit, offset }) =>
-                APIClient.searchCkRecordsPage(cfg.apiPrefix, {
+            fetchPage: async ({ filters, sort, limit, offset }) => {
+                const res = await APIClient.searchCkRecordsPage(cfg.apiPrefix, {
                     filters: filters || {},
                     sort: (sort || []).map(s => ({ by: s.key, dir: s.dir })),
                     limit,
                     offset,
-                }),
+                });
+                return { ...res, items: (res.items || []).map(g => CkFinResPage._flattenGroup(g)) };
+            },
         });
 
         // Таблица
@@ -73,7 +80,7 @@ export class CkFinResPage {
             onRowSelect: (record) => this._onRowSelect(record),
         });
 
-        // Панель видимости колонок (кнопка ⚙ в тулбаре)
+        // Панель видимости колонок (кнопка ⚙ в тулбаре) + секция «Развертка по ТБ»
         const colvisBtn = document.getElementById('ckColvisBtn');
         if (colvisBtn) {
             ColumnVisibility.mount({
@@ -81,8 +88,12 @@ export class CkFinResPage {
                 columns,
                 viewState: this._viewState,
                 onChange: () => this._dataTable.refresh(),
+                preContent: this._buildTbViewSection(columns),
             });
         }
+
+        // Применяем сохранённый вид развертки (чипы/pivot) до первого рендера таблицы.
+        this._applyTbView(this._viewState.getExtra('tbView', 'chips'), columns);
 
         // Форма
         CkForm.init({
@@ -90,6 +101,7 @@ export class CkFinResPage {
             dictionaries: this._dictionaries,
             containerEl: document.getElementById('ckFormPanel'),
             onProcessPick: (field) => this._openProcessPicker(field),
+            onBreakdownEdit: (field) => this._openBreakdownEditor(field),
             sectionStateKey: cfg.sectionStateKey,
         });
 
@@ -117,9 +129,64 @@ export class CkFinResPage {
         }
     }
 
+    /** Группа API → плоская строка таблицы (ключ строки — сериализованный group_key). */
+    static _flattenGroup(g) {
+        const k = g.group_key || {};
+        return {
+            ...g.common,
+            id: `${k.act_sub_number_id}|${k.km_id}|${k.act_item_number}|${k.metric_code}`,
+            group_key: k,
+            row_ids: g.row_ids || [],
+            tb_breakdown: g.tb_breakdown || [],
+            total_amount: g.total_amount,
+            total_counts: g.total_counts,
+            tb_count: g.tb_count,
+            divergent_fields: g.divergent_fields || [],
+            updated_at: g.updated_at,
+        };
+    }
+
+    /** Секция «Развертка по ТБ» для панели видимости колонок. */
+    static _buildTbViewSection(columns) {
+        const box = document.createElement('div');
+        box.className = 'dt-colvis-tbview';
+        box.innerHTML = `
+            <div class="dt-colvis-tbview__title">Развертка по ТБ</div>
+            <label><input type="radio" name="ckFrTbView" value="chips"> Чипы с суммами</label>
+            <label><input type="radio" name="ckFrTbView" value="pivot"> Колонки по ТБ</label>`;
+        const current = this._viewState.getExtra('tbView', 'chips');
+        box.querySelector(`input[value="${current}"]`).checked = true;
+        box.querySelectorAll('input[name=ckFrTbView]').forEach(r => {
+            r.addEventListener('change', () => this._applyTbView(r.value, columns));
+        });
+        return box;
+    }
+
+    /** Переключение вида: chips ↔ pivot (видимость управляется штатным view-state). */
+    static _applyTbView(view, columns) {
+        this._viewState.setExtra('tbView', view);
+        const pivKeys = columns.filter(c => String(c.key).startsWith('piv:')).map(c => c.key);
+        if (view === 'pivot') {
+            this._viewState.setVisible('tb_breakdown', false);
+            // Если все pivot-колонки скрыты (первое включение) — показать все
+            if (pivKeys.every(k => !this._viewState.isVisible(k))) {
+                pivKeys.forEach(k => this._viewState.setVisible(k, true));
+            }
+        } else {
+            pivKeys.forEach(k => this._viewState.setVisible(k, false));
+            this._viewState.setVisible('tb_breakdown', true);
+        }
+        this._dataTable.refresh();
+    }
+
     static _onRowSelect(record) {
         CkForm.fill(record);
         this._updateSubheader(record);
+        // Данные строк ТБ группы разошлись по общим полям (ETL-рассинхрон) —
+        // предупреждаем один раз при выборе записи.
+        if (Array.isArray(record.divergent_fields) && record.divergent_fields.length) {
+            Notifications.warning('Данные строк ТБ расходятся по полям: ' + record.divergent_fields.join(', '));
+        }
     }
 
     static _onAddRecord() {
@@ -145,22 +212,47 @@ export class CkFinResPage {
         }
 
         const data = CkForm.collectData();
+        // Развертка по ТБ уходит отдельным полем breakdown группового запроса —
+        // из common её убираем (common описывает только общегрупповые поля).
+        const breakdown = (data.tb_breakdown || []).map(b => ({
+            neg_finder_tb_id: String(b.neg_finder_tb_id),
+            metric_amount_rubles: String(b.metric_amount_rubles),
+            metric_element_counts: Number(b.metric_element_counts || 0),
+        }));
+        delete data.tb_breakdown;
         const mode = CkForm.getMode();
+        const record = CkForm.getCurrentRecord();
+
+        const body = mode === 'create'
+            ? {
+                group_key: {
+                    act_sub_number_id: null,
+                    km_id: data.km_id || '',
+                    act_item_number: data.act_item_number || '',
+                    metric_code: data.metric_code || '',
+                },
+                expected_row_ids: [],
+                common: data,
+                breakdown,
+            }
+            : {
+                group_key: record.group_key,
+                expected_row_ids: record.row_ids,
+                common: { ...record, ...data },
+                breakdown,
+            };
 
         try {
-            if (mode === 'create') {
-                await APIClient.createCkRecord(CkFinResConfig.apiPrefix, data);
-                Notifications.success('Запись создана');
-            } else if (mode === 'edit') {
-                const record = CkForm.getCurrentRecord();
-                await APIClient.updateCkRecords(CkFinResConfig.apiPrefix, [{ ...record, ...data }]);
-                Notifications.success('Запись обновлена');
-            }
+            await APIClient.groupSaveCkRecords(CkFinResConfig.apiPrefix, body);
+            Notifications.success(mode === 'create' ? 'Запись создана' : 'Запись обновлена');
             await this._loadData();
             CkForm.renderEmpty();
             this._updateSubheader(null);
         } catch (error) {
             Notifications.error('Ошибка сохранения: ' + error.message);
+            // 409: группу параллельно изменили/удалили — подтягиваем актуальное
+            // состояние, чтобы expected_row_ids на следующей попытке не разъехались снова.
+            if (String(error.message).includes('обновите данные')) await this._loadData();
         }
     }
 
@@ -170,19 +262,24 @@ export class CkFinResPage {
 
         const confirmed = await DialogManager.show({
             title: 'Удалить запись?',
-            message: `Запись #${record.id} будет удалена.`,
+            message: `Пункт ${record.act_item_number || '—'} · метрика ${record.metric_code || '—'}: будут удалены строки всех ТБ (${record.tb_count || 0}).`,
             type: 'warning',
         });
         if (!confirmed) return;
 
         try {
-            await APIClient.deleteCkRecord(CkFinResConfig.apiPrefix, record.id);
+            await APIClient.groupDeleteCkRecord(CkFinResConfig.apiPrefix, {
+                group_key: record.group_key,
+                expected_row_ids: record.row_ids,
+            });
             Notifications.success('Запись удалена');
             await this._loadData();
             CkForm.renderEmpty();
             this._updateSubheader(null);
         } catch (error) {
             Notifications.error('Ошибка удаления: ' + error.message);
+            // 409: та же гонка, что и в _onSave — обновляем список.
+            if (String(error.message).includes('обновите данные')) await this._loadData();
         }
     }
 
@@ -193,13 +290,35 @@ export class CkFinResPage {
         });
     }
 
+    static _openBreakdownEditor(field) {
+        const cfg = CkFinResConfig;
+        const current = CkForm.getBreakdownValue(field.key);
+        const lossEl = document.getElementById('ck-field-real_loss');
+        const nsEl = document.getElementById('ck-field-is_sent_to_top_brass');
+        const rec = CkForm.getCurrentRecord();
+        FRBreakdownEditor.show({
+            subtitle: rec
+                ? `Пункт ${rec.act_item_number || '—'} · ${rec.metric_code || ''} «${rec.metric_name || ''}»`
+                : 'Новая запись',
+            terbanks: this._dictionaries.terbanks || [],
+            colorOf: (id) => cfg.tbColor(id),
+            breakdown: current,
+            flags: { loss: !!(lossEl && lossEl.checked), ns: !!(nsEl && nsEl.checked) },
+            onApply: ({ breakdown, flags }) => {
+                CkForm.setBreakdownValue(field.key, breakdown);
+                if (lossEl) lossEl.checked = !!flags.loss;
+                if (nsEl) nsEl.checked = !!flags.ns;
+            },
+        });
+    }
+
     static _updateSubheader(record) {
         const titleEl = document.getElementById('ckRecordTitle');
         const metaEl = document.getElementById('ckRecordMeta');
         if (!titleEl || !metaEl) return;
 
         if (record) {
-            titleEl.textContent = `Запись #${record.id}`;
+            titleEl.textContent = `Пункт ${record.act_item_number || '—'} · ${record.metric_code || ''}`;
             const date = record.updated_at || record.created_at;
             const author = record.updated_by || record.created_by || '';
             metaEl.textContent = date

@@ -10,7 +10,7 @@ export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Финансовый Результат';
-    static storageKey = 'ck:ck-fin-res:view:v2';
+    static storageKey = 'ck:ck-fin-res:view:v3';
     static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
 
@@ -32,9 +32,108 @@ export class CkFinResConfig {
         return t ? t.short_name : String(val);
     }
 
+    /** Пастельная палитра ТБ (фиксирована за tb_id; см. спеку §2 п.10). */
+    static TB_PALETTE = {
+        '1': '#8fade5', '4': '#e5a97c', '5': '#82c9a6', '7': '#e39494',
+        '8': '#a89ade', '9': '#ddc27f', '10': '#7fbeda', '11': '#97ca97',
+        '12': '#dda2c2', '13': '#cf9f6d', '16': '#bf9edd', '14': '#b9c17c',
+    };
+    static TB_FALLBACK_COLOR = '#9aa3b5';
+    static TB_ABBR = {
+        '1': 'ББ', '4': 'ВВБ', '5': 'ДВБ', '7': 'МБ', '8': 'ПБ', '9': 'СЗБ',
+        '10': 'СибБ', '11': 'СРБ', '12': 'УБ', '13': 'ЦЧБ', '16': 'ЮЗБ', '14': 'ЦА',
+    };
+
+    static tbColor(id) { return this.TB_PALETTE[String(id)] || this.TB_FALLBACK_COLOR; }
+
+    static tbAbbr(id, dicts) {
+        const a = this.TB_ABBR[String(id)];
+        if (a) return a;
+        const t = ((dicts && dicts.terbanks) || []).find(t => String(t.tb_id) === String(id));
+        return t ? t.short_name : String(id);
+    }
+
+    static fmtMoney(v) {
+        return Number(v || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /** Ячейка «Сумма — итого»: число + мини-бар композиции по ТБ. */
+    static renderTotalAmount(raw, record) {
+        const wrap = document.createElement('div');
+        const num = document.createElement('div');
+        num.className = 'frb-cell-total';
+        num.textContent = record.tb_count ? `${this.fmtMoney(raw)} ₽` : 'не распределено';
+        wrap.appendChild(num);
+        const list = record.tb_breakdown || [];
+        const total = list.reduce((s, b) => s + Number(b.metric_amount_rubles || 0), 0);
+        if (total > 0) {
+            const bar = document.createElement('div');
+            bar.className = 'frb-cell-minibar';
+            for (const b of list) {
+                const seg = document.createElement('span');
+                seg.style.width = `${(Number(b.metric_amount_rubles || 0) / total) * 100}%`;
+                seg.style.background = this.tbColor(b.neg_finder_tb_id);
+                seg.title = `${this.tbAbbr(b.neg_finder_tb_id)} — ${this.fmtMoney(b.metric_amount_rubles)} ₽`;
+                bar.appendChild(seg);
+            }
+            wrap.appendChild(bar);
+        }
+        return wrap;
+    }
+
+    /** Ячейка «ТБ, выявившие отклонение»: чипы с суммами. */
+    static renderTbChips(raw, record, dicts) {
+        const wrap = document.createElement('div');
+        wrap.className = 'frb-cell-chips';
+        const list = record.tb_breakdown || [];
+        if (!list.length) { wrap.textContent = '—'; return wrap; }
+        for (const b of list) {
+            const chip = document.createElement('span');
+            chip.className = 'frb-chip';
+            chip.title = `${this.tbAbbr(b.neg_finder_tb_id, dicts)} — ${this.fmtMoney(b.metric_amount_rubles)} ₽`;
+            const dot = document.createElement('span');
+            dot.className = 'frb-chip-dot';
+            dot.style.background = this.tbColor(b.neg_finder_tb_id);
+            chip.appendChild(dot);
+            chip.appendChild(document.createTextNode(
+                `${this.tbAbbr(b.neg_finder_tb_id, dicts)} · ${this.fmtMoney(b.metric_amount_rubles)}`,
+            ));
+            wrap.appendChild(chip);
+        }
+        return wrap;
+    }
+
+    /** Pivot-колонки: по одной числовой колонке на каждый ТБ словаря. */
+    static tbPivotColumns(dicts) {
+        return ((dicts && dicts.terbanks) || []).map(t => {
+            const id = String(t.tb_id);
+            return {
+                key: `piv:${id}`, label: this.tbAbbr(id, dicts), type: 'number',
+                align: 'right', width: 120, hidden: true, noFilter: true,
+                description: t.full_name || t.short_name,
+                render: (raw, record) => {
+                    const span = document.createElement('span');
+                    const b = (record.tb_breakdown || []).find(x => String(x.neg_finder_tb_id) === id);
+                    span.textContent = b ? this.fmtMoney(b.metric_amount_rubles) : '—';
+                    if (!b) span.className = 'frb-cell-zero';
+                    return span;
+                },
+            };
+        });
+    }
+
     /**
      * Колонки таблицы выводятся из `fields` (один источник правды) + read-only
      * display-колонки. Заголовки/форматтеры/выравнивание уточняются overrides.
+     *
+     * Групповая модель (Task 10): строка таблицы — логическая группа (пункт ×
+     * метрика), а не физическая строка ТБ. `total_amount`/`tb_count`/
+     * `total_counts` — чистые read-only display-колонки (extra, поля в форме
+     * нет). `tb_breakdown` — ЕСТЬ как поле формы (тип `amount-breakdown`,
+     * секция «Метрика»), поэтому его табличное представление (чипы ТБ,
+     * noFilter, своя ширина) задаётся через `overrides`, а не `extra` —
+     * иначе `buildColumns` собрал бы ДВЕ колонки с одним и тем же ключом
+     * (одну — из `extra`, другую — автовыведенную из `fields`).
      */
     static get columns() {
         return buildColumns(this.fields, {
@@ -45,18 +144,31 @@ export class CkFinResConfig {
                 { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
+                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
+                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true },
+                { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true },
             ],
             overrides: {
                 metric_code: { label: 'Код метрики', type: 'text' },
-                neg_finder_tb_id: {
-                    label: 'ТБ',
+                tb_leader: {
+                    label: 'ТБ-рук. проверки',
                     format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts),
                     // Словарный резолвер для F1-фильтра: имя ТБ → массив сырых tb_id.
                     filterResolve: (q, dicts) => (dicts.terbanks || [])
                         .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
                         .map(t => String(t.tb_id)),
                 },
-                metric_amount_rubles: { align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
+                // Автовыведенная из fields (type: 'amount-breakdown') колонка
+                // переопределяется целиком под чипы ТБ — см. комментарий выше.
+                tb_breakdown: {
+                    label: 'ТБ, выявившие отклонение',
+                    type: 'text',
+                    width: 320,
+                    noFilter: true,
+                    render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
+                },
+                real_loss: { label: 'Реальные потери' },
+                is_sent_to_top_brass: { label: 'На НС', description: 'На наблюдательный совет' },
                 dt_sz: { format: (v) => CkFinResConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
                 rev_start_dt: { format: (v) => CkFinResConfig.formatDate(v) },
                 rev_end_dt: { format: (v) => CkFinResConfig.formatDate(v) },
@@ -64,13 +176,14 @@ export class CkFinResConfig {
             },
             // Порядок колонок повторяет порядок секций формы (без группировки в
             // самой таблице): идентификация → процесс → отклонение → метрика
-            // (код метрики вплотную к названию) → поручения → системное.
+            // (код метрики вплотную к названию, сумма-итог/развертка/счётчики
+            // ТБ рядом) → поручения → системное.
             order: [
                 'id',
-                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'neg_finder_tb_id',
+                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
-                'metric_code', 'metric_name', 'metric_element_counts', 'metric_amount_rubles', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
+                'metric_code', 'metric_name', 'total_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
                 'reestr_metric_id', 'created_at', 'updated_at',
             ],
