@@ -1572,6 +1572,38 @@ export class APIClient {
     }
 
     /**
+     * Групповое сохранение записи ЦК (общие поля + развертка по ТБ).
+     * @param {string} prefix - 'ck-fin-res'
+     * @param {Object} body - {group_key, expected_row_ids, common, breakdown}
+     * @returns {Promise<{deactivated: number, inserted: number, skipped: number}>}
+     */
+    static async groupSaveCkRecords(prefix, body) {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/group-save`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Групповое удаление записи ЦК (все строки группы).
+     * @param {string} prefix - 'ck-fin-res'
+     * @param {Object} body - {group_key, expected_row_ids}
+     * @returns {Promise<{deleted: number}>}
+     */
+    static async groupDeleteCkRecord(prefix, body) {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/group-delete`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
      * Получить запись по ID.
      * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
      * @param {number} id

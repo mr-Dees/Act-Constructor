@@ -104,6 +104,18 @@
     transform: translateY(0);
 }
 
+/* Подпись noFilter-колонки (шапка без фильтр-контрола): занимает место поля и
+   ужимается с ellipsis — иначе длинная подпись вытолкнула бы кнопку сортировки
+   за обрезанный край ячейки. Шрифт/цвет наследуются от .dt-head-row th. */
+.dt-th-label {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 0; /* та же вертикальная метрика, что у .dt-th-filter — ровная шапка */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .dt-th-filter {
     flex: 1;
     min-width: 0;

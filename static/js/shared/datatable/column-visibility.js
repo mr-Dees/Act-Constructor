@@ -1,9 +1,11 @@
-/** Панель ⚙: чекбоксы видимости колонок + Выбрать/Снять все + Сброс. */
+/** Панель ⚙: опциональная доменная секция (preContent) над сеткой + чекбоксы
+ * видимости колонок + Выбрать/Снять все + Сброс. */
 export class ColumnVisibility {
-  static mount({ anchorEl, columns, viewState, onChange }) {
+  static mount({ anchorEl, columns, viewState, onChange, preContent }) {
     const panel = document.createElement('div');
     panel.className = 'dt-colvis-panel';
     panel.hidden = true;
+    if (preContent) panel.appendChild(preContent); // доменная секция над чекбоксами (например, вид развертки ТБ)
 
     const grid = document.createElement('div');
     grid.className = 'dt-colvis-grid';

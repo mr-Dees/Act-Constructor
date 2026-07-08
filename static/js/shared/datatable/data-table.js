@@ -110,6 +110,7 @@ export class DataTable {
    * колонки) + каретка 3-позиционной сортировки + крестик очистки. Имя колонки
    * видно как placeholder/мини-метка; активный фильтр подсвечивает `.dt-th--filtered`.
    * Активная сортировка помечается `aria-sort` только на ВЕДУЩЕЙ колонке набора.
+   * Колонка с `noFilter: true` — только подпись и сортировка, без фильтр-контрола.
    */
   _buildHeaderCell(col) {
     const th = document.createElement('th');
@@ -118,6 +119,46 @@ export class DataTable {
 
     const cell = document.createElement('div');
     cell.className = 'dt-th-cell';
+
+    // Сортировка строится ДО ветки noFilter — она нужна и обычным, и
+    // noFilter-колонкам (блок зависит только от col и this._sort).
+    const sortBtn = document.createElement('button');
+    sortBtn.type = 'button';
+    sortBtn.className = 'dt-th-sort';
+    sortBtn.title = 'Клик добавляет колонку к сортировке (клики накапливаются)';
+    sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
+    sortBtn.addEventListener('click', () => this.setSort(col.key));
+
+    const si = this._sort.findIndex(s => s.key === col.key);
+    const dir = si >= 0 ? this._sort[si].dir : null;
+    if (dir) {
+      th.classList.add('dt-th--sorted');
+      sortBtn.classList.add('active');
+      if (si === 0) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+    }
+    sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+
+    let priorityEl = null;
+    if (si >= 0 && this._sort.length >= 2) {
+      priorityEl = document.createElement('span');
+      priorityEl.className = 'dt-th-priority';
+      priorityEl.textContent = String(si + 1);
+      priorityEl.setAttribute('aria-hidden', 'true');
+    }
+
+    // Колонки без серверного смысла фильтра (например, pivot-колонки ТБ)
+    // получают шапку без фильтр-контрола — только подпись и сортировку.
+    if (col.noFilter) {
+      const span = document.createElement('span');
+      span.className = 'dt-th-label';
+      span.textContent = col.label;
+      span.title = col.description || col.label;
+      cell.appendChild(span);
+      cell.appendChild(sortBtn);
+      if (priorityEl) cell.appendChild(priorityEl);
+      th.appendChild(cell);
+      return th;
+    }
 
     const field = document.createElement('div');
     field.className = 'dt-th-field';
@@ -156,30 +197,6 @@ export class DataTable {
       this._setFilterSpec(col.key, null);
       syncFilter();
     });
-
-    const sortBtn = document.createElement('button');
-    sortBtn.type = 'button';
-    sortBtn.className = 'dt-th-sort';
-    sortBtn.title = 'Клик добавляет колонку к сортировке (клики накапливаются)';
-    sortBtn.setAttribute('aria-label', `Сортировать по колонке: ${col.label}`);
-    sortBtn.addEventListener('click', () => this.setSort(col.key));
-
-    const si = this._sort.findIndex(s => s.key === col.key);
-    const dir = si >= 0 ? this._sort[si].dir : null;
-    if (dir) {
-      th.classList.add('dt-th--sorted');
-      sortBtn.classList.add('active');
-      if (si === 0) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
-    }
-    sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
-
-    let priorityEl = null;
-    if (si >= 0 && this._sort.length >= 2) {
-      priorityEl = document.createElement('span');
-      priorityEl.className = 'dt-th-priority';
-      priorityEl.textContent = String(si + 1);
-      priorityEl.setAttribute('aria-hidden', 'true');
-    }
 
     field.appendChild(floatLabel);
     field.appendChild(control);
@@ -543,9 +560,16 @@ export class DataTable {
       for (const col of cols) {
         const td = document.createElement('td');
         const raw = record[col.key];
-        const text = col.format ? col.format(raw, this._dicts) : (raw == null ? '' : String(raw));
-        td.textContent = text;
-        td.title = text;
+        let text = '';
+        if (col.render) {
+          // Кастомный DOM-рендер ячейки (сумма с мини-баром, чипы ТБ и т.п.)
+          const node = col.render(raw, record, this._dicts);
+          if (node) td.appendChild(node);
+        } else {
+          text = col.format ? col.format(raw, this._dicts) : (raw == null ? '' : String(raw));
+          td.textContent = text;
+          td.title = text;
+        }
         td.style.width = `${this._view.getWidth(col.key)}px`;
         if (col.align === 'right') td.classList.add('align-right');
         if (col.align === 'center') td.classList.add('align-center');

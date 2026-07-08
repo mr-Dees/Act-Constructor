@@ -1,7 +1,7 @@
 /**
- * Состояние представления таблицы (видимость колонок + ширины) с persist в
- * localStorage. Доменно-агностично: ключ хранилища и набор колонок передаются
- * снаружи. Невалидное состояние молча откатывается к дефолту.
+ * Состояние представления таблицы (видимость колонок + ширины + произвольные
+ * extra-флаги) с persist в localStorage. Доменно-агностично: ключ хранилища и
+ * набор колонок передаются снаружи. Невалидное состояние молча откатывается к дефолту.
  */
 export class TableViewState {
   /**
@@ -47,6 +47,7 @@ export class TableViewState {
         this._hidden = hidden;
       }
       if (data.widths && typeof data.widths === 'object') this._widths = { ...data.widths };
+      if (data.extra && typeof data.extra === 'object') this._extra = { ...data.extra };
     } catch {
       /* битое состояние — остаёмся на дефолте */
     }
@@ -58,7 +59,7 @@ export class TableViewState {
     try {
       this._storage.setItem(
         this._key,
-        JSON.stringify({ v: 2, hidden, known: [...this._order], widths: this._widths }),
+        JSON.stringify({ v: 2, hidden, known: [...this._order], widths: this._widths, extra: this._extra || {} }),
       );
     } catch {
       /* переполнение квоты — игнорируем */
@@ -91,6 +92,16 @@ export class TableViewState {
 
   getWidth(key) { return this._widths[key] != null ? this._widths[key] : this._defaultWidth[key]; }
   setWidth(key, px) { this._widths[key] = Math.round(px); this._save(); }
+
+  /** Произвольные доменные флаги представления (например, вид развертки ТБ). */
+  getExtra(key, def) {
+    return this._extra && key in this._extra ? this._extra[key] : def;
+  }
+
+  setExtra(key, value) {
+    this._extra = { ...(this._extra || {}), [key]: value };
+    this._save();
+  }
 
   resetToDefault() { this._hidden = new Set(this._defaultHidden); this._widths = {}; this._save(); }
 }
