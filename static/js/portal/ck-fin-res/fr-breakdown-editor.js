@@ -144,7 +144,7 @@ export class FRBreakdownEditor extends DialogBase {
         `;
     }
 
-    /** Строит строки ТБ в #frbRows: точка-цвет + имя + range + сумма + «шт.» + %. Без шеврона/деталей. */
+    /** Строит строки ТБ в #frbRows: точка-цвет + имя + range + сумма + «шт.» + % + «+ остаток». Без шеврона/деталей. */
     static _buildRows(dialog, st, terbanks, opts) {
         const wrap = dialog.querySelector('#frbRows');
         wrap.innerHTML = '';
@@ -158,11 +158,13 @@ export class FRBreakdownEditor extends DialogBase {
                 <input type="range" min="0" value="0" aria-label="${this._esc(tb.short_name)}: доля суммы">
                 <input class="frb-amount" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="${this._esc(tb.short_name)}: сумма, рубли">
                 <input class="frb-count" inputmode="numeric" autocomplete="off" placeholder="шт." title="Количество элементов (операций)" aria-label="${this._esc(tb.short_name)}: количество элементов">
-                <span class="frb-pct">—</span>`;
+                <span class="frb-pct">—</span>
+                <button type="button" class="frb-give" title="Отдать весь остаток этому ТБ">+ остаток</button>`;
 
             const range = row.querySelector('input[type="range"]');
             const amount = row.querySelector('.frb-amount');
             const count = row.querySelector('.frb-count');
+            const give = row.querySelector('.frb-give');
 
             range.addEventListener('input', () => {
                 const raw = Math.round(Number(range.value)) * 100;
@@ -191,6 +193,14 @@ export class FRBreakdownEditor extends DialogBase {
                 const v = parseInt(String(count.value).replace(/\D/g, ''), 10);
                 st.rows[id].n = isFinite(v) && v > 0 ? v : 0;
                 this._syncAll(dialog, st, terbanks, opts);
+            });
+            // «+ остаток»: отдать весь нераспределённый остаток этому ТБ
+            give.addEventListener('click', () => {
+                const rest = st.target - sumKop(st.rows);
+                if (rest > 0) {
+                    st.rows[id].a += rest;
+                    this._syncAll(dialog, st, terbanks, opts);
+                }
             });
             // Попытка тронуть заблокированный контрол пустого ТБ при исчерпанном лимите → красная индикация
             row.addEventListener('pointerdown', () => {
@@ -428,6 +438,8 @@ export class FRBreakdownEditor extends DialogBase {
             range.disabled = fullSpent && !r.a;   // лимит исчерпан → пустые ТБ заблокированы
             amount.disabled = fullSpent && !r.a;
             count.disabled = !r.a;                // количество — только при сумме (хотя бы 1 копейка)
+            // «+ остаток» доступна только в режиме цели при ненулевом остатке (disabled → visibility:hidden)
+            row.querySelector('.frb-give').disabled = !(st.mode === 'total' && st.target > 0 && rest > 0);
             count.title = !r.a ? 'Сначала укажите сумму — хотя бы 1 копейку' : 'Количество элементов (операций)';
             range.max = Math.max(Math.round(total / 100), 1);
             range.step = stepR;
