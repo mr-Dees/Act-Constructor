@@ -492,10 +492,11 @@ export class FRBreakdownEditor extends DialogBase {
         return fmtKop(kop) + ' ₽';
     }
 
+    /** Экранирует HTML-спецсимволы и кавычки (текстовый и атрибутный контекст). */
     static _esc(text) {
         const div = document.createElement('div');
         div.textContent = text || '';
-        return div.innerHTML;
+        return div.innerHTML.replace(/"/g, '&quot;');
     }
 }
 
