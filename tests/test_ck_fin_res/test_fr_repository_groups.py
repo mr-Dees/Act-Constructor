@@ -128,3 +128,53 @@ async def test_sort_rejects_unknown_column(mock_conn):
     repo = FRValidationRepository(mock_conn)
     with pytest.raises(ValueError):
         await repo.search_groups(filters=None, sort=[("evil; DROP", "asc")], limit=10, offset=0)
+
+
+@pytest.mark.asyncio
+async def test_tb_breakdown_membership_filter_goes_to_having(mock_conn):
+    """Алиас tb_breakdown → HAVING membership по neg_finder_tb_id, не в WHERE
+    (иначе строки группы резались бы ДО GROUP BY и портили итоги)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(
+        filters={"tb_breakdown": FilterSpec(op="in", values=["7", "8"])},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "HAVING" in sql_a
+    assert "SUM(CASE WHEN neg_finder_tb_id IN" in sql_a
+    before_group_by = sql_a.split("GROUP BY")[0]
+    assert "neg_finder_tb_id" not in before_group_by
+
+
+@pytest.mark.asyncio
+async def test_tb_breakdown_membership_filter_contains(mock_conn):
+    """op=contains по прямому ключу neg_finder_tb_id — тоже membership (тот же алиас-таргет)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(
+        filters={"neg_finder_tb_id": FilterSpec(op="contains", value="7")},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "SUM(CASE WHEN CAST(neg_finder_tb_id AS TEXT) ILIKE" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_tb_breakdown_membership_filter_empty_values(mock_conn):
+    """Пустой values → 1=0 в HAVING (валидно) — «совпадений нет», как и в row-WHERE."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(
+        filters={"tb_breakdown": FilterSpec(op="in", values=[])},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "HAVING" in sql_a
+    assert "1=0" in sql_a

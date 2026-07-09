@@ -62,7 +62,7 @@ async def group_save(
     try:
         result = await service.group_save(body, username)
     except FRGroupConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     logger.info("Групповое сохранение ЦКФР пользователем %s: %s", username, result)
     return result
 
@@ -77,6 +77,6 @@ async def group_delete(
     try:
         deleted = await service.group_delete(body, username)
     except FRGroupConflictError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     logger.info("Групповое удаление ЦКФР пользователем %s: %s строк", username, deleted)
     return {"deleted": deleted}

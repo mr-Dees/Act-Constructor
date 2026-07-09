@@ -140,6 +140,14 @@ AGG_FILTER_EXPR = {
     "total_counts": "SUM(metric_element_counts)",
 }
 
+# Membership-фильтры: «группа попадает в выдачу, если содержит такую строку»
+# (ключ — алиас с фронта, значение — реальная колонка). В отличие от
+# row-фильтра, membership НЕ режет физические строки группы ДО GROUP BY —
+# иначе SUM/COUNT итога считались бы по усечённому набору строк, искажая
+# tb_count/total_amount. tb_breakdown — алиас с фронта (колонки с таким именем
+# в VIEW нет, это computed-поле сборки группы), neg_finder_tb_id — прямой ключ.
+MEMBERSHIP_FILTER_COLS = {"neg_finder_tb_id": "neg_finder_tb_id", "tb_breakdown": "neg_finder_tb_id"}
+
 # Сортировка по виртуальным агрегатным колонкам.
 AGG_SORT_EXPR = {
     "total_amount": "SUM(metric_amount_rubles)",
@@ -256,23 +264,78 @@ class FRValidationRepository(BaseRepository):
     @staticmethod
     def _split_filters(
         filters: dict[str, FilterSpec] | None,
-    ) -> tuple[dict[str, FilterSpec], dict[str, FilterSpec]]:
-        """Делит фильтры на строчные (WHERE) и агрегатные (HAVING по SUM)."""
+    ) -> tuple[dict[str, FilterSpec], dict[str, FilterSpec], dict[str, FilterSpec]]:
+        """Делит фильтры на строчные (WHERE), агрегатные (HAVING по SUM) и
+        membership (HAVING «группа содержит значение»).
+
+        Порядок проверки важен: membership — ДО row/agg. Иначе neg_finder_tb_id
+        (и его алиас tb_breakdown с фронта) попал бы в row-WHERE и резал бы
+        физические строки группы ДО GROUP BY — итоги группы (SUM/COUNT)
+        считались бы по усечённому набору строк вместо всей группы.
+        """
         row_filters: dict[str, FilterSpec] = {}
         agg_filters: dict[str, FilterSpec] = {}
+        membership_filters: dict[str, FilterSpec] = {}
         for column, spec in (filters or {}).items():
-            if column in AGG_FILTER_EXPR:
+            if column in MEMBERSHIP_FILTER_COLS:
+                membership_filters[column] = spec
+            elif column in AGG_FILTER_EXPR:
                 agg_filters[column] = spec
             else:
                 row_filters[column] = spec
-        return row_filters, agg_filters
+        return row_filters, agg_filters, membership_filters
 
     @staticmethod
+    def _build_membership_having(
+        membership_filters: dict[str, FilterSpec], start_idx: int,
+    ) -> tuple[list[str], list, int]:
+        """Условия HAVING «группа содержит такой ТБ»: SUM(CASE WHEN ... THEN 1
+        ELSE 0 END) > 0 — группа проходит, если ХОТЯ БЫ ОДНА её строка
+        удовлетворяет условию; итоги группы при этом считаются по ВСЕМ
+        строкам (в отличие от row-level WHERE, которое отфильтровало бы
+        строки до GROUP BY и исказило SUM/COUNT)."""
+        conditions: list[str] = []
+        params: list = []
+        idx = start_idx
+        for column, spec in membership_filters.items():
+            col = MEMBERSHIP_FILTER_COLS[column]
+            op = spec.op
+            if op == "in":
+                values = spec.values or []
+                if not values:
+                    conditions.append("1=0")
+                    continue
+                placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
+                conditions.append(f"SUM(CASE WHEN {col} IN ({placeholders}) THEN 1 ELSE 0 END) > 0")
+                params.extend(values)
+                idx += len(values)
+            elif op == "eq":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) = ${idx} THEN 1 ELSE 0 END) > 0")
+                params.append(value)
+                idx += 1
+            elif op == "contains":
+                value = spec.value
+                if value is None or str(value).strip() == "":
+                    continue
+                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) ILIKE ${idx} THEN 1 ELSE 0 END) > 0")
+                params.append(f"%{value}%")
+                idx += 1
+        return conditions, params, idx
+
+    @classmethod
     def _build_having(
-        agg_filters: dict[str, FilterSpec], start_idx: int,
+        cls,
+        agg_filters: dict[str, FilterSpec],
+        membership_filters: dict[str, FilterSpec],
+        start_idx: int,
     ) -> tuple[str, list, int]:
-        """HAVING по агрегатам группы. Семантика op — как в _build_filter_where,
-        но выражение — SUM(...) вместо колонки (фильтр по итогу группы)."""
+        """HAVING по агрегатам группы (SUM-фильтры) и по членству (группа
+        содержит значение, например ТБ) — обе категории делят одну сквозную
+        нумерацию параметров. Семантика op агрегатной части — как в
+        _build_filter_where, но выражение — SUM(...) вместо колонки."""
         conditions: list[str] = []
         params: list = []
         idx = start_idx
@@ -303,6 +366,9 @@ class FRValidationRepository(BaseRepository):
                     conditions.append(f"{expr} <= CAST(${idx} AS NUMERIC)")
                     params.append(to)
                     idx += 1
+        member_conditions, member_params, idx = cls._build_membership_having(membership_filters, idx)
+        conditions.extend(member_conditions)
+        params.extend(member_params)
         having = f" HAVING {' AND '.join(conditions)}" if conditions else ""
         return having, params, idx
 
@@ -318,15 +384,17 @@ class FRValidationRepository(BaseRepository):
 
         Двухфазно (PG 9.4 / GP 6.x, без json_agg):
         A) страница групп: GROUP BY ключ + SUM/COUNT, HAVING для фильтров по
-           итогам, ORDER BY по агрегатам/MIN(col); total — COUNT по подзапросу;
+           итогам и по членству (например, «содержит такой ТБ» — не режет
+           строки группы, см. _split_filters), ORDER BY по агрегатам/MIN(col);
+           total — COUNT по подзапросу;
         B) добор физических строк групп страницы одним row-value IN; сборка
            групп в Python: common — из строки с max(updated_at, id),
            tb_breakdown — по возрастанию ТБ, divergent_fields — групповые поля,
            разъехавшиеся между строками (ETL-рассинхрон).
         """
-        row_filters, agg_filters = self._split_filters(filters)
+        row_filters, agg_filters, membership_filters = self._split_filters(filters)
         where, params, idx = self._build_filter_where(row_filters)
-        having, having_params, idx = self._build_having(agg_filters, idx)
+        having, having_params, idx = self._build_having(agg_filters, membership_filters, idx)
         params = params + having_params
 
         key_select = ", ".join(
@@ -515,6 +583,14 @@ class FRValidationRepository(BaseRepository):
         async with self.conn.transaction():
             current_rows = await self._load_group_rows(group_key)
             current_ids = {r["id"] for r in current_rows}
+            # Создание (expected_row_ids пуст), но группа с таким ключом уже
+            # есть — это не гонка с параллельным изменением, а попытка
+            # создать дубль пункта+метрики. Отдельное сообщение ДО общей
+            # проверки набора id ниже (та — про "изменили параллельно").
+            if not expected_row_ids and current_ids:
+                raise FRGroupConflictError(
+                    "Запись с таким пунктом и метрикой уже существует — откройте её для редактирования",
+                )
             if current_ids != set(expected_row_ids):
                 raise FRGroupConflictError(
                     "Запись изменена другим пользователем — обновите данные",

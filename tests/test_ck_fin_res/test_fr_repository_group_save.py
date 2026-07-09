@@ -85,6 +85,23 @@ async def test_conflict_when_expected_ids_mismatch(mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_create_conflict_when_group_already_exists(mock_conn):
+    """Создание (expected_row_ids=[]), но группа с таким ключом уже есть —
+    отдельное дружелюбное сообщение, не общее «изменена другим пользователем»."""
+    _tx(mock_conn)
+    repo = FRValidationRepository(mock_conn)
+    row = _db_row(101, "7", "980000.00", 8)
+    mock_conn.fetch.return_value = [row]
+    with pytest.raises(FRGroupConflictError, match="уже существует"):
+        await repo.group_save(
+            group_key=KEY, expected_row_ids=[],
+            common=_common_from(row),
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": Decimal("980000.00"), "metric_element_counts": 8}],
+            username="12345",
+        )
+
+
+@pytest.mark.asyncio
 async def test_unchanged_rows_are_skipped(mock_conn):
     _tx(mock_conn)
     repo = FRValidationRepository(mock_conn)

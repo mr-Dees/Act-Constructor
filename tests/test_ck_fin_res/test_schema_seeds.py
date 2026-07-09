@@ -3,8 +3,6 @@
 import re
 from pathlib import Path
 
-import pytest
-
 SCHEMA = Path("app/domains/ck_fin_res/migrations/postgresql/schema.sql").read_text(encoding="utf-8")
 
 
