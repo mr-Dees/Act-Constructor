@@ -466,36 +466,47 @@ def split_block_segments(html: str) -> list[BlockSegment]:
 
 
 class _TopLevelSplitter(HTMLParser):
-    """Собирает сегменты, реконструируя сырой HTML из событий парсера.
+    """Собирает сегменты-абзацы, реконструируя сырой HTML из событий парсера.
 
     convert_charrefs=False + get_starttag_text: entity-ссылки и атрибуты
     вложенной разметки доезжают до apply_inline_html дословно, без
     повторного экранирования.
+
+    Граница сегмента-абзаца — блочный <div>/<p>, который несёт СВОЁ
+    выравнивание, а не только верхнеуровневый (TB-1/S1). Вложенный блок со своим
+    text-align уходит в отдельный w:p с этим выравниванием — в браузере он и так
+    на своей строке со своим align (text-align наследуется, own-align
+    перекрывает). Вложенный блок БЕЗ align остаётся сырым внутри сегмента
+    (мягкий перенос w:br, наследует align родителя) — прежнее поведение. Так
+    превью (каскад CSS) и DOCX не расходятся по выравниванию.
     """
 
     def __init__(self):
         super().__init__(convert_charrefs=False)
         self._segments: list[BlockSegment] = []
         self._buf: list[str] = []
-        # Глубина открытых элементов внутри текущего сегмента; 0 = верхний
-        # уровень content. _in_block — копим внутренности top-level div/p.
-        self._depth = 0
-        self._in_block = False
-        self._block_align: str | None = None
+        # Стек открытых блоков-КОНТЕЙНЕРОВ (границ сегмента): элемент —
+        # [align, emitted_child]. Пусто = верхний уровень (анонимный сегмент).
+        self._ctx_stack: list[list] = []
+        # Глубина открытых НЕ-контейнерных элементов (span/b/… и вложенных div/p
+        # без align) внутри текущего буфера. Пока >0 — мы внутри сырой разметки
+        # сегмента, новые div/p там тоже сырые (буфер держим сбалансированным).
+        self._inner_depth = 0
 
     def handle_starttag(self, tag, attrs):
         raw = self.get_starttag_text() or ""
         if tag in _VOID_TAGS:
             self._buf.append(raw)
             return
-        if self._depth == 0 and tag in ("div", "p"):
-            self._flush_anonymous()
-            self._in_block = True
-            self._block_align = _extract_text_align(dict(attrs))
-            self._depth = 1
-            return
+        if tag in ("div", "p") and self._inner_depth == 0:
+            align = _extract_text_align(dict(attrs))
+            # Контейнер: верхнеуровневый блок ЛИБО вложенный со своим align.
+            if not self._ctx_stack or align is not None:
+                self._open_container(align)
+                return
+        # Прочее (span/b/i/a/li/hN и вложенные div/p без align) — сырьё сегмента.
         self._buf.append(raw)
-        self._depth += 1
+        self._inner_depth += 1
 
     def handle_startendtag(self, tag, attrs):
         # Self-closing (<br/>) — элемент не открывается, глубина не растёт.
@@ -504,13 +515,13 @@ class _TopLevelSplitter(HTMLParser):
     def handle_endtag(self, tag):
         if tag in _VOID_TAGS:
             return
-        if self._depth == 0:
-            return  # непарный закрывающий тег на верхнем уровне
-        self._depth -= 1
-        if self._depth == 0 and self._in_block:
-            self._emit_block()
+        if self._inner_depth > 0:
+            self._inner_depth -= 1
+            self._buf.append(f"</{tag}>")
             return
-        self._buf.append(f"</{tag}>")
+        if self._ctx_stack:
+            self._close_container()
+        # else: непарный закрывающий тег на верхнем уровне — игнор.
 
     def handle_data(self, data):
         if data:
@@ -523,12 +534,42 @@ class _TopLevelSplitter(HTMLParser):
         self._buf.append(f"&#{name};")
 
     def finish(self) -> list[BlockSegment]:
-        """Хвост после конца ввода: незакрытый блок или анонимный остаток."""
-        if self._in_block:
-            self._emit_block()
-        else:
-            self._flush_anonymous()
+        """Хвост после конца ввода: закрываем недозакрытые контейнеры и остаток."""
+        while self._ctx_stack:
+            self._close_container()
+        self._flush_anonymous()
         return self._segments
+
+    def _open_container(self, align: str | None) -> None:
+        # Перед новым контейнером — сбросить накопленный кусок текущего сегмента.
+        if self._ctx_stack:
+            self._flush_partial()          # частичный кусок родителя (его align)
+            self._ctx_stack[-1][1] = True  # у родителя появился дочерний сегмент
+        else:
+            self._flush_anonymous()        # верхнеуровневый анонимный кусок
+        self._ctx_stack.append([align, False])
+
+    def _close_container(self) -> None:
+        inner = _normalize_segment_html("".join(self._buf))
+        self._buf.clear()
+        align, emitted_child = self._ctx_stack.pop()
+        if inner:
+            self._segments.append(BlockSegment(align, inner))
+        elif not emitted_child:
+            # Пустой блок-лист = пустая строка-абзац (как <div><br></div>).
+            self._segments.append(BlockSegment(align, ""))
+        # else: пустой хвост после дочерних сегментов — не плодим пустой абзац.
+
+    def _flush_partial(self) -> None:
+        """Кусок текущего контейнера ДО вложенного блока — свой сегмент с align
+        контейнера; чисто пробельный кусок пропускаем (браузер его схлопывает)."""
+        text = "".join(self._buf)
+        self._buf.clear()
+        if not text.strip(" \t\r\n"):
+            return
+        self._segments.append(
+            BlockSegment(self._ctx_stack[-1][0], _normalize_segment_html(text))
+        )
 
     def _flush_anonymous(self) -> None:
         text = "".join(self._buf)
@@ -538,15 +579,6 @@ class _TopLevelSplitter(HTMLParser):
         if not text.strip(" \t\r\n"):
             return
         self._segments.append(BlockSegment(None, _normalize_segment_html(text)))
-
-    def _emit_block(self) -> None:
-        inner = "".join(self._buf)
-        self._buf.clear()
-        self._in_block = False
-        self._segments.append(
-            BlockSegment(self._block_align, _normalize_segment_html(inner))
-        )
-        self._block_align = None
 
 
 def _normalize_segment_html(inner: str) -> str:

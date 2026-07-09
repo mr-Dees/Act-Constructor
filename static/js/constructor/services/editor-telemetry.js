@@ -95,11 +95,36 @@ export const EditorTelemetry = {
                 body: JSON.stringify({ events }),
                 credentials: 'same-origin',
                 ...(keepalive ? { keepalive: true } : {}),
-            }).catch(() => { /* сеть/прокси — телеметрия не критична */ });
+            }).catch(() => {
+                // #10: сеть/прокси упали ДО ответа сервера — счётчики не теряем,
+                // возвращаем в очередь (дошлёт следующий флаш). На keepalive-флаше
+                // (вкладка закрывается) возвращать некуда — глотаем.
+                if (!keepalive) this._requeue(events);
+            });
         } catch (_) {
-            // fetch может бросить синхронно (например, keepalive-лимит тела) —
-            // проглатываем: телеметрия не должна ронять редактор.
+            // fetch бросил синхронно (например, keepalive-лимит тела) — вернём в
+            // очередь (кроме keepalive). Телеметрия не должна ронять редактор.
+            if (!keepalive) this._requeue(events);
         }
+    },
+
+    /**
+     * @private #10: возвращает неотправленный батч в очередь при транзиентном
+     * сбое — слияние по ключу `${actId}|${eventType}`, как в track. Размер
+     * очереди естественно ограничен числом пар (акт × тип события), поэтому
+     * повторные сбои не растят её безгранично (растёт только счётчик).
+     * @param {Array<{event_type:string, act_id:number, count:number}>} events
+     */
+    _requeue(events) {
+        if (!this._enabled) return; // kill-switch выключился между флашем и сбоем
+        for (const e of events) {
+            const key = e.act_id + '|' + e.event_type;
+            const entry = this._pending.get(key);
+            if (entry) entry.count += e.count;
+            else this._pending.set(key, { event_type: e.event_type, act_id: e.act_id, count: e.count });
+            this._totalPending += e.count;
+        }
+        this._ensureTimer();
     },
 
     /**

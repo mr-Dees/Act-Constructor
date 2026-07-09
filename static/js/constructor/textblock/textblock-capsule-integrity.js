@@ -59,6 +59,16 @@ Object.assign(TextBlockManager.prototype, {
         const guardChar = this.CAP_GUARD_CHAR;
         // id → первая встреченная капсула с этим id (в document order)
         const seen = new Map();
+        // #11: множество ВСЕХ id капсул документа, включая ещё не обойдённые.
+        // Дериватив дубля ('<id>_d<n>') не должен совпасть с литеральным id,
+        // стоящим ПОЗЖЕ по порядку: иначе тот при обходе счёлся бы дублем и был
+        // переименован зря (+ ложный dup_id_fix). Собираем один раз до цикла.
+        const allIds = new Set();
+        root.querySelectorAll('.text-link, .text-footnote').forEach(span => {
+            const idAttr = span.classList.contains('text-link') ? 'data-link-id' : 'data-footnote-id';
+            const id = span.getAttribute(idAttr);
+            if (id) allIds.add(id);
+        });
         let changed = false;
         root.querySelectorAll('.text-link, .text-footnote').forEach(span => {
             const isLink = span.classList.contains('text-link');
@@ -90,7 +100,7 @@ Object.assign(TextBlockManager.prototype, {
                     changed = true;
                     return;
                 }
-                const fresh = this._derivedDuplicateId(id, seen);
+                const fresh = this._derivedDuplicateId(id, seen, allIds);
                 span.setAttribute(idAttr, fresh);
                 seen.set(fresh, span);
                 changed = true;
@@ -134,15 +144,18 @@ Object.assign(TextBlockManager.prototype, {
      * вход → побайтно тот же выход; после первой починки дубля уже нет, повторный
      * прогон валидатора ничего не трогает (идемпотентность). Суффикс '_d<n>'
      * держит id opaque (нигде не парсится) и проходит DOMPurify (значение data-*
-     * не ограничено). Коллизию с реально существующим id обходим инкрементом n,
-     * сохраняя детерминизм (порядок обхода — document order).
+     * не ограничено). Коллизию с уже назначенным (seen) ИЛИ существующим где-либо
+     * в документе (allIds, #11) id обходим инкрементом n, сохраняя детерминизм
+     * (порядок обхода — document order).
      * @param {string} baseId дублирующийся id
-     * @param {Map} seen уже занятые id в документе
+     * @param {Map} seen уже назначенные id (в т.ч. деривативы)
+     * @param {Set} [allIds] все исходные id документа, включая ещё не обойдённые
      * @returns {string}
      */
-    _derivedDuplicateId(baseId, seen) {
+    _derivedDuplicateId(baseId, seen, allIds = null) {
         let n = 1;
-        while (seen.has(baseId + '_d' + n)) n += 1;
+        const taken = (cand) => seen.has(cand) || (allIds !== null && allIds.has(cand));
+        while (taken(baseId + '_d' + n)) n += 1;
         return baseId + '_d' + n;
     },
 

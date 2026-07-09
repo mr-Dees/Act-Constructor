@@ -6,9 +6,10 @@
 
 Порядок гейтов важен:
   1. kill-switch (``ACTS__EDITOR_TELEMETRY_ENABLED=false``) → 204 без записи;
-  2. rate-guard (> ``MAX_EVENTS_PER_BATCH`` событий) → 422 (защита INSERT'а);
+  2. лимит размера батча (> ``MAX_EVENTS_PER_BATCH`` событий) → 422 (защита INSERT'а);
   3. пустой батч → 204;
   4. запись → 201.
+Частоту запросов ограничивает глобальный RateLimitMiddleware, а не гейт №2.
 Username берётся из auth-зависимости, НЕ из payload.
 """
 

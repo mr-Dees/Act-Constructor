@@ -806,16 +806,12 @@ export class APIClient {
                 window.StorageManager.setBaseUpdatedAt(result.updated_at);
             }
 
-            // PERSIST-4: если за время сериализации + сетевого PUT пользователь
-            // печатал (эпоха выросла), эти правки в отправленную data НЕ попали.
-            // Тогда НЕ помечаем акт синхронизированным и НЕ удаляем снимок —
-            // акт остаётся dirty, следующий цикл сохранения дошлёт свежие
-            // правки. Иначе фиксируем синхронизацию и убираем снимок-черновик.
-            if (window.StorageManager.getDirtyEpoch() === epochBeforeSave) {
-                window.StorageManager.markAsSyncedWithDB();
-                // Содержимое теперь в БД — снимок-черновик больше не нужен.
-                window.StorageManager.removeSnapshot(actId);
-            }
+            // PERSIST-4/A1: единый финал успешного PUT (эпоха-гейт синхронизации
+            // + снятие снимка при стабильной эпохе; гашение offline-машинерии в
+            // любом случае). Если за время PUT пользователь печатал (эпоха
+            // выросла), эти правки в отправленную data НЕ попали — акт остаётся
+            // dirty и дошлётся следующим циклом.
+            window.StorageManager.finalizeDbSave(actId, epochBeforeSave);
 
             // Бэкенд может вернуть мягкое предупреждение (Finding 3/8): сохранение
             // прошло, но есть на что обратить внимание. Для периодического
@@ -955,16 +951,10 @@ export class APIClient {
             }
             const result = await resp.json();
             if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
-            // PERSIST-4: правки, напечатанные во время PUT (эпоха выросла), в
-            // отправленную data не попали — НЕ помечаем синхронизированным и НЕ
-            // снимаем снимок (акт остаётся dirty, дошлётся следующим циклом).
-            // Иначе фиксируем синхронизацию и освобождаем LS. Eviction снимка
-            // перенесён сюда из _escalateQuotaToDb — снятие снимка атомарно с
-            // гейтом синхронизации (как в saveActContent).
-            if (window.StorageManager.getDirtyEpoch() === epochBeforeSave) {
-                window.StorageManager.markAsSyncedWithDB();
-                window.StorageManager.removeSnapshot(actId);
-            }
+            // PERSIST-4/A1: единый финал (эпоха-гейт синхронизации + снятие снимка
+            // + гашение offline-машинерии). Eviction снимка живёт здесь, а не в
+            // _escalateQuotaToDb — атомарно с гейтом (как в saveActContent).
+            window.StorageManager.finalizeDbSave(actId, epochBeforeSave);
             return result;
         } catch (err) {
             // §6.8: аварийное сохранение в БД не удалось — фиксируем в телеметрии

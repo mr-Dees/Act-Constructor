@@ -105,6 +105,28 @@ test('CORE-2: разные исходные id → разные производ
   assert.notEqual(mgr._derivedDuplicateId('A', seen), mgr._derivedDuplicateId('B', seen));
 });
 
+test('#11: _derivedDuplicateId обходит id из allIds (не только seen)', () => {
+  const mgr = makeMgr();
+  const seen = new Map();
+  const allIds = new Set(['L1', 'L1_d1']); // L1_d1 занят позже по документу
+  assert.equal(mgr._derivedDuplicateId('L1', seen, allIds), 'L1_d2');
+});
+
+test('#11: дериватив дубля не крадёт литеральный id, стоящий ПОЗЖЕ — нет лишнего переименования', () => {
+  const mgr = makeMgr();
+  // Два дубля 'L1', затем НЕЗАВИСИМАЯ капсула с литеральным 'L1_d1'.
+  const caps = [
+    fakeLink('L1', 'http://a', 'A', fakeParent()),
+    fakeLink('L1', 'http://b', 'B', fakeParent()),
+    fakeLink('L1_d1', 'http://c', 'C', fakeParent()),
+  ];
+  mgr._repairCapsulesInRoot(fakeRoot(caps));
+  const ids = caps.map((c) => c.getAttribute('data-link-id'));
+  // Второй 'L1' → 'L1_d2' (обходит существующий 'L1_d1'); третий НЕ тронут.
+  assert.deepEqual(ids, ['L1', 'L1_d2', 'L1_d1']);
+  assert.equal(new Set(ids).size, 3); // все уникальны, третий не переименован
+});
+
 test('CORE-2: здоровая одиночная капсула → changed=false (write-back не триггерится)', () => {
   const mgr = makeMgr();
   const caps = [fakeLink('L1', 'http://a', 'A', fakeParent())];

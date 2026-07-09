@@ -173,3 +173,15 @@ class TestEditorTelemetryEndpoint:
             )
         assert resp.status_code == 422
         repo.insert_many.assert_not_awaited()
+
+    def test_oversized_count_returns_422_not_500(self):
+        """Аномально большой count отбивается Pydantic (le=), а не падает
+        переполнением INTEGER на INSERT (голый 500). Верхняя граница обязательна."""
+        app, repo = _build_app(enabled=True)
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/acts/editor-telemetry",
+                json=_events(("observer_heal", 1, 9_999_999_999)),
+            )
+        assert resp.status_code == 422
+        repo.insert_many.assert_not_awaited()

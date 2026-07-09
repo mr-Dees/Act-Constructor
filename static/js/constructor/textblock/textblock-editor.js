@@ -324,13 +324,20 @@ Object.assign(TextBlockManager.prototype, {
      * трогаем. Каретку читаем из живого Selection; её ZWSP-узел переживает
      * normalizeMarkers (та чистит только U+FEFF), поэтому проверка надёжна и
      * после нормализации капсул. Идемпотентно.
+     *
+     * ignoreCaret=true — режим blur: каретка ПОКИДАЕТ редактор, поэтому B-2 не
+     * применяем (Selection на blur ещё может указывать внутрь якоря, но
+     * пользователь уже ушёл, не напечатав → якорь осиротел). Иначе такие якоря
+     * утекали бы в сохранённый content: обычный blur-путь finalizeEdit —
+     * единственный их чистильщик — не вызывал.
      * @param {HTMLElement} editor
+     * @param {{ignoreCaret?: boolean}} [opts={}]
      */
-    _cleanOrphanSizeAnchors(editor) {
+    _cleanOrphanSizeAnchors(editor, { ignoreCaret = false } = {}) {
         if (!editor || typeof editor.querySelectorAll !== 'function') return;
         if (typeof this._isZeroWidthNode !== 'function'
             || typeof this._isCapsule !== 'function') return;
-        const sel = (typeof window !== 'undefined' && typeof window.getSelection === 'function')
+        const sel = (!ignoreCaret && typeof window !== 'undefined' && typeof window.getSelection === 'function')
             ? window.getSelection() : null;
         const caretNode = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0).startContainer : null;
         editor.querySelectorAll('span[style]').forEach(span => {
@@ -446,6 +453,15 @@ Object.assign(TextBlockManager.prototype, {
         // редактор. Идемпотентно: при штатном compositionend __composing уже
         // false и буфер уже слит — повторный вызов ничего не находит.
         if (typeof this._flushComposition === 'function') this._flushComposition(editor);
+
+        // Blur = каретка покидает редактор: осиротевшие якоря размера (span, чьё
+        // содержимое — только U+200B, пользователь выбрал размер и ушёл, не
+        // напечатав) чистим из живого DOM ДО сериализации, игнорируя B-2. Иначе
+        // они утекали бы в сохранённый content — обычный blur-путь ниже пишет
+        // textBlock.content напрямую, минуя finalizeEdit (единственный чистильщик).
+        if (typeof this._cleanOrphanSizeAnchors === 'function') {
+            this._cleanOrphanSizeAnchors(editor, { ignoreCaret: true });
+        }
 
         const s = this._stripGuards(editor.innerHTML);
         // CORE-2b: сериализуем с признаком РЕАЛЬНОЙ починки капсул. Косметика

@@ -450,6 +450,18 @@ export class StorageManager {
                 if (confirmed) {
                     try {
                         await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
+                        // E1: saveActContent — no-op (return null), если параллельный
+                        // (периодический) PUT уже в полёте; дождёмся его, иначе тост
+                        // «Изменения сохранены» подтвердил бы несостоявшуюся запись.
+                        if (APIClient._saveInFlightPromise) {
+                            await APIClient._saveInFlightPromise.catch(() => {});
+                        }
+                        // Если акт всё ещё не синхронизирован (тот PUT no-op'нулся/
+                        // упал, либо правки печатались во время PUT) — форсим
+                        // гарантированный PUT, чтобы подтверждение не было ложным.
+                        if (this.hasUnsyncedChanges()) {
+                            await APIClient.forceSaveToDb(window.currentActId);
+                        }
                         Notifications.success('Изменения сохранены');
                     } catch (err) {
                         console.error('Ошибка сохранения:', err);
@@ -570,6 +582,31 @@ export class StorageManager {
     static markAsSyncedWithDB() {
         this._setState('saved');
         this._resetDbSaveFailureState();
+    }
+
+    /**
+     * PERSIST-4/A1: единый финал успешного PUT в БД для saveActContent и
+     * forceSaveToDb (устраняет дубль эпоха-гейта в двух save-путях).
+     *
+     * Эпоха стабильна → правок во время await PUT не было: помечаем
+     * синхронизированным (заодно гасит offline-машинерию) и снимаем
+     * снимок-черновик. Эпоха выросла → правки печатались во время PUT и в
+     * отправленную data не попали: акт остаётся грязным (дошлётся следующим
+     * циклом), НО сам PUT прошёл — сервер достижим, поэтому всё равно гасим
+     * offline-машинерию (дедуп-предупреждение + подписку 'online'). Без этого
+     * после разового сбоя сохранения следующий реальный сбой уже не
+     * предупредил бы, пока не случится стабильный по эпохе успех (A1).
+     *
+     * @param {number} actId
+     * @param {number} epochBeforeSave эпоха грязности, снятая ДО сериализации
+     */
+    static finalizeDbSave(actId, epochBeforeSave) {
+        if (this.getDirtyEpoch() === epochBeforeSave) {
+            this.markAsSyncedWithDB();
+            this.removeSnapshot(actId);
+        } else {
+            this._resetDbSaveFailureState();
+        }
     }
 
     /**

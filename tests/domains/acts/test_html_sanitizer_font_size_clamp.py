@@ -42,11 +42,23 @@ def test_clamp_preserves_other_css_properties():
     assert "color" in out and "red" in out
 
 
-def test_non_px_units_not_clamped():
-    """em/%/pt редактор не эмитит — числовой кламп их не трогает."""
-    for value in ("1.5em", "150%", "40pt"):
+def test_non_px_font_size_stripped():
+    """Не-px размер (em/%/pt/rem) редактор не эмитит; приходит из прямого API/
+    внешней вставки и обошёл бы границы (500pt) или рассогласовал превью↔DOCX —
+    санитайзер убирает объявление font-size целиком, текст остаётся."""
+    for value in ("1.5em", "150%", "40pt", "3rem", "500pt"):
         out = sanitize_html(f'<span style="font-size: {value}">т</span>')
-        assert value in out
+        assert "font-size" not in out
+        assert value not in out
+        assert "т" in out
+
+
+def test_non_px_font_size_stripped_keeps_siblings():
+    """Убирается только не-px font-size; соседние CSS-свойства span остаются."""
+    out = sanitize_html('<span style="font-size: 40pt; color: red">т</span>')
+    assert "font-size" not in out and "40pt" not in out
+    assert "color" in out and "red" in out
+    assert "т" in out
 
 
 def test_clamp_respects_settings_bounds(monkeypatch):

@@ -143,13 +143,37 @@ class _BlockStyleFilter(Filter):
             yield token
 
 
-# TB-6: мягкий кламп font-size к [min,max] из настроек. Только px (редактор
-# эмитит именно px; em/%/pt оставляем как есть). Значение в диапазоне остаётся
-# дословным — паритетные фикстуры (font-size: 20px) не переформатируются.
+# TB-6: мягкий кламп font-size к [min,max] из настроек. Кламп — по px (редактор
+# эмитит именно px); значение в диапазоне остаётся дословным — паритетные
+# фикстуры (font-size: 20px) не переформатируются. Не-px размер (pt/em/%/rem)
+# редактор не создаёт — он приходит из прямого API/внешней вставки и убирается
+# целиком (_strip_nonpx_font_size), иначе обошёл бы границы (500pt проходит мимо
+# клампа) и рассогласовал превью↔DOCX (em/%/rem превью рендерит, inline._SIZE_RE
+# роняет).
 _FONT_SIZE_PX_RE = re.compile(
     r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*px",
     re.IGNORECASE,
 )
+
+# Одно объявление font-size с единицей ≠ px (или без единицы) внутри style —
+# вместе с примыкающим ';', чтобы не осталось пустой декларации. Негативный
+# lookahead пропускает валидный <N>px (его обрабатывает кламп).
+_FONT_SIZE_NONPX_DECL_RE = re.compile(
+    r"font-size\s*:\s*(?!\s*\d+(?:\.\d+)?\s*px\b)[^;]*;?",
+    re.IGNORECASE,
+)
+
+
+def _strip_nonpx_font_size(style: str) -> str:
+    """Убирает из style объявления font-size в НЕ-px единицах (pt/em/%/rem…).
+
+    Редактор эмитит размер только в px; не-px приходит из прямого API/внешней
+    вставки. Оставленный, он либо обошёл бы границы клампа (font-size:500pt), либо
+    рассогласовал превью↔DOCX (em/%/rem превью показывает, а inline._SIZE_RE не
+    распознаёт). Удаляем объявление целиком — оба рендера падают на базовый
+    размер. px не трогаем: его зажимает _clamp_font_size_px.
+    """
+    return _FONT_SIZE_NONPX_DECL_RE.sub("", style)
 
 
 def _clamp_font_size_px(style: str, min_px: int, max_px: int) -> str:
@@ -192,7 +216,14 @@ class _FontSizeClampFilter(Filter):
                 key = (None, "style")
                 style = data.get(key)
                 if style and "font-size" in style.lower():
-                    data[key] = _clamp_font_size_px(style, min_px, max_px)
+                    style = _strip_nonpx_font_size(style)
+                    style = _clamp_font_size_px(style, min_px, max_px)
+                    # Осталась пустая/только-разделители строка (был лишь не-px
+                    # font-size) — снимаем style целиком.
+                    if style.strip(" ;\t\r\n"):
+                        data[key] = style
+                    else:
+                        data.pop(key, None)
             yield token
 
 

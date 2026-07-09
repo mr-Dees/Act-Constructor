@@ -70,6 +70,30 @@ def test_split_nested_block_stays_inside_segment():
     assert segments == [BlockSegment(None, "a<div>вложен</div>")]
 
 
+def test_split_nested_aligned_block_becomes_own_segment():
+    """S1: вложенный блок со СВОИМ text-align — отдельный сегмент с этим
+    выравниванием; куски родителя до/после — сегменты с align родителя."""
+    segments = split_block_segments(
+        '<div style="text-align: center">a'
+        '<div style="text-align: right">b</div>c</div>'
+    )
+    assert segments == [
+        BlockSegment("center", "a"),
+        BlockSegment("right", "b"),
+        BlockSegment("center", "c"),
+    ]
+
+
+def test_split_nested_aligned_only_child_no_empty_parent_segment():
+    """Родитель без собственного текста, только вложенный aligned-блок — пустой
+    сегмент-родитель НЕ плодится."""
+    segments = split_block_segments(
+        '<div style="text-align: center">'
+        '<div style="text-align: right">x</div></div>'
+    )
+    assert segments == [BlockSegment("right", "x")]
+
+
 def test_split_interblock_whitespace_dropped():
     segments = split_block_segments("<div>a</div>\n  <div>b</div>")
     assert segments == [BlockSegment(None, "a"), BlockSegment(None, "b")]
@@ -178,6 +202,22 @@ def test_nested_div_stays_soft_break_in_same_paragraph(doc):
     assert len(paras) == 1
     assert _count_breaks(paras[0]) == 1
     assert "a" in paras[0].text and "вложен" in paras[0].text
+
+
+def test_nested_aligned_div_becomes_own_paragraph(doc):
+    """S1: вложенный блок со своим text-align рендерится отдельным w:p с этим
+    выравниванием — превью (каскад) и DOCX больше не расходятся."""
+    paras = _render(
+        doc,
+        '<div style="text-align: center;">верх'
+        '<div style="text-align: right;">вложен-право</div>низ</div>',
+    )
+    assert [p.text for p in paras] == ["верх", "вложен-право", "низ"]
+    assert [p.alignment for p in paras] == [
+        WD_ALIGN_PARAGRAPH.CENTER,
+        WD_ALIGN_PARAGRAPH.RIGHT,
+        WD_ALIGN_PARAGRAPH.CENTER,
+    ]
 
 
 def test_footnote_in_centered_line(doc):

@@ -162,6 +162,22 @@ test('TB-4: осиротевший якорь чистится на save, яко
   assert.equal(capsule.removed, false, 'капсула не тронута');
 });
 
+test('blur (ignoreCaret): якорь ПОД кареткой тоже чистится — каретка покидает редактор', () => {
+  const caretZwsp = { nodeType: 3, textContent: '​', data: '​' };
+  const caretAnchor = makeSpan('24px', '​'); // zero-width, каретка внутри
+  caretAnchor._caret = caretZwsp;
+  const editor = { querySelectorAll: () => [caretAnchor] };
+  // На blur Selection ещё может указывать внутрь якоря — ignoreCaret его игнорирует.
+  globalThis.getSelection = () => ({
+    rangeCount: 1, getRangeAt: () => ({ startContainer: caretZwsp }),
+  });
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr._cleanOrphanSizeAnchors(editor, { ignoreCaret: true });
+
+  assert.equal(caretAnchor.removed, true, 'на blur осиротевший якорь под кареткой снят (не утечёт в content)');
+});
+
 test('TB-4: без активной каретки (null selection) все осиротевшие якоря чистятся', () => {
   const orphan1 = makeSpan('18px', '​');
   const orphan2 = makeSpan('72px', '​​');

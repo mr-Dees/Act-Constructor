@@ -155,3 +155,56 @@ test('§6.8: обычный флаш идёт без keepalive', () => {
   assert.equal(fetchCalls.length, 1);
   assert.notEqual(fetchCalls[0].opts.keepalive, true, 'штатный флаш без keepalive');
 });
+
+test('§6.8 #10: сетевой сбой возвращает счётчики в очередь, не теряет', async () => {
+  globalThis.fetch = () => Promise.reject(new Error('network down'));
+  EditorTelemetry.track('save_failure');
+  EditorTelemetry.track('save_failure');
+  EditorTelemetry.flush();
+  // Даём микротаскам .catch отработать (реквеу — в .catch флаша).
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(EditorTelemetry._totalPending, 2, 'счётчики вернулись в очередь после сбоя');
+
+  // Сеть восстановилась — следующий флаш дошлёт вернувшийся батч одной записью.
+  const calls = [];
+  globalThis.fetch = (url, opts) => {
+    calls.push(opts);
+    return Promise.resolve({ ok: true, json: async () => ({}) });
+  };
+  EditorTelemetry.flush();
+  assert.equal(calls.length, 1, 'после восстановления батч дошёл');
+  assert.deepEqual(JSON.parse(calls[0].body).events, [
+    { event_type: 'save_failure', act_id: 999002, count: 2 },
+  ]);
+});
+
+test('§6.8 #10: keepalive-флаш (unload) при сбое НЕ реквеуит — вкладка закрывается', async () => {
+  globalThis.fetch = () => Promise.reject(new Error('down'));
+  EditorTelemetry.track('observer_heal');
+  EditorTelemetry._flushOnUnload();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(EditorTelemetry._totalPending, 0, 'на unload возвращать некуда');
+});
+
+test('§6.8 #10: реквеуанный батч сливается с новыми событиями по ключу', async () => {
+  globalThis.fetch = () => Promise.reject(new Error('down'));
+  EditorTelemetry.track('observer_heal');
+  EditorTelemetry.flush();
+  await Promise.resolve();
+  await Promise.resolve();
+  EditorTelemetry.track('observer_heal');
+  assert.equal(EditorTelemetry._totalPending, 2, 'новое событие слилось с вернувшимся');
+  assert.equal(EditorTelemetry._pending.size, 1, 'одна запись — тот же ключ');
+});
+
+test('§6.8 #10: kill-switch выключен между флашем и сбоем — реквеу не копит', async () => {
+  globalThis.fetch = () => Promise.reject(new Error('down'));
+  EditorTelemetry.track('observer_heal');
+  EditorTelemetry.flush();
+  EditorTelemetry.setEnabled(false); // выключили ДО отработки .catch
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(EditorTelemetry._totalPending, 0, 'выключенная телеметрия не реквеуит');
+});
