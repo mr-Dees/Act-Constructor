@@ -70,6 +70,12 @@ test('«ТБ, выявившие отклонение» (tb_breakdown): слов
   assert.equal(typeof col.filterResolve, 'function');
   const dicts = { terbanks: [{ tb_id: 4, short_name: 'Волго-Вятский банк' }, { tb_id: 14, short_name: 'ЦА' }] };
   assert.deepEqual(col.filterResolve('волго', dicts), ['4']);
+  // filterValue — аксессор сырого значения для client-mode: record.tb_breakdown —
+  // массив объектов, а фильтровать нужно по массиву голых tb_id (см. datatable-logic).
+  assert.equal(typeof col.filterValue, 'function');
+  assert.deepEqual(col.filterValue({ tb_breakdown: [{ neg_finder_tb_id: 7 }, { neg_finder_tb_id: 8 }] }), ['7', '8']);
+  assert.deepEqual(col.filterValue({ tb_breakdown: [] }), []);
+  assert.deepEqual(col.filterValue({}), []); // нет развертки — не падает
   assert.equal(col.noSort, true); // ключ колонки (чипы) неизвестен бэкенду — сортировка на сервере уведёт в ValueError
   assert.equal(col.width, 320);
   assert.equal(typeof col.render, 'function');

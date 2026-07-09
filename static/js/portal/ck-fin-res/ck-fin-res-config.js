@@ -174,6 +174,11 @@ export class CkFinResConfig {
                     filterResolve: (q, dicts) => (dicts.terbanks || [])
                         .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
                         .map(t => String(t.tb_id)),
+                    // Сырое значение для client-mode фильтрации (маленькие наборы, включая
+                    // демо): record.tb_breakdown — массив ОБЪЕКТОВ, specMatches сравнил бы
+                    // его как строку и никогда не совпал бы. filterValue отдаёт массив
+                    // голых tb_id — по нему уже работает массивная семантика specMatches.
+                    filterValue: (record) => (record.tb_breakdown || []).map(b => String(b.neg_finder_tb_id)),
                     render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
                 },
                 real_loss: { label: 'Реальные потери' },

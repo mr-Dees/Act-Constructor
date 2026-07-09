@@ -13,6 +13,12 @@
  *   {op:'eq',       value}                — точное равенство по сырому тексту
  *   {op:'in',       values:[...]}         — членство по сырым значениям (словари)
  *   {op:'range',    from?, to?, cast}     — диапазон (cast: 'date' | 'numeric')
+ *
+ * Колонка может нести опциональный аксессор `filterValue(record) -> raw`,
+ * которым в client-mode добывается сырое значение вместо `record[col.key]`
+ * (например, когда физическое значение — массив объектов, а фильтровать нужно
+ * по проекции скаляров). Для raw-массива скаляров contains/eq/in матчат, если
+ * условию удовлетворяет хотя бы один элемент (см. specMatches).
  */
 
 /**
@@ -34,11 +40,18 @@ function specActive(spec) {
 }
 
 /**
- * Проходит ли сырое значение `raw` фильтр `spec`.
+ * Проходит ли сырое значение `raw` фильтр `spec`. Если `raw` — МАССИВ скаляров
+ * (даёт колоночный аксессор filterValue, напр. развертка по ТБ), для
+ * contains/eq/in действует семантика «хотя бы один элемент проходит скалярную
+ * проверку»: рекурсивный вызов на каждом элементе переиспользует ту же логику,
+ * что и для одиночного значения (String-сравнение — как для скаляров).
  * @returns {boolean}
  */
 export function specMatches(raw, spec) {
   if (!spec || !spec.op) return true;
+  if (Array.isArray(raw) && (spec.op === 'contains' || spec.op === 'eq' || spec.op === 'in')) {
+    return raw.some(item => specMatches(item, spec));
+  }
   switch (spec.op) {
     case 'contains': {
       const q = norm(spec.value ?? '');
@@ -74,13 +87,17 @@ export function specMatches(raw, spec) {
  * Проходит ли запись ВСЕ активные фильтры (комбинируются по И).
  * `filterMap` — dict[colKey → FilterSpec]. `dicts` не используется (адаптация
  * уже произведена при построении спека) — параметр сохранён для совместимости.
+ * Сырое значение колонки берётся через `col.filterValue(record)`, если
+ * колонка его несёт; иначе — как раньше, `record[col.key]` (поведение колонок
+ * без аксессора не меняется).
  * @returns {boolean}
  */
 export function rowMatchesFilters(record, columns, filterMap, dicts) {
   for (const col of columns) {
     const spec = (filterMap || {})[col.key];
     if (!specActive(spec)) continue;
-    if (!specMatches(record[col.key], spec)) return false;
+    const raw = typeof col.filterValue === 'function' ? col.filterValue(record) : record[col.key];
+    if (!specMatches(raw, spec)) return false;
   }
   return true;
 }
