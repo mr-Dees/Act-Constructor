@@ -40,3 +40,16 @@ def test_all_seed_guards_include_tb():
 
 def test_seeds_backfill_tb_leader():
     assert "SET tb_leader" in SCHEMA, "Нет idempotent-бэкфилла tb_leader для сид-строк"
+
+
+def test_seeds_contain_mpl_demo_group():
+    assert SCHEMA.count("metric_code = '602'") >= 2 or SCHEMA.count("metric_code='602'") >= 2, (
+        "Ожидается демо-группа метрики 602 минимум из 2 строк ТБ"
+    )
+    assert "mpl_amount_rubles" in SCHEMA
+
+
+def test_ua_metric_dict_contains_602():
+    path = Path("app/domains/ua_data/migrations/postgresql/schema.sql")
+    sql = path.read_text(encoding="utf-8")
+    assert "'602'" in sql, "В словаре метрик должна быть запись с кодом 602"

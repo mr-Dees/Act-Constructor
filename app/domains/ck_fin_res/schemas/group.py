@@ -22,11 +22,22 @@ class GroupKey(BaseModel):
 
 
 class TBBreakdownItem(BaseModel):
-    """Строка развертки: один ТБ группы. Строка существует ⇔ сумма > 0."""
+    """Строка развертки: один ТБ группы. Строка существует ⇔ сумма > 0 ИЛИ MPL > 0."""
 
     neg_finder_tb_id: str = Field(..., min_length=1, max_length=200)
-    metric_amount_rubles: Decimal = Field(..., gt=Decimal("0"))
+    metric_amount_rubles: Decimal = Field(..., ge=Decimal("0"))
+    mpl_amount_rubles: Decimal = Field(
+        default=Decimal("0"), ge=Decimal("0"),
+        description="MPL 90+, руб. — заполняется только для метрики 602",
+    )
     metric_element_counts: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _at_least_one_amount(self) -> "TBBreakdownItem":
+        """Строка ТБ существует ⇔ сумма > 0 ИЛИ MPL > 0."""
+        if self.metric_amount_rubles <= 0 and self.mpl_amount_rubles <= 0:
+            raise ValueError("У ТБ должна быть заполнена сумма или MPL 90+ (больше нуля)")
+        return self
 
 
 class FRGroupSaveRequest(BaseModel):
