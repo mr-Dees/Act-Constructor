@@ -13,7 +13,8 @@ def test_schema_has_tb_leader_column():
 
 
 def test_seeds_contain_multi_tb_group():
-    """Сиды должны содержать группу: один (км, пункт, метрика) × несколько ТБ."""
+    """Сиды: групп (км, пункт, метрика) с >= 2 ТБ — не меньше 3 (спека §4.3),
+    из них хотя бы одна с >= 3 ТБ."""
     # Каждая строка сида несёт guard WHERE NOT EXISTS (... km_id ... act_item_number ... metric_code ... neg_finder_tb_id ...)
     guards = re.findall(
         r"WHERE km_id = '([^']+)' AND act_item_number = '([^']+)' "
@@ -24,8 +25,9 @@ def test_seeds_contain_multi_tb_group():
     by_group: dict[tuple, set] = {}
     for km, item, metric, tb in guards:
         by_group.setdefault((km, item, metric), set()).add(tb)
-    multi = {k: v for k, v in by_group.items() if len(v) >= 3}
-    assert multi, "Нет ни одной группы (км, пункт, метрика) с >= 3 ТБ"
+    multi = {k: v for k, v in by_group.items() if len(v) >= 2}
+    assert len(multi) >= 3, f"Групп с >= 2 ТБ: {len(multi)} (нужно не меньше 3): {sorted(multi)}"
+    assert any(len(v) >= 3 for v in multi.values()), "Нет ни одной группы (км, пункт, метрика) с >= 3 ТБ"
 
 
 def test_all_seed_guards_include_tb():

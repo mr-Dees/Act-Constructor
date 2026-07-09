@@ -722,6 +722,7 @@ class AppError(Exception):
 | `LastAdminError` | 409 | `admin-last-admin` | Последний админ |
 | `FRRecordNotFoundError` | 404 | `ck-fin-res-record-not-found` | FR-запись не найдена |
 | `FRValidationError` | 400 | `ck-fin-res-validation` | FR-валидация |
+| `FRGroupConflictError` | 409 | `ck-fin-res-group-conflict` | FR-группа: параллельное изменение или дубль при создании |
 | `CSRecordNotFoundError` | 404 | `ck-client-exp-record-not-found` | CS-запись не найдена |
 | `CSValidationError` | 400 | `ck-client-exp-validation` | CS-валидация |
 
@@ -1158,6 +1159,8 @@ DomainDescriptor(
 | `t_db_oarb_ck_fr_validation` | Результаты верификации метрик FR (факты риска) |
 
 Связанная таблица `t_db_oarb_ck_validation_reestr_metric` (реестр метрик, формат ФР00001) управляется ETL и в приложении не создаётся. VIEW `v_db_oarb_ck_fr_validation` (JOIN на `t_db_oarb_ua_sub_number` по `act_sub_number_id`) создаётся вне приложения средствами ETL/DBA.
+
+Колонка `tb_leader` (ТБ-руководитель проверки, `tb_id` справочника терр. банков строкой) добавлена в `schema.sql` после первых развёртываний, а `create_tables_if_not_exist` не добавляет колонки в существующие таблицы (см. §6.5.4). Для уже развёрнутых PG-инсталляций — ручной `ALTER TABLE t_db_oarb_ck_fr_validation ADD COLUMN tb_leader TEXT NOT NULL DEFAULT ''`; на GP колонку добавляет ETL-команда до деплоя.
 
 **Домен ЦК Клиентский опыт (`ck_client_exp`) — 1 таблица:**
 
@@ -3774,12 +3777,12 @@ class PaginatedResponse(BaseModel, Generic[T]):
 | `GET /api/v1/admin/audit-log` | `AuditLogEntry` |
 | `GET /api/v1/chat/conversations` | `ConversationListItem` |
 | `GET /api/v1/chat/conversations/{id}/messages` | `MessageResponse` |
-| `POST /api/v1/ck-fin-res/records/search` | `dict` (FR-запись) |
+| `POST /api/v1/ck-fin-res/records/search` | `dict` (группа ЦКФР: одна логическая строка на (суб-акт, КМ, пункт, метрика) с разверткой `tb_breakdown`) |
 | `POST /api/v1/ck-client-exp/records/search` | `dict` (CS-запись) |
 
 До Wave 4 часть эндпоинтов возвращала «голый список» (`list[...]`), CK — `{data: [...]}`, что приводило к зоопарку парсеров на фронте. После унификации **фронт-консьюмеры всегда читают `.items`** (см. `static/js/shared/api.js` и доменные модули).
 
-**Правило для новых list-эндпоинтов:** возвращай `PaginatedResponse[YourSchema]`, не пиши свою обёртку. Bulk-операции (например, `batch-update` в ЦК-доменах) — отдельный контракт, они **не** под `PaginatedResponse`.
+**Правило для новых list-эндпоинтов:** возвращай `PaginatedResponse[YourSchema]`, не пиши свою обёртку. Bulk-операции (`batch-update` — только ЦК Клиентский опыт; ЦКФР — `group-save`/`group-delete`) — отдельный контракт, они **не** под `PaginatedResponse`.
 
 ### 14.2 Pagination limits и UI-паттерн Load More
 
