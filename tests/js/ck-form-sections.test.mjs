@@ -51,3 +51,28 @@ test('CkForm.init с sectionStateKey читает свёрнутые секци�
     globalThis.localStorage.getItem = origGet;
   }
 });
+
+test('collectData: nullable-число — пустое → null; обычное число — пустое → 0, заполненное → Number', () => {
+  const FIELDS = [
+    { key: 'opt_num', label: 'Опц. число', type: 'number', nullable: true },
+    { key: 'req_num', label: 'Число', type: 'number' },
+  ];
+  CkForm.init({ fields: FIELDS, dictionaries: {}, containerEl: document.createElement('div') });
+  // Стаб-DOM не индексирует элементы — подменяем getElementById на словарь инпутов.
+  const els = {
+    'ck-field-opt_num': { value: '' },
+    'ck-field-req_num': { value: '' },
+  };
+  const origGet = document.getElementById;
+  document.getElementById = (id) => els[id] || null;
+  try {
+    let data = CkForm.collectData();
+    assert.equal(data.opt_num, null); // opt-in nullable: пусто → null, не 0
+    assert.equal(data.req_num, 0);    // прежнее поведение прочих чисел сохранено
+    els['ck-field-opt_num'].value = '42';
+    data = CkForm.collectData();
+    assert.equal(data.opt_num, 42);   // заполненное nullable — обычное число
+  } finally {
+    document.getElementById = origGet;
+  }
+});

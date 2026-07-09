@@ -131,9 +131,9 @@ export class CkFinResConfig {
      * `total_counts` — чистые read-only display-колонки (extra, поля в форме
      * нет). `tb_breakdown` — ЕСТЬ как поле формы (тип `amount-breakdown`,
      * секция «Метрика»), поэтому его табличное представление (чипы ТБ,
-     * noFilter, noSort, своя ширина) задаётся через `overrides`, а не `extra` —
-     * иначе `buildColumns` собрал бы ДВЕ колонки с одним и тем же ключом
-     * (одну — из `extra`, другую — автовыведенную из `fields`).
+     * словарный фильтр по ТБ, noSort, своя ширина) задаётся через `overrides`,
+     * а не `extra` — иначе `buildColumns` собрал бы ДВЕ колонки с одним и тем
+     * же ключом (одну — из `extra`, другую — автовыведенную из `fields`).
      */
     static get columns() {
         return buildColumns(this.fields, {
@@ -145,7 +145,8 @@ export class CkFinResConfig {
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
                 { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
-                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true },
+                // noFilter: ключа tb_count нет в ALLOWED_COLUMNS бэка — фильтр молча игнорировался бы; сортировка (COUNT(*)) поддержана.
+                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true, noFilter: true },
                 { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true },
             ],
             overrides: {
@@ -162,10 +163,17 @@ export class CkFinResConfig {
                 // переопределяется целиком под чипы ТБ — см. комментарий выше.
                 tb_breakdown: {
                     label: 'ТБ, выявившие отклонение',
-                    type: 'text',
+                    // Тип словаря — иначе хедер-UI (_specFromText) не применит filterResolve.
+                    type: 'dictionary',
                     width: 320,
-                    noFilter: true,
                     noSort: true,
+                    // Словарный резолвер (как у старого ТБ-фильтра): имя ТБ → массив
+                    // сырых tb_id; спек op=in уходит на бэк под ключом tb_breakdown —
+                    // membership-алиас «группа содержит такой ТБ» (HAVING, итоги
+                    // группы не искажаются).
+                    filterResolve: (q, dicts) => (dicts.terbanks || [])
+                        .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
+                        .map(t => String(t.tb_id)),
                     render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
                 },
                 real_loss: { label: 'Реальные потери' },
@@ -247,7 +255,8 @@ export class CkFinResConfig {
         { section: 'Поручения', key: 'assignment', fields: [
             { key: 'sberdocs_ctrl_assgn_number', label: '№ контр. поручения SberDocs', type: 'text' },
             { row: [
-                { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number' },
+                // nullable: пустое поле уходит как null (Optional[int] на бэке), а не 0
+                { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number', nullable: true },
                 { key: 'assigment_format', label: 'Формат поручения', type: 'dictionary', dict: 'assignment_formats' },
             ]},
             { key: 'assigment_recommendation', label: 'Формулировка поручения', type: 'textarea', rows: 2 },

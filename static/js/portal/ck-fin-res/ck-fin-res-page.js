@@ -155,7 +155,9 @@ export class CkFinResPage {
             <label><input type="radio" name="ckFrTbView" value="chips"> Чипы с суммами</label>
             <label><input type="radio" name="ckFrTbView" value="pivot"> Колонки по ТБ</label>`;
         const current = this._viewState.getExtra('tbView', 'chips');
-        box.querySelector(`input[value="${current}"]`).checked = true;
+        // Битое персист-значение (не chips/pivot) не должно ронять страницу — фолбэк на чипы.
+        const el = box.querySelector(`input[value="${current}"]`) || box.querySelector('input[value="chips"]');
+        el.checked = true;
         box.querySelectorAll('input[name=ckFrTbView]').forEach(r => {
             r.addEventListener('change', () => this._applyTbView(r.value, columns));
         });

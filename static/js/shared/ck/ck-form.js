@@ -69,7 +69,12 @@ export class CkForm {
                 data[field.key] = el.checked;
             } else if (field.type === 'number') {
                 const val = el.value.trim();
-                data[field.key] = val === '' ? 0 : Number(val);
+                // Опциональное число (opt-in через nullable: true в конфиге):
+                // пустое поле → null, не 0 — на бэке Optional[int]
+                // (например, «ИД поручения УВА»). Прочие числа — как раньше.
+                data[field.key] = val === ''
+                    ? (field.nullable === true ? null : 0)
+                    : Number(val);
             } else if (field.type === 'date') {
                 data[field.key] = el.value || null;
             } else if (field.type === 'process-picker') {
