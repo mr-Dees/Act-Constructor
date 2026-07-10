@@ -14,8 +14,8 @@ export class CkFinResConfig {
     static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
 
-    /** Метрики с показателем «MPL 90+». Синхронизировано вручную с MPL_METRIC_CODES в fr_validation_service.py. */
-    static MPL_METRIC_CODES = new Set(['602']);
+    /** Метрики с показателем «NPL 90+». Синхронизировано вручную с NPL_METRIC_CODES в fr_validation_service.py. */
+    static NPL_METRIC_CODES = new Set(['602']);
 
     static formatDate(val) {
         if (!val) return '';
@@ -185,13 +185,13 @@ export class CkFinResConfig {
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
                 { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
-                // total_mpl_amount — чистый read-only агрегат (как total_amount): бэк уже
+                // total_npl_amount — чистый read-only агрегат (как total_amount): бэк уже
                 // отдаёт его в группе и знает и в AGG_FILTER_EXPR (диапазон-фильтр), и в
                 // AGG_SORT_EXPR (сортировка) — noSort намеренно не ставим, сортировка
                 // включена тем же способом, что у total_amount (по умолчанию).
                 {
-                    key: 'total_mpl_amount',
-                    label: 'MPL 90+, руб.',
+                    key: 'total_npl_amount',
+                    label: 'NPL 90+, руб.',
                     description: 'Итог по группе. Заполняется только для метрики 602',
                     type: 'number',
                     align: 'right',
@@ -243,11 +243,11 @@ export class CkFinResConfig {
                     filterValue: (record) => (record.tb_breakdown || []).map(b => String(b.neg_finder_tb_id)),
                     render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
                 },
-                // Поле формы mpl_breakdown (amount-breakdown) тоже автовыводится в
+                // Поле формы npl_breakdown (amount-breakdown) тоже автовыводится в
                 // колонку buildColumns — как и tb_breakdown выше. Но в отличие от него
-                // MPL сознательно не получает чипы/пивот (спека §1.3: «в таблице MPL —
-                // только агрегатом total_mpl_amount», колонка добавляется отдельно
-                // позже). Сырую развертку прячем служебно: ключа mpl_breakdown нет ни
+                // NPL сознательно не получает чипы/пивот (спека §1.3: «в таблице NPL —
+                // только агрегатом total_npl_amount», колонка добавляется отдельно
+                // позже). Сырую развертку прячем служебно: ключа npl_breakdown нет ни
                 // в ALLOWED_COLUMNS, ни в AGG_SORT_EXPR бэка — фильтр молча
                 // проигнорировался бы, а сортировка ушла бы в ValueError.
                 // hidden:true защищает только ДЕФОЛТ: «⚙ → Выбрать все» дёргает
@@ -255,10 +255,10 @@ export class CkFinResConfig {
                 // безусловно, игнорируя _defaultHidden. Поэтому колонка обязана уметь
                 // отрендериться сама — format-заглушка вместо утечки String([...]) →
                 // "[object Object]" на 602-строках. Отдельный label — чтобы служебная
-                // колонка не путалась в панели с настоящей «MPL 90+, руб.»
-                // (total_mpl_amount из Task 6, там же будет видимой по умолчанию).
-                mpl_breakdown: {
-                    label: 'MPL 90+ — развёртка (служебная)',
+                // колонка не путалась в панели с настоящей «NPL 90+, руб.»
+                // (total_npl_amount из Task 6, там же будет видимой по умолчанию).
+                npl_breakdown: {
+                    label: 'NPL 90+ — развёртка (служебная)',
                     hidden: true,
                     noSort: true,
                     noFilter: true,
@@ -280,7 +280,7 @@ export class CkFinResConfig {
                 'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
-                'metric_code', 'metric_name', 'total_amount', 'total_mpl_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
+                'metric_code', 'metric_name', 'total_amount', 'total_npl_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
                 'reestr_metric_id', 'created_at', 'updated_at',
             ],
@@ -333,7 +333,7 @@ export class CkFinResConfig {
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
             { key: 'tb_breakdown', label: 'Сумма по ТБ (руб.)', type: 'amount-breakdown', required: true,
               description: 'Сумма выявленных возможностей финансового результата банка — итог и развертка по ТБ' },
-            { key: 'mpl_breakdown', label: 'MPL 90+, руб.', type: 'amount-breakdown', required: false,
+            { key: 'npl_breakdown', label: 'NPL 90+, руб.', type: 'amount-breakdown', required: false,
               description: 'Заполняется только для метрики 602' },
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },

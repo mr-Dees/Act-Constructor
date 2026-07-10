@@ -48,19 +48,19 @@ export function headroomKop(rows, targetKop, tbId) {
   return Math.max(0, targetKop - others);
 }
 
-/** Развертка MPL из строк группы: только ТБ с MPL > 0, значение — в формате редактора. */
-export function extractMplBreakdown(tbBreakdown) {
+/** Развертка NPL из строк группы: только ТБ с NPL > 0, значение — в формате редактора. */
+export function extractNplBreakdown(tbBreakdown) {
   return (tbBreakdown || [])
-    .filter((b) => parseKop(String(b.mpl_amount_rubles ?? '')) > 0)
+    .filter((b) => parseKop(String(b.npl_amount_rubles ?? '')) > 0)
     .map((b) => ({
       neg_finder_tb_id: String(b.neg_finder_tb_id),
-      metric_amount_rubles: (parseKop(String(b.mpl_amount_rubles)) / 100).toFixed(2),
+      metric_amount_rubles: (parseKop(String(b.npl_amount_rubles)) / 100).toFixed(2),
     }));
 }
 
-/** Слияние основной и MPL-развёрток в единый breakdown group-save (union по ТБ). */
-export function mergeTbBreakdowns(mainItems, mplItems) {
-  const mpl = new Map((mplItems || []).map((i) => [
+/** Слияние основной и NPL-развёрток в единый breakdown group-save (union по ТБ). */
+export function mergeTbBreakdowns(mainItems, nplItems) {
+  const npl = new Map((nplItems || []).map((i) => [
     String(i.neg_finder_tb_id),
     (parseKop(String(i.metric_amount_rubles ?? '')) / 100).toFixed(2),
   ]));
@@ -68,16 +68,16 @@ export function mergeTbBreakdowns(mainItems, mplItems) {
     neg_finder_tb_id: String(i.neg_finder_tb_id),
     metric_amount_rubles: String(i.metric_amount_rubles),
     metric_element_counts: Number(i.metric_element_counts || 0),
-    mpl_amount_rubles: mpl.get(String(i.neg_finder_tb_id)) || '0.00',
+    npl_amount_rubles: npl.get(String(i.neg_finder_tb_id)) || '0.00',
   }));
   const seen = new Set(out.map((i) => i.neg_finder_tb_id));
-  for (const [tbId, amount] of mpl) {
+  for (const [tbId, amount] of npl) {
     if (seen.has(tbId)) continue;
     out.push({
       neg_finder_tb_id: tbId,
       metric_amount_rubles: '0.00',
       metric_element_counts: 0,
-      mpl_amount_rubles: amount,
+      npl_amount_rubles: amount,
     });
   }
   return out;
@@ -86,6 +86,6 @@ export function mergeTbBreakdowns(mainItems, mplItems) {
 if (typeof window !== 'undefined') {
   window.FRBreakdownLogic = {
     fmtKop, parseKop, largestRemainder, niceStep, sumKop, headroomKop,
-    extractMplBreakdown, mergeTbBreakdowns,
+    extractNplBreakdown, mergeTbBreakdowns,
   };
 }
