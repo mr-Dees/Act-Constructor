@@ -182,12 +182,14 @@ export class CkFinResConfig {
         return buildColumns(this.fields, {
             extra: [
                 // Служебные колонки скрыты по умолчанию (hidden) — включаются из панели видимости.
-                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true },
-                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
-                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
-                { key: 'metric_name', label: 'Метрика', type: 'text' },
-                { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
-                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', render: (raw, record) => CkFinResConfig.renderAmountTotal(raw, record.tb_breakdown || [], { hasValue: !!record.tb_count, emptyText: 'не распределено' }) },
+                // group — вручную (не выведена из fields, т.к. это extra-колонки): без него
+                // они выпадали бы между секционными группами и рвали бы заголовки в панели ⚙.
+                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true, group: 'Системное' },
+                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
+                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
+                { key: 'metric_name', label: 'Метрика', type: 'text', group: 'Метрика' },
+                { key: 'act_sub_number', label: '№ суб-акта', type: 'text', group: 'Идентификация' },
+                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', group: 'Метрика', render: (raw, record) => CkFinResConfig.renderAmountTotal(raw, record.tb_breakdown || [], { hasValue: !!record.tb_count, emptyText: 'не распределено' }) },
                 // total_npl_amount — чистый read-only агрегат (как total_amount): бэк уже
                 // отдаёт его в группе и знает и в AGG_FILTER_EXPR (диапазон-фильтр), и в
                 // AGG_SORT_EXPR (сортировка) — noSort намеренно не ставим, сортировка
@@ -200,6 +202,7 @@ export class CkFinResConfig {
                     align: 'right',
                     width: 140,
                     filterPicker: 'numrange',
+                    group: 'Метрика',
                     // hasValue — по наличию развертки, не по raw>0 (симметрично total_amount):
                     // «—» вместо «не распределено» — NPL законно пуст у метрик ≠ 602.
                     render: (raw, record) => {
@@ -208,8 +211,8 @@ export class CkFinResConfig {
                     },
                 },
                 // noFilter: ключа tb_count нет в ALLOWED_COLUMNS бэка — фильтр молча игнорировался бы; сортировка (COUNT(*)) поддержана.
-                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true, noFilter: true },
-                { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true },
+                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true, noFilter: true, group: 'Метрика' },
+                { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true, group: 'Метрика' },
             ],
             overrides: {
                 metric_code: { label: 'Код метрики', type: 'text' },
@@ -278,13 +281,12 @@ export class CkFinResConfig {
             // (код метрики вплотную к названию, сумма-итог/развертка/счётчики
             // ТБ рядом) → поручения → системное.
             order: [
-                'id',
                 'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
                 'metric_code', 'metric_name', 'total_amount', 'total_npl_amount', 'tb_breakdown', 'npl_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
-                'reestr_metric_id', 'created_at', 'updated_at',
+                'reestr_metric_id', 'id', 'created_at', 'updated_at',
             ],
         });
     }

@@ -437,6 +437,12 @@
     cursor: pointer;
 }
 
+/* Секция «Развертка по ТБ» (радио + галочки-пары piv:/pivnpl:) над общим списком колонок */
+.dt-colvis-tbview .dt-colvis-grouplabel { padding-top: 0; }
+.dt-colvis-tbview__radios { display: flex; gap: 12px; font-size: 13px; margin-bottom: 6px; }
+.dt-colvis-tbgrid { display: grid; grid-template-columns: repeat(4, minmax(60px, 1fr)); gap: 4px 10px; font-size: 13px; }
+.dt-colvis-tbgrid input:disabled + span { color: var(--text-secondary); }
+
 .dt-colvis-actions {
     display: flex;
     gap: 8px;
