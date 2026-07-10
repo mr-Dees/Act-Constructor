@@ -46,6 +46,19 @@ export class CkFinResConfig {
         '1': 'ББ', '4': 'ВВБ', '5': 'ДВБ', '7': 'МБ', '8': 'ПБ', '9': 'СЗБ',
         '10': 'СибБ', '11': 'СРБ', '12': 'УБ', '13': 'ЦЧБ', '16': 'ЮЗБ', '14': 'ЦА',
     };
+    /**
+     * Полные названия ТБ — тот же фиксированный набор id, что TB_PALETTE/TB_ABBR.
+     * Источник filterOptions чекбокс-фильтра tb_breakdown (см. columns ниже):
+     * колонки строит геттер columns() без параметров (buildColumns собирает
+     * overrides синхронно, раньше, чем страница загружает dicts.terbanks), так
+     * что опции не могут дождаться асинхронного словаря и берутся отсюда.
+     */
+    static TB_NAMES = {
+        '1': 'Байкальский банк', '4': 'Волго-Вятский банк', '5': 'Дальневосточный банк',
+        '7': 'Московский банк', '8': 'Поволжский банк', '9': 'Северо-Западный банк',
+        '10': 'Сибирский банк', '11': 'Среднерусский банк', '12': 'Уральский банк',
+        '13': 'Центрально-Чернозёмный банк', '16': 'Юго-Западный банк', '14': 'Центральный аппарат',
+    };
 
     static tbColor(id) { return this.TB_PALETTE[String(id)] || this.TB_FALLBACK_COLOR; }
 
@@ -147,7 +160,24 @@ export class CkFinResConfig {
                 { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
-                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
+                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
+                // total_mpl_amount — чистый read-only агрегат (как total_amount): бэк уже
+                // отдаёт его в группе и знает и в AGG_FILTER_EXPR (диапазон-фильтр), и в
+                // AGG_SORT_EXPR (сортировка) — noSort намеренно не ставим, сортировка
+                // включена тем же способом, что у total_amount (по умолчанию).
+                {
+                    key: 'total_mpl_amount',
+                    label: 'MPL 90+, руб.',
+                    description: 'Итог по группе. Заполняется только для метрики 602',
+                    type: 'number',
+                    align: 'right',
+                    width: 140,
+                    filterPicker: 'numrange',
+                    render: (v) => {
+                        const n = Number(v || 0);
+                        return document.createTextNode(n > 0 ? CkFinResConfig.fmtMoney(n) : '—');
+                    },
+                },
                 // noFilter: ключа tb_count нет в ALLOWED_COLUMNS бэка — фильтр молча игнорировался бы; сортировка (COUNT(*)) поддержана.
                 { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true, noFilter: true },
                 { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true },
@@ -166,17 +196,22 @@ export class CkFinResConfig {
                 // переопределяется целиком под чипы ТБ — см. комментарий выше.
                 tb_breakdown: {
                     label: 'ТБ, выявившие отклонение',
-                    // Тип словаря — иначе хедер-UI (_specFromText) не применит filterResolve.
+                    // Тип словаря оставлен для совместимости (align/width не зависят от
+                    // него); текстовый filterResolve, ради которого он был нужен, снят —
+                    // фильтр теперь чекбокс-пикер (filterPicker) и от col.type не зависит.
                     type: 'dictionary',
                     width: 320,
                     noSort: true,
-                    // Словарный резолвер (как у старого ТБ-фильтра): имя ТБ → массив
-                    // сырых tb_id; спек op=in уходит на бэк под ключом tb_breakdown —
-                    // membership-алиас «группа содержит такой ТБ» (HAVING, итоги
-                    // группы не искажаются).
-                    filterResolve: (q, dicts) => (dicts.terbanks || [])
-                        .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
-                        .map(t => String(t.tb_id)),
+                    filterPicker: 'checkbox',
+                    // Опции попапа — фиксированный список тех же 12 ТБ, что TB_PALETTE/
+                    // TB_ABBR (полное название — TB_NAMES, см. комментарий там же).
+                    // Спек op=in уходит на бэк под ключом tb_breakdown — membership-алиас
+                    // «группа содержит такой ТБ» (HAVING, итоги группы не искажаются).
+                    filterOptions: Object.keys(CkFinResConfig.TB_ABBR).map((id) => ({
+                        value: id,
+                        label: `${CkFinResConfig.TB_ABBR[id]} — ${CkFinResConfig.TB_NAMES[id]}`,
+                        short: CkFinResConfig.TB_ABBR[id],
+                    })),
                     // Сырое значение для client-mode фильтрации (маленькие наборы, включая
                     // демо): record.tb_breakdown — массив ОБЪЕКТОВ, specMatches сравнил бы
                     // его как строку и никогда не совпал бы. filterValue отдаёт массив
@@ -221,7 +256,7 @@ export class CkFinResConfig {
                 'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
-                'metric_code', 'metric_name', 'total_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
+                'metric_code', 'metric_name', 'total_amount', 'total_mpl_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
                 'reestr_metric_id', 'created_at', 'updated_at',
             ],
