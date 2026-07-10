@@ -105,7 +105,10 @@ class CSValidationRepository(BaseRepository):
           ``1=0`` («совпадений нет»);
         - ``range``: ``cast`` обязателен (date→DATE, numeric→NUMERIC), иначе
           фильтр пропускается; условия собираются по наличию границ
-          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``.
+          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``;
+        - ``contains_any``: ``(CAST(col AS TEXT) ILIKE $i OR ...)`` по каждой
+          непустой фразе из values; пустой/пробельный список → пропуск (в
+          отличие от ``in``, не ``1=0``).
 
         CAST в TEXT нужен, т.к. ILIKE/= по тексту не определены для numeric/
         date/bool без приведения. Совместимо с PG 9.4 / GP 6.x.
@@ -154,6 +157,16 @@ class CSValidationRepository(BaseRepository):
                     conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
                     params.append(hi)
                     idx += 1
+            elif op == "contains_any":
+                values = [v for v in (spec.values or []) if v is not None and str(v).strip() != ""]
+                if not values:
+                    continue  # нет фраз = фильтр не задан (в отличие от in: пустой in → 1=0)
+                ors = []
+                for v in values:
+                    ors.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
+                    params.append(f"%{v}%")
+                    idx += 1
+                conditions.append("(" + " OR ".join(ors) + ")")
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         return where, params, idx
 

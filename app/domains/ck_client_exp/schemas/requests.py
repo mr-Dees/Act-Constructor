@@ -14,10 +14,12 @@ class FilterSpec(BaseModel):
       клиент резолвит имя→id заранее, пустой ``values`` означает «совпадений нет»;
     - ``range`` — диапазон по сырому с приведением типа (``cast`` ∈ {date, numeric},
       границы ``from``/``to``);
-    - ``eq`` — точное равенство по сырому тексту (``value``).
+    - ``eq`` — точное равенство по сырому тексту (``value``);
+    - ``contains_any`` — колонка содержит ЛЮБУЮ из фраз (поле ``values``; OR по
+      ILIKE); пустой список → фильтр пропускается;
     """
 
-    op: Literal["contains", "in", "range", "eq"]
+    op: Literal["contains", "in", "range", "eq", "contains_any"]
     value: Optional[str] = None
     values: Optional[list[str]] = None
     from_: Optional[str] = Field(default=None, alias="from")

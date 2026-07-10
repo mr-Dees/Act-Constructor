@@ -244,6 +244,33 @@ class TestFilterOps:
         sql = mock_conn.fetch.call_args[0][0]
         assert "CAST(metric_amount_rubles AS TEXT) ILIKE" in sql
 
+    async def test_contains_any_builds_or_ilike(self, repo, mock_conn):
+        """contains_any → OR по CAST(col AS TEXT) ILIKE, параметр %фраза% на каждую фразу."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"ck_comment": FilterSpec(op="contains_any", values=["риск", "просрочк"])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "(CAST(ck_comment AS TEXT) ILIKE $1 OR CAST(ck_comment AS TEXT) ILIKE $2)" in sql
+        assert mock_conn.fetch.call_args[0][1:] == ("%риск%", "%просрочк%", 10, 0)
+
+    async def test_contains_any_skips_blank_values(self, repo, mock_conn):
+        """contains_any с пустым/пробельным списком → фильтр пропускается (не 1=0, в отличие от in)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"ck_comment": FilterSpec(op="contains_any", values=["", "  "])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "WHERE" not in sql
+
 
 # -------------------------------------------------------------------------
 # search_filtered — сортировка/пагинация

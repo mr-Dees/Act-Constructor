@@ -169,9 +169,71 @@ class TestBuildFilterWhere:
         )
         assert where == ""
 
+    def test_contains_any_builds_or_ilike(self, repo):
+        """op=contains_any: OR по ILIKE — колонка содержит ЛЮБУЮ из фраз."""
+        where, params, idx = repo._build_filter_where(
+            {"ck_comment": FilterSpec(op="contains_any", values=["риск", "просрочк"])}
+        )
+        assert "(CAST(ck_comment AS TEXT) ILIKE $1 OR CAST(ck_comment AS TEXT) ILIKE $2)" in where
+        assert params == ["%риск%", "%просрочк%"]
+        assert idx == 3
+
+    def test_contains_any_skips_blank_values(self, repo):
+        """op=contains_any с пустым/пробельным списком → фильтр пропускается (не 1=0, в отличие от in)."""
+        where, params, idx = repo._build_filter_where(
+            {"ck_comment": FilterSpec(op="contains_any", values=["", "  "])}
+        )
+        assert where == ""
+        assert params == []
+
     def test_empty_filters_no_where(self, repo):
         """Без фильтров: WHERE пуст, params пуст, idx не сдвинут."""
         where, params, idx = repo._build_filter_where({})
         assert where == ""
         assert params == []
         assert idx == 1
+
+
+# -------------------------------------------------------------------------
+# _build_having (агрегатная часть + membership)
+# -------------------------------------------------------------------------
+
+
+class TestBuildHaving:
+
+    def test_contains_any_on_aggregate_builds_or_ilike(self, repo):
+        """contains_any по агрегатной колонке — OR по CAST(SUM(...) AS TEXT) ILIKE."""
+        having, params, idx = repo._build_having(
+            {"total_npl_amount": FilterSpec(op="contains_any", values=["12", "34"])}, {}, 1,
+        )
+        assert (
+            "(CAST(SUM(npl_amount_rubles) AS TEXT) ILIKE $1 "
+            "OR CAST(SUM(npl_amount_rubles) AS TEXT) ILIKE $2)"
+        ) in having
+        assert params == ["%12%", "%34%"]
+
+    def test_membership_npl_breakdown_requires_npl_positive(self, repo):
+        """npl_breakdown (membership): группа проходит, если есть строка выбранного ТБ с NPL > 0."""
+        having, params, idx = repo._build_having(
+            {}, {"npl_breakdown": FilterSpec(op="in", values=["14", "1"])}, 1,
+        )
+        assert (
+            "SUM(CASE WHEN neg_finder_tb_id IN ($1, $2) AND npl_amount_rubles > 0 "
+            "THEN 1 ELSE 0 END) > 0"
+        ) in having
+        assert params == ["14", "1"]
+
+
+# -------------------------------------------------------------------------
+# _split_filters
+# -------------------------------------------------------------------------
+
+
+class TestSplitFilters:
+
+    def test_npl_breakdown_routes_to_membership(self):
+        """npl_breakdown маршрутизируется в membership, не в row/agg (см. _split_filters)."""
+        row, agg, member = FRValidationRepository._split_filters(
+            {"npl_breakdown": FilterSpec(op="in", values=["14"])}
+        )
+        assert "npl_breakdown" in member and not row and not agg

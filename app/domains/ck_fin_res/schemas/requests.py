@@ -12,7 +12,9 @@ class FilterSpec(BaseModel):
     - ``contains`` — подстрока по сырому тексту (поле ``value``);
     - ``in`` — членство по сырым значениям (поле ``values``; для словарей);
     - ``range`` — диапазон по сырому с приведением типа (``from``/``to`` + ``cast``);
-    - ``eq`` — точное равенство по сырому тексту (поле ``value``).
+    - ``eq`` — точное равенство по сырому тексту (поле ``value``);
+    - ``contains_any`` — колонка содержит ЛЮБУЮ из фраз (поле ``values``; OR по
+      ILIKE); пустой список → фильтр пропускается;
 
     Поле ``from`` конфликтует с ключевым словом Python, поэтому объявлено как
     ``from_`` с ``alias="from"``; ``populate_by_name=True`` позволяет заполнять
@@ -21,7 +23,7 @@ class FilterSpec(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    op: Literal["contains", "in", "range", "eq"]
+    op: Literal["contains", "in", "range", "eq", "contains_any"]
     value: Optional[str] = None
     values: Optional[list[str]] = None
     from_: Optional[str] = Field(default=None, alias="from")

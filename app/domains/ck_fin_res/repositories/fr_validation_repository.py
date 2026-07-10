@@ -144,12 +144,15 @@ AGG_FILTER_EXPR = {
 }
 
 # Membership-фильтры: «группа попадает в выдачу, если содержит такую строку»
-# (ключ — алиас с фронта, значение — реальная колонка). В отличие от
-# row-фильтра, membership НЕ режет физические строки группы ДО GROUP BY —
-# иначе SUM/COUNT итога считались бы по усечённому набору строк, искажая
-# tb_count/total_amount. tb_breakdown — алиас с фронта (колонки с таким именем
-# в VIEW нет, это computed-поле сборки группы), neg_finder_tb_id — прямой ключ.
-MEMBERSHIP_FILTER_COLS = {"neg_finder_tb_id": "neg_finder_tb_id", "tb_breakdown": "neg_finder_tb_id"}
+# (ключ — алиас с фронта; значение — (колонка членства, доп. условие строки
+# или None)). npl_breakdown учитывает только строки с NPL (> 0) — «группа
+# содержит выбранный ТБ, у которого есть NPL». Row-фильтром это быть не может
+# по той же причине, что и tb_breakdown (см. _split_filters).
+MEMBERSHIP_FILTER_COLS = {
+    "neg_finder_tb_id": ("neg_finder_tb_id", None),
+    "tb_breakdown": ("neg_finder_tb_id", None),
+    "npl_breakdown": ("neg_finder_tb_id", "npl_amount_rubles > 0"),
+}
 
 # Сортировка по виртуальным агрегатным колонкам.
 AGG_SORT_EXPR = {
@@ -206,7 +209,10 @@ class FRValidationRepository(BaseRepository):
           условие ``1=0`` («совпадений нет»);
         - ``range`` — ``CAST(col AS <T>) >= ${i}`` и/или ``<= ${j}``, где T —
           из cast-allowlist ({date→DATE, numeric→NUMERIC}); без корректного cast
-          или без границ — пропуск.
+          или без границ — пропуск;
+        - ``contains_any`` — ``(CAST(col AS TEXT) ILIKE ${i} OR ...)`` по каждой
+          непустой фразе из values; пустой/пробельный список → пропуск (в
+          отличие от ``in``, не ``1=0``).
 
         Все значения — bind-параметры (не конкатенируются в SQL). Каст в TEXT
         нужен, т.к. ILIKE/``=`` по тексту не определены для numeric/date/bool.
@@ -258,6 +264,16 @@ class FRValidationRepository(BaseRepository):
                     conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
                     params.append(to)
                     idx += 1
+            elif op == "contains_any":
+                values = [v for v in (spec.values or []) if v is not None and str(v).strip() != ""]
+                if not values:
+                    continue  # нет фраз = фильтр не задан (в отличие от in: пустой in → 1=0)
+                ors = []
+                for v in values:
+                    ors.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
+                    params.append(f"%{v}%")
+                    idx += 1
+                conditions.append("(" + " OR ".join(ors) + ")")
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         return where, params, idx
 
@@ -297,12 +313,15 @@ class FRValidationRepository(BaseRepository):
         ELSE 0 END) > 0 — группа проходит, если ХОТЯ БЫ ОДНА её строка
         удовлетворяет условию; итоги группы при этом считаются по ВСЕМ
         строкам (в отличие от row-level WHERE, которое отфильтровало бы
-        строки до GROUP BY и исказило SUM/COUNT)."""
+        строки до GROUP BY и исказило SUM/COUNT). ``contains_any`` сознательно
+        не поддерживается — чекбокс-фильтр (единственный источник membership
+        с фронта) шлёт только ``in``."""
         conditions: list[str] = []
         params: list = []
         idx = start_idx
         for column, spec in membership_filters.items():
-            col = MEMBERSHIP_FILTER_COLS[column]
+            col, extra = MEMBERSHIP_FILTER_COLS[column]
+            suffix = f" AND {extra}" if extra else ""
             op = spec.op
             if op == "in":
                 values = spec.values or []
@@ -310,21 +329,21 @@ class FRValidationRepository(BaseRepository):
                     conditions.append("1=0")
                     continue
                 placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
-                conditions.append(f"SUM(CASE WHEN {col} IN ({placeholders}) THEN 1 ELSE 0 END) > 0")
+                conditions.append(f"SUM(CASE WHEN {col} IN ({placeholders}){suffix} THEN 1 ELSE 0 END) > 0")
                 params.extend(values)
                 idx += len(values)
             elif op == "eq":
                 value = spec.value
                 if value is None or str(value).strip() == "":
                     continue
-                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) = ${idx} THEN 1 ELSE 0 END) > 0")
+                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) = ${idx}{suffix} THEN 1 ELSE 0 END) > 0")
                 params.append(value)
                 idx += 1
             elif op == "contains":
                 value = spec.value
                 if value is None or str(value).strip() == "":
                     continue
-                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) ILIKE ${idx} THEN 1 ELSE 0 END) > 0")
+                conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) ILIKE ${idx}{suffix} THEN 1 ELSE 0 END) > 0")
                 params.append(f"%{value}%")
                 idx += 1
         return conditions, params, idx
@@ -339,7 +358,8 @@ class FRValidationRepository(BaseRepository):
         """HAVING по агрегатам группы (SUM-фильтры) и по членству (группа
         содержит значение, например ТБ) — обе категории делят одну сквозную
         нумерацию параметров. Семантика op агрегатной части — как в
-        _build_filter_where, но выражение — SUM(...) вместо колонки."""
+        _build_filter_where (включая contains_any), но выражение — SUM(...)
+        вместо колонки."""
         conditions: list[str] = []
         params: list = []
         idx = start_idx
@@ -370,6 +390,16 @@ class FRValidationRepository(BaseRepository):
                     conditions.append(f"{expr} <= CAST(${idx} AS NUMERIC)")
                     params.append(to)
                     idx += 1
+            elif op == "contains_any":
+                values = [v for v in (spec.values or []) if v is not None and str(v).strip() != ""]
+                if not values:
+                    continue
+                ors = []
+                for v in values:
+                    ors.append(f"CAST({expr} AS TEXT) ILIKE ${idx}")
+                    params.append(f"%{v}%")
+                    idx += 1
+                conditions.append("(" + " OR ".join(ors) + ")")
         member_conditions, member_params, idx = cls._build_membership_having(membership_filters, idx)
         conditions.extend(member_conditions)
         params.extend(member_params)
