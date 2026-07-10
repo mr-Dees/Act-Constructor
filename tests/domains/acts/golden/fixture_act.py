@@ -283,13 +283,6 @@ def build_golden_act_dict() -> dict:
                 f'data-footnote-text="{MARKER_FOOTNOTE_TEXT}">'
                 "GOLDEN_TB_FOOTNOTE_ANCHOR</span>"
             ),
-            "formatting": {
-                "fontSize": 16,
-                "alignment": "center",
-                "bold": True,
-                "italic": True,
-                "underline": True,
-            },
         },
     }
 

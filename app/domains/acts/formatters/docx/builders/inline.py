@@ -2,9 +2,14 @@
 
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <s>/<strike>/<del>,
 <span style="font-size: ...">, <span style="text-decoration: line-through">,
-<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) рендерятся как
-мягкий перенос строки между блоками (контейнерная разметка contenteditable из
-обычного Enter). Любой другой тег игнорируется (содержимое сохраняется).
+<br>, <a href="...">. Блочные теги (<div>/<p>/<li>/<h1>..<h6>) внутри
+переданного фрагмента рендерятся как мягкий перенос строки между блоками.
+Любой другой тег игнорируется (содержимое сохраняется).
+
+TB-1: ВЕРХНЕУРОВНЕВЫЕ <div>/<p> контента текстблока — отдельные абзацы Word
+со своим выравниванием из style="text-align". Разбиение делает
+split_block_segments (ниже), потребитель — formatter._render_textblock:
+каждый сегмент → свой w:p → apply_inline_html только для внутренностей.
 
 Зачёркивание (M.19): Chromium execCommand('strikeThrough') эмитит <strike>
 (тег-форма, styleWithCSS в приложении не включается); CSS-форма
@@ -166,12 +171,19 @@ class _InlineParser(HTMLParser):
             self._footnote_run_before = existing_runs[-1] if existing_runs else None
             # Якорь рендерим обычным текстом; сноску добавим при закрытии.
             self._span_kinds.append(("footnote", attrs.get("data-footnote-text")))
-            self.stack.append(current)
+            # EXP-1: капсула-сноска со своим font-size (увеличенная/уменьшенная) —
+            # видимый якорь экспортируется этим кеглем, а не базовым.
+            size = _extract_size_pt(attrs)
+            self.stack.append(replace(current, size_pt=size) if size else current)
             return
         url = attrs.get("data-link-url", "")
         if "text-link" in cls and url and self._open_hyperlink(url):
             self._span_kinds.append(("link", None))
-            self.stack.append(replace(current, underline=True))
+            # EXP-1: капсула-ссылка со своим font-size — текст ссылки
+            # экспортируется этим кеглем (w:sz run'а внутри w:hyperlink).
+            size = _extract_size_pt(attrs)
+            state = replace(current, underline=True)
+            self.stack.append(replace(state, size_pt=size) if size else state)
             return
         size = _extract_size_pt(attrs)
         self._span_kinds.append(("plain", None))
@@ -190,7 +202,10 @@ class _InlineParser(HTMLParser):
             self._close_hyperlink()
         if tag == "span" and self._span_kinds:
             kind, payload = self._span_kinds.pop()
-            if kind == "footnote" and payload:
+            # EXP-3: критерий пустоты тела сноски — payload.strip() (зеркало
+            # фронт-нумерации numberFootnotes: text.trim()). «Пробельная» сноска
+            # сноской не становится — иначе экспорт и превью разошлись бы.
+            if kind == "footnote" and payload and payload.strip():
                 # BUG-3: хвостовой обычный пробел ВНУТРИ якоря (например из
                 # вставки Word) дал бы растяжимую щель между якорем и номером
                 # под justify — срезаем его перед добавлением сноски.
@@ -361,7 +376,13 @@ class _InlineParser(HTMLParser):
     def _open_hyperlink(self, href: str) -> bool:
         """Создаёт w:hyperlink. Якорь '#...' → внутренняя ссылка (w:anchor),
         безопасная внешняя схема → external relationship (r:id). Небезопасный
-        протокол (javascript: и т.п.) отклоняется → текст останется plain."""
+        протокол (javascript: и т.п.) отклоняется → текст останется plain.
+
+        Ссылка строится прямым oxml (не нативным API): python-docx 1.2.0 умеет
+        гиперссылки только на ЧТЕНИЕ (Paragraph.hyperlinks / класс Hyperlink),
+        метода записи add_hyperlink нет. К тому же ссылка-капсула несёт свои
+        run'ы с форматированием (цвет, кегль EXP-1, начертание) — простой
+        текст+URL их бы не выразил."""
         href = href.strip()
         hyperlink = OxmlElement("w:hyperlink")
         if href.startswith("#"):
@@ -389,3 +410,183 @@ def _extract_size_pt(attrs: dict) -> float | None:
     value = float(match.group(1))
     unit = match.group(2).lower()
     return value * _PX_TO_PT if unit == "px" else value
+
+
+# ---------------------------------------------------------------------------
+# TB-1: разбиение контента текстблока на верхнеуровневые сегменты-абзацы.
+# ---------------------------------------------------------------------------
+
+# Void-теги HTML: элемент не открывается, на глубину вложенности не влияют.
+# Для сегментации важен <br>; остальные — страховка для легаси-контента.
+_VOID_TAGS = frozenset({
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+})
+
+# text-align из inline-style блочного элемента. Прочие значения (start/end/
+# -webkit-*) сознательно не распознаются — рендер применит дефолт justify.
+_TEXT_ALIGN_RE = re.compile(
+    r"text-align\s*:\s*(left|center|right|justify)\b", re.IGNORECASE
+)
+
+# Сегмент из одного placeholder-<br> (пустая строка contenteditable:
+# <div><br></div>) — сам абзац уже даёт строку, w:br удвоил бы её.
+_PLACEHOLDER_BR_RE = re.compile(r"^\s*<br\b[^>]*>\s*$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class BlockSegment:
+    """Верхнеуровневый «абзац» контента текстблока.
+
+    alignment — значение text-align блочного элемента (None = не задано,
+    рендер подставит дефолт justify); html — внутренняя разметка сегмента
+    (пустая строка = пустой абзац-строка).
+    """
+    alignment: str | None
+    html: str
+
+
+def split_block_segments(html: str) -> list[BlockSegment]:
+    """Режет content на верхнеуровневые сегменты-абзацы для DOCX.
+
+    Верхнеуровневый <div>/<p> → отдельный сегмент со своим text-align.
+    Смежный контент ВНЕ блочных элементов (голый текст, span «размера на
+    каретке», <br> — легаси-разметка) группируется в анонимный сегмент без
+    выравнивания: он не теряется, а уходит в абзац с дефолтным justify.
+    Вложенные блочные теги остаются внутри html сегмента — apply_inline_html
+    рендерит их мягкими переносами w:br, как раньше. Пустой/пробельный
+    контент даёт пустой список (рендер сам добавит абзац-строку).
+    """
+    if not html:
+        return []
+    splitter = _TopLevelSplitter()
+    splitter.feed(html)
+    splitter.close()
+    return splitter.finish()
+
+
+class _TopLevelSplitter(HTMLParser):
+    """Собирает сегменты-абзацы, реконструируя сырой HTML из событий парсера.
+
+    convert_charrefs=False + get_starttag_text: entity-ссылки и атрибуты
+    вложенной разметки доезжают до apply_inline_html дословно, без
+    повторного экранирования.
+
+    Граница сегмента-абзаца — блочный <div>/<p>, который несёт СВОЁ
+    выравнивание, а не только верхнеуровневый (TB-1/S1). Вложенный блок со своим
+    text-align уходит в отдельный w:p с этим выравниванием — в браузере он и так
+    на своей строке со своим align (text-align наследуется, own-align
+    перекрывает). Вложенный блок БЕЗ align остаётся сырым внутри сегмента
+    (мягкий перенос w:br, наследует align родителя) — прежнее поведение. Так
+    превью (каскад CSS) и DOCX не расходятся по выравниванию.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self._segments: list[BlockSegment] = []
+        self._buf: list[str] = []
+        # Стек открытых блоков-КОНТЕЙНЕРОВ (границ сегмента): элемент —
+        # [align, emitted_child]. Пусто = верхний уровень (анонимный сегмент).
+        self._ctx_stack: list[list] = []
+        # Глубина открытых НЕ-контейнерных элементов (span/b/… и вложенных div/p
+        # без align) внутри текущего буфера. Пока >0 — мы внутри сырой разметки
+        # сегмента, новые div/p там тоже сырые (буфер держим сбалансированным).
+        self._inner_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        raw = self.get_starttag_text() or ""
+        if tag in _VOID_TAGS:
+            self._buf.append(raw)
+            return
+        if tag in ("div", "p") and self._inner_depth == 0:
+            align = _extract_text_align(dict(attrs))
+            # Контейнер: верхнеуровневый блок ЛИБО вложенный со своим align.
+            if not self._ctx_stack or align is not None:
+                self._open_container(align)
+                return
+        # Прочее (span/b/i/a/li/hN и вложенные div/p без align) — сырьё сегмента.
+        self._buf.append(raw)
+        self._inner_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        # Self-closing (<br/>) — элемент не открывается, глубина не растёт.
+        self._buf.append(self.get_starttag_text() or "")
+
+    def handle_endtag(self, tag):
+        if tag in _VOID_TAGS:
+            return
+        if self._inner_depth > 0:
+            self._inner_depth -= 1
+            self._buf.append(f"</{tag}>")
+            return
+        if self._ctx_stack:
+            self._close_container()
+        # else: непарный закрывающий тег на верхнем уровне — игнор.
+
+    def handle_data(self, data):
+        if data:
+            self._buf.append(data)
+
+    def handle_entityref(self, name):
+        self._buf.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self._buf.append(f"&#{name};")
+
+    def finish(self) -> list[BlockSegment]:
+        """Хвост после конца ввода: закрываем недозакрытые контейнеры и остаток."""
+        while self._ctx_stack:
+            self._close_container()
+        self._flush_anonymous()
+        return self._segments
+
+    def _open_container(self, align: str | None) -> None:
+        # Перед новым контейнером — сбросить накопленный кусок текущего сегмента.
+        if self._ctx_stack:
+            self._flush_partial()          # частичный кусок родителя (его align)
+            self._ctx_stack[-1][1] = True  # у родителя появился дочерний сегмент
+        else:
+            self._flush_anonymous()        # верхнеуровневый анонимный кусок
+        self._ctx_stack.append([align, False])
+
+    def _close_container(self) -> None:
+        inner = _normalize_segment_html("".join(self._buf))
+        self._buf.clear()
+        align, emitted_child = self._ctx_stack.pop()
+        if inner:
+            self._segments.append(BlockSegment(align, inner))
+        elif not emitted_child:
+            # Пустой блок-лист = пустая строка-абзац (как <div><br></div>).
+            self._segments.append(BlockSegment(align, ""))
+        # else: пустой хвост после дочерних сегментов — не плодим пустой абзац.
+
+    def _flush_partial(self) -> None:
+        """Кусок текущего контейнера ДО вложенного блока — свой сегмент с align
+        контейнера; чисто пробельный кусок пропускаем (браузер его схлопывает)."""
+        text = "".join(self._buf)
+        self._buf.clear()
+        if not text.strip(" \t\r\n"):
+            return
+        self._segments.append(
+            BlockSegment(self._ctx_stack[-1][0], _normalize_segment_html(text))
+        )
+
+    def _flush_anonymous(self) -> None:
+        text = "".join(self._buf)
+        self._buf.clear()
+        # Межблочные ASCII-пробелы браузер схлопывает — абзац из них не
+        # делаем. &nbsp;/U+00A0 сюда не попадают (не в " \t\r\n").
+        if not text.strip(" \t\r\n"):
+            return
+        self._segments.append(BlockSegment(None, _normalize_segment_html(text)))
+
+
+def _normalize_segment_html(inner: str) -> str:
+    if _PLACEHOLDER_BR_RE.match(inner):
+        return ""
+    return inner
+
+
+def _extract_text_align(attrs: dict) -> str | None:
+    match = _TEXT_ALIGN_RE.search(attrs.get("style") or "")
+    return match.group(1).lower() if match else None

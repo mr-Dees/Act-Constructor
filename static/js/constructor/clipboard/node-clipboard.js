@@ -403,6 +403,14 @@ export const NodeClipboard = {
             return false;
         }
 
+        // PERSIST-2: лимит текстблоков-на-узел (B-13). insertNodeAt не зовёт
+        // canAddContent — без этой проверки paste мог дать узлу N+1 текстблоков.
+        const textBlockLimitCheck = ValidationTree.canInsertTextBlockSubtree(targetNodeId, regenerated.node);
+        if (!textBlockLimitCheck.valid) {
+            Notifications.error(textBlockLimitCheck.message);
+            return false;
+        }
+
         // КП-5: лимит суммарного размера картинок целевого акта.
         const limits = getImageLimits();
         const existingBytes = estimateActImageBytes(_unwrap(AppState.violations) || {});

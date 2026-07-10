@@ -57,6 +57,11 @@ export class ItemsRenderer {
         }
 
         tableManager.attachEventListeners();
+
+        // TREE-1: сквозная нумерация сносок по всем редакторам листа единым
+        // проходом (в т.ч. read-only) — иначе после полного рендера номера пусты
+        // до фокуса. Централизованно здесь, НЕ в каждом createEditor (иначе O(N²)).
+        textBlockManager.renumberAllFootnotes();
     }
 
     /**
@@ -93,6 +98,12 @@ export class ItemsRenderer {
         // Восстанавливаем listeners только в новом поддереве; ширины колонок
         // рендерятся из colWidths через colgroup, отдельное восстановление не нужно.
         tableManager.attachEventListenersToContainer(newEl);
+
+        // TREE-1: пересборка поддерева пересоздаёт входящие в него текстблок-
+        // редакторы (номера сносок — рантайм-атрибут, теряются), а удаление/
+        // перенос блока со сносками сдвигает сквозную нумерацию последующих —
+        // перенумеровываем весь лист единым проходом (как превью после патча).
+        textBlockManager.renumberAllFootnotes();
     }
 
     /**
@@ -149,6 +160,11 @@ export class ItemsRenderer {
         const newEl = textBlockManager.createTextBlockElement(textBlock, node);
         oldEl.parentNode.replaceChild(newEl, oldEl);
         this._domIndex.set(`textblock:${textBlockId}`, newEl);
+
+        // TREE-1: пересозданный блок теряет номера сносок (рантайм-атрибут), а
+        // смена их числа сдвигает сквозную нумерацию последующих блоков —
+        // перенумеровываем весь лист единым проходом.
+        textBlockManager.renumberAllFootnotes();
     }
 
     /**

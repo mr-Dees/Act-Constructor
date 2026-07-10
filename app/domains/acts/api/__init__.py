@@ -1,6 +1,7 @@
 """API роутеры домена актов."""
 
 from app.domains.acts.api.limits import router as limits_router
+from app.domains.acts.api.editor_telemetry import router as editor_telemetry_router
 from app.domains.acts.api.management import router as management_router
 from app.domains.acts.api.content import router as content_router
 from app.domains.acts.api.export import router as export_router
@@ -16,6 +17,9 @@ def get_api_routers():
         # затенялся бы маршрутом GET /{act_id} (int-конвертация "limits"
         # даёт 422 без fallthrough к следующему роуту).
         (limits_router, "/acts", ["Лимиты актов"]),
+        # editor-telemetry — тоже литеральный путь, регистрируем до management
+        # по той же причине (никакой int-конвертации сегмента пути).
+        (editor_telemetry_router, "/acts", ["Телеметрия редактора"]),
         (management_router, "/acts", ["Менеджмент актов"]),
         (content_router, "/acts", ["Содержимое актов"]),
         (export_router, "/acts/export", ["Операции экспорта"]),

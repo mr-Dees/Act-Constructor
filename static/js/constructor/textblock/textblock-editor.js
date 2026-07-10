@@ -1,12 +1,11 @@
 /**
  * Расширение для работы с редактором
  */
-import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
-import { SafeHTML } from '../../shared/sanitize.js';
+import { SafeHTML, SAFE_HTML_PROFILES, renderActContent } from '../../shared/sanitize.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -45,12 +44,14 @@ Object.assign(TextBlockManager.prototype, {
         editor.dataset.placeholder = 'Введите текст...';
         // Sanitize: textBlock.content приходит из БД, мог быть сохранён до того,
         // как backend начнёт чистить через bleach. DOMPurify обрабатывает любой
-        // вектор stored-XSS на клиенте.
-        SafeHTML.set(editor, textBlock.content || '');
+        // вектор stored-XSS на клиенте. CORE-1: профиль 'acts' (не дефолтный
+        // blocklist) — редактируемая поверхность должна совпадать с тем, что
+        // реально допускает бэк-санитайзер и что отрисует превью.
+        renderActContent(editor, textBlock.content || '');
 
         // O1: чиним уже-битые капсулы старых актов при открытии (дубль-id и т.п.).
         if (this.validateAndRepairCapsules) {
-            SafeHTML.set(editor, this.validateAndRepairCapsules(editor.innerHTML));
+            renderActContent(editor, this.validateAndRepairCapsules(editor.innerHTML));
         }
 
         // BUG-2.2: бэк-санитайзер (bleach, html_sanitizer.py) срезает с маркеров
@@ -71,6 +72,12 @@ Object.assign(TextBlockManager.prototype, {
         if (AppConfig.readOnlyMode?.isReadOnly) {
             editor.contentEditable = 'false';
             editor.classList.add('read-only');
+            // CARET-2 (перенос между актами): редактировать в RO нельзя, но
+            // КОПИРОВАТЬ можно — навешиваем copy (не cut) со strip guard'ов
+            // (U+FEFF в RO-DOM есть: normalizeMarkers выше отрабатывает до RO-ветки)
+            // и меткой data-aw-clip. editor берётся замыканием (activeEditor RO не
+            // ставит) — handleEditorCopy передаёт его в _expandRangeOutOfMarkers.
+            editor.addEventListener('copy', (e) => this.handleEditorCopy(e, editor, false));
         } else {
             editor.contentEditable = 'true';
             this.attachEditorEvents(editor, textBlock);
@@ -78,7 +85,7 @@ Object.assign(TextBlockManager.prototype, {
             this.installCapsuleObserver(editor);
         }
 
-        this.applyFormatting(editor, textBlock.formatting);
+        this.applyBaseFontSize(editor);
 
         return editor;
     },
@@ -211,6 +218,26 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private CARET-3: DOM-строка (между <br>) может визуально ПЕРЕНОСИТЬСЯ на
+     * несколько экранных рядов в узком блоке. Капсула — первый узел строки —
+     * физически лежит только на ПЕРВОМ ряду; на wrap-продолжении Home должен
+     * вести к началу ТЕКУЩЕГО экранного ряда (нативное поведение), а не
+     * телепортировать к капсуле. Сравниваем нижнюю границу ряда капсулы с
+     * верхней точкой каретки: каретка ниже — она на другом (wrap) ряду. Если
+     * измерить не удалось — не блокируем штатное поведение #12.
+     * @param {Range} range схлопнутая каретка
+     * @param {Element} first капсула — первый узел DOM-строки
+     * @returns {boolean}
+     */
+    _isCaretOnCapsuleRow(range, first) {
+        const capRect = first.getClientRects()[0];
+        if (!capRect) return true;
+        const caretRect = range.getClientRects()[0] || range.getBoundingClientRect();
+        if (!caretRect) return true;
+        return caretRect.top < capRect.bottom - 1;
+    },
+
+    /**
      * @private Снимает caret-guard'ы: чистые U+FEFF-узлы удаляет, а U+FEFF
      * ВНУТРИ текста с реальными символами (guard, в который успели напечатать)
      * срезает, сохраняя текст. Идемпотентно. U+200B (якорь размера) не трогает.
@@ -283,6 +310,69 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private TB-4: снимает ОСИРОТЕВШИЕ якоря размера из ЖИВОГО DOM перед
+     * сериализацией — span'ы с inline font-size, чьё содержимое ТОЛЬКО U+200B
+     * (материализация «размера на каретке» из applyFontSize), ПОД КАРЕТКОЙ
+     * которых уже никого нет (пользователь ушёл, не напечатав). Без этого якоря
+     * копятся в content годами: дают ложный смешанный размер и раздувают разметку.
+     * Заодно чистит ГОЛЫЕ текстовые узлы из одного U+200B без span-обёртки —
+     * removeFormat разворачивает якорь именно в такой узел (селектор
+     * span[style] его уже не находит).
+     *
+     * B-2 (регрессия ЗАПРЕЩЕНА): якорь, ВНУТРИ которого стоит текущая каретка, —
+     * это «живая» материализация размера, обязанная пережить сохранение; его НЕ
+     * трогаем. Каретку читаем из живого Selection; её ZWSP-узел переживает
+     * normalizeMarkers (та чистит только U+FEFF), поэтому проверка надёжна и
+     * после нормализации капсул. Идемпотентно.
+     *
+     * ignoreCaret=true — режим blur: каретка ПОКИДАЕТ редактор, поэтому B-2 не
+     * применяем (Selection на blur ещё может указывать внутрь якоря, но
+     * пользователь уже ушёл, не напечатав → якорь осиротел). Иначе такие якоря
+     * утекали бы в сохранённый content: обычный blur-путь finalizeEdit —
+     * единственный их чистильщик — не вызывал.
+     * @param {HTMLElement} editor
+     * @param {{ignoreCaret?: boolean}} [opts={}]
+     */
+    _cleanOrphanSizeAnchors(editor, { ignoreCaret = false } = {}) {
+        if (!editor || typeof editor.querySelectorAll !== 'function') return;
+        if (typeof this._isZeroWidthNode !== 'function'
+            || typeof this._isCapsule !== 'function') return;
+        const sel = (!ignoreCaret && typeof window !== 'undefined' && typeof window.getSelection === 'function')
+            ? window.getSelection() : null;
+        const caretNode = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0).startContainer : null;
+        editor.querySelectorAll('span[style]').forEach(span => {
+            if (this._isCapsule(span) || !span.style || !span.style.fontSize) return;
+            // Якорь = span, содержимое которого — только zero-width (U+200B).
+            if (!this._isZeroWidthNode(span)) return;
+            // B-2: каретка внутри якоря → это живая материализация размера, не трогаем.
+            if (caretNode && typeof span.contains === 'function' && span.contains(caretNode)) return;
+            span.remove();
+        });
+
+        // removeFormat-unwrap: тот же якорь, но БЕЗ span-обёртки — голый
+        // текстовый узел из одного U+200B. U+FEFF (caret-guard) сюда НЕ входит,
+        // его чистит _cleanCapGuards отдельно. Каретка внутри текстового узла —
+        // это сам узел (startContainer), поэтому сравниваем по ссылке (B-2).
+        const bareAnchors = [];
+        const walk = (node) => {
+            let child = node.firstChild;
+            while (child) {
+                if (child.nodeType === Node.TEXT_NODE && /^[\u200B]+$/.test(child.data)) {
+                    bareAnchors.push(child);
+                } else if (child.nodeType === Node.ELEMENT_NODE && child.firstChild) {
+                    walk(child);
+                }
+                child = child.nextSibling;
+            }
+        };
+        walk(editor);
+        bareAnchors.forEach(t => {
+            if (t === caretNode) return;
+            if (t.parentNode) t.parentNode.removeChild(t);
+        });
+    },
+
+    /**
      * Привязывает tooltip-обработчики к ссылкам/сноскам при начальном рендере
      * Обработчики будут заменены полным набором при фокусе редактора
      * @private
@@ -335,6 +425,8 @@ Object.assign(TextBlockManager.prototype, {
         editor.addEventListener('input', () => this.handleEditorInput(editor, textBlock));
         editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e, editor, textBlock));
         editor.addEventListener('paste', (e) => this.handleEditorPaste(e, editor, textBlock));
+        editor.addEventListener('copy', (e) => this.handleEditorCopy(e, editor, false));
+        editor.addEventListener('cut', (e) => this.handleEditorCopy(e, editor, true));
         editor.addEventListener('mouseup', () => this.handleSelectionChange());
         editor.addEventListener('keyup', () => this.handleSelectionChange());
     },
@@ -356,8 +448,48 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
+        // Если фокус ушёл ДО compositionend (IME прервана внешне) — буфер
+        // __composingRecords иначе провисит до следующего ввода в этот
+        // редактор. Идемпотентно: при штатном compositionend __composing уже
+        // false и буфер уже слит — повторный вызов ничего не находит.
+        if (typeof this._flushComposition === 'function') this._flushComposition(editor);
+
+        // Blur = каретка покидает редактор: осиротевшие якоря размера (span, чьё
+        // содержимое — только U+200B, пользователь выбрал размер и ушёл, не
+        // напечатав) чистим из живого DOM ДО сериализации, игнорируя B-2. Иначе
+        // они утекали бы в сохранённый content — обычный blur-путь ниже пишет
+        // textBlock.content напрямую, минуя finalizeEdit (единственный чистильщик).
+        if (typeof this._cleanOrphanSizeAnchors === 'function') {
+            this._cleanOrphanSizeAnchors(editor, { ignoreCaret: true });
+        }
+
         const s = this._stripGuards(editor.innerHTML);
-        textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
+        // CORE-2b: сериализуем с признаком РЕАЛЬНОЙ починки капсул. Косметика
+        // (снятие contenteditable, ре-сериализация) меняет строку всегда, поэтому
+        // сравнивать repaired!==s нельзя — берём changed из отчёта валидатора.
+        const report = (typeof this._repairCapsulesReport === 'function')
+            ? this._repairCapsulesReport(s)
+            : { html: s, changed: false };
+        textBlock.content = report.html;
+
+        // Валидатор реально чинил капсулу (дубль-id, расщеплённый клон, пустая
+        // капсула) → живой DOM разошёлся с сохранённым content: возвращаем
+        // починенный HTML в редактор (renderActContent, Task 8), иначе до
+        // ре-рендера пользователь видит битую капсулу. Только на blur (не во
+        // время печати). Гард __healing глушит observer, чтобы write-back не
+        // вызвал heal-шторм; finalizeEdit (Task 1) нормализует guard'ы/нумерацию
+        // по починенному DOM и запишет content. Каретку не восстанавливаем —
+        // фокуса на blur уже нет.
+        if (report.changed) {
+            editor.__healing = true;
+            try {
+                renderActContent(editor, report.html);
+                this.finalizeEdit(editor);
+            } finally {
+                if (editor.__capsuleObserver) editor.__capsuleObserver.takeRecords();
+                editor.__healing = false;
+            }
+        }
 
         // Точечный апдейт превью сразу при blur: input-debounce (500мс) мог не
         // успеть сработать, и превью оставалось бы с устаревшим текстом до
@@ -389,6 +521,14 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик ввода с debounce
      */
     handleEditorInput(editor, textBlock) {
+        // CARET-1: пока капсула редактируется inline (двойной клик, класс
+        // editing-mode), автосток редактора на паузе — его finalizeEdit сбросил
+        // бы contenteditable редактируемой капсулы (normalizeMarkers) и сохранил
+        // бы служебный класс editing-mode в content. Событие input долетает сюда
+        // всплытием из капсулы; финальное сохранение делает finishEditing на
+        // выходе из режима (→ finalizeEdit).
+        if (editor.querySelector('.editing-mode')) return;
+
         // B-26: пустоту определяем синхронно при каждом вводе — мгновенный
         // показ/скрытие placeholder, без зависимости от save-debounce.
         this._toggleEmptyClass(editor);
@@ -398,26 +538,25 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         editor.saveTimeout = setTimeout(() => {
-            const s = this._stripGuards(editor.innerHTML);
-            textBlock.content = this.validateAndRepairCapsules ? this.validateAndRepairCapsules(s) : s;
-
-            if (typeof ChangelogTracker !== 'undefined') {
-                ChangelogTracker._recordDebounced('modify_textblock', textBlock.id, '', {field: 'content'}, 5000);
-            }
-
-            // Применяем форматирование к новым ссылкам и сноскам
+            // Наследуем форматирование на новые ссылки/сноски ДО стока, чтобы
+            // применённые стили попали в сериализованный content (см. #14).
             this.applyFormattingToNewNodes(editor);
-
-            // typing-flow: дополнительный 150 мс debounce поверх 500 мс save-debounce.
-            // Контентная правка одного блока → точечный патч.
-            PreviewManager.scheduleTypingBlock('textblock', textBlock.id);
+            // Единый сток: normalize-if-капсулы + перенумерация-по-изменению +
+            // empty-class + saveContent (changelog внутри, TB-5). Нативное
+            // удаление/paste могли изменить число сносок — finalizeEdit ловит это
+            // и перенумеровывает (CARET-7).
+            this.finalizeEdit(editor);
         }, 500);
     },
 
     /**
-     * Обработчик вставки. Стратегия «только ссылки» (4г): <a href> с абсолютной
-     * схемой http/https/mailto → внутренний span.text-link, всё остальное
-     * форматирование схлопывается в plain-text. Сноски из буфера не адаптируем.
+     * Обработчик вставки. Два режима по метке происхождения data-aw-clip:
+     *  - свой буфер (data-aw-clip) — round-trip капсул: реконструкция ссылок/
+     *    сносок фабриками со свежими id + сохранение инлайн-формата (CARET-2);
+     *  - внешний HTML — прежняя строгая политика «только ссылки» (4г).
+     * Вставка идёт через execCommand('insertHTML') — остаётся в нативном undo
+     * (§6.9). Гейт пустоты (CARET-6): пустой после санитизации фрагмент НЕ съедает
+     * выделение (никакого deleteContents до проверки), а откатывается в insertText.
      */
     handleEditorPaste(e, editor, textBlock) {
         e.preventDefault();
@@ -425,60 +564,238 @@ Object.assign(TextBlockManager.prototype, {
         const html = e.clipboardData.getData('text/html');
         const plain = e.clipboardData.getData('text/plain');
 
+        // CARET-1: вставка во время inline-правки капсулы (двойной клик) идёт
+        // ПЛЕЙН-текстом в её тело — HTML/капсулам внутри капсулы места нет. Наши
+        // слои её не клоббят (editing-mode), нативный insertText остаётся в undo;
+        // финальное сохранение делает finishEditing на выходе из режима.
+        if (editor.querySelector('.editing-mode')) {
+            if (plain) document.execCommand('insertText', false, plain);
+            return;
+        }
+
         // Нет HTML — прежний путь: только чистый текст.
         if (!html || !html.trim()) {
             document.execCommand('insertText', false, plain);
-            this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-            this._toggleEmptyClass(editor);
+            this.finalizeEdit(editor);
             return;
         }
 
         const fragment = this._buildPasteFragment(html);
 
+        // Гейт пустоты (CARET-6): DOMPurify мог вырезать весь фрагмент (например
+        // «Копировать изображение» кладёт только <img> при пустом plain). Проверку
+        // делаем ДО любой правки выделения — никакого deleteContents, иначе
+        // выделение исчезало бы без вставки и без undo. Пусто → откат в insertText
+        // (вернёт и undo); при пустом plain — no-op, выделение не трогаем.
+        if (!fragment.childNodes.length) {
+            if (plain) {
+                document.execCommand('insertText', false, plain);
+                this.finalizeEdit(editor);
+            } else {
+                // §6.8: и HTML санитизирован в ноль, и plain пуст — вставка
+                // ничего не даёт (частый кейс «Копировать изображение» в текст).
+                window.EditorTelemetry?.track?.('empty_paste');
+            }
+            return;
+        }
+
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
-            // Атомарность: если выделение клипает капсулу, deleteContents клонирует
-            // её. Расширяем границы за целые капсулы перед удалением/вставкой.
+            // Атомарность: выделение, клипающее тело капсулы, расширяем за целые
+            // капсулы — иначе insertHTML (как deleteContents) надкусит атом.
+            // editor передаём явно (не полагаемся на activeEditor).
             if (typeof this._expandRangeOutOfMarkers === 'function') {
-                this._expandRangeOutOfMarkers(range);
+                this._expandRangeOutOfMarkers(range, editor);
+                selection.removeAllRanges();
+                selection.addRange(range);
             }
-            range.deleteContents();
-            range.insertNode(fragment);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
+            // insertHTML (не insertNode) — вставка остаётся в нативном undo-стеке.
+            // Фрагмент уже безопасен: капсулы реконструированы (свежие id,
+            // contenteditable=false, URL прогнан через validateLinkUrl).
+            const holder = document.createElement('div');
+            holder.appendChild(fragment);
+            document.execCommand('insertHTML', false, holder.innerHTML);
         } else {
             // Нет каретки — деградируем до plain-text.
             document.execCommand('insertText', false, plain);
         }
 
-        this.normalizeMarkers(editor);
         // Наследуем форматирование на новые маркеры (как при ручном создании).
-        // #14: ДО saveContent — иначе унаследованный размер вставленной ссылки
+        // #14: ДО стока — иначе унаследованный размер вставленной ссылки
         // мутируется только в живом DOM и не попадает в сериализованный content
         // до blur (paste не ставит saveTimeout → flushActiveEditor — no-op).
         this.applyFormattingToNewNodes(editor);
-        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // Единый сток: normalize (guard'ы у вставленных маркеров) + перенумерация
+        // (paste поверх сноски мог её удалить — CARET-7) + empty-class +
+        // saveContent (+ changelog).
+        this.finalizeEdit(editor);
         // BUG-4: навешиваем ПОЛНЫЙ набор обработчиков (tooltip/contextmenu/
         // dblclick/клик-каретка) на вставленные маркеры сразу. Иначе ссылка из
         // Word оживала (наведение/редактирование) только при следующем фокусе —
         // перезаход на шаг, перезагрузка или клик в другое поле и обратно.
         this.attachLinkFootnoteHandlers();
-        this._toggleEmptyClass(editor);
     },
 
     /**
-     * 4г: строит DocumentFragment из вставленного HTML. <a href> на ЛЮБОЙ глубине
-     * → span.text-link (фабрика createLinkMarker, C5); прочий текст → textContent.
-     * Структура (абзацы/списки) теряется сознательно — режим «только ссылки».
-     * Word оборачивает <a> в mso-разметку, поэтому обходим всё дерево рекурсивно
-     * (а не только top-level), иначе вложенная ссылка терялась бы (BUG-4).
-     * Схему href валидирует validateLinkUrl (http/https/mailto/tel/ftp/file/#),
-     * как и при ручном вводе.
+     * CORE-4 + CARET-2: копирование/вырезание выделения в буфер СВОИМ форматом.
+     * Кладёт в clipboardData text/html (капсулы — как есть, span с data-атрибутами,
+     * под меткой происхождения data-aw-clip) и text/plain, предварительно стрипнув
+     * caret-guard'ы (U+FEFF) — иначе невидимка утекает во внешние приложения
+     * (CORE-4) и ломает обратную вставку. Выделение клонируется расширенным за
+     * целые капсулы (атомарность). cut дополнительно удаляет выделение через
+     * execCommand('delete') — остаётся в нативном undo (§6.9).
+     * @param {ClipboardEvent} e
+     * @param {HTMLElement} editor
+     * @param {boolean} isCut true для cut, false для copy
+     */
+    handleEditorCopy(e, editor, isCut) {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        // Только выделение внутри ЭТОГО редактора — иначе не вмешиваемся.
+        if (!editor.contains(range.commonAncestorContainer)) return;
+        if (!e.clipboardData) return;
+
+        e.preventDefault();
+
+        // Клон выделения, расширенный за целые капсулы (не надкусываем атом).
+        // editor передаём явно — RO-редактор не ставит activeEditor.
+        const work = range.cloneRange();
+        if (typeof this._expandRangeOutOfMarkers === 'function') {
+            this._expandRangeOutOfMarkers(work, editor);
+        }
+        const wrapper = document.createElement('div');
+        wrapper.setAttribute('data-aw-clip', '1');
+        wrapper.appendChild(work.cloneContents());
+        // Стрип caret-guard'ов (U+FEFF) из всего клона — рантайм-only, во внешние
+        // приложения не отдаём. U+200B (якорь размера) в html оставляем: переживает
+        // round-trip и сохраняет размер; из plain — вычищаем (в тексте он мусор).
+        if (typeof this._cleanCapGuards === 'function') this._cleanCapGuards(wrapper);
+
+        e.clipboardData.setData('text/html', wrapper.outerHTML);
+        e.clipboardData.setData('text/plain',
+            (wrapper.textContent || '').replace(/\u200B/g, ''));
+
+        if (isCut) {
+            // Удаляем расширенное выделение нативно — остаётся в undo-стеке.
+            selection.removeAllRanges();
+            selection.addRange(work);
+            document.execCommand('delete');
+            this.finalizeEdit(editor);
+        }
+    },
+
+    /**
+     * Строит DocumentFragment из вставленного HTML, выбирая режим по метке
+     * происхождения data-aw-clip: свой буфер → реконструкция капсул + инлайн-
+     * формат; внешний HTML → строгая политика «только ссылки».
      * @private
      */
     _buildPasteFragment(html) {
+        if (this._isOwnClipboardHtml(html)) {
+            return this._buildOwnPasteFragment(html);
+        }
+        return this._buildExternalPasteFragment(html);
+    },
+
+    /**
+     * @private Фрагмент помечен как наш буфер обмена (copy/cut редактора)?
+     * Точная проверка АТРИБУТА (а не подстроки — иначе слово «data-aw-clip» в
+     * тексте/чужом атрибуте ложно включило бы щедрый режим): парсим инертно в
+     * <template> и ищем ЭЛЕМЕНТ с data-aw-clip. querySelector по всему фрагменту,
+     * не только по корню: на реальном round-trip браузер оборачивает наш <div> в
+     * <html>/<body>/StartFragment-комментарии (CF_HTML), и корнем стал бы <html>.
+     * Дешёвый substring-префильтр отсекает обычный внешний HTML без парса.
+     */
+    _isOwnClipboardHtml(html) {
+        if (typeof html !== 'string' || html.indexOf('data-aw-clip') === -1) return false;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        return tpl.content.querySelector('[data-aw-clip]') !== null;
+    },
+
+    /**
+     * CARET-2: свой буфер (data-aw-clip) — round-trip капсул. Щедрый allowlist
+     * (инлайн-формат b/i/u/s/span[style] + разметка капсул), затем реконструкция
+     * капсул фабриками со СВЕЖИМИ id. Метку data-aw-clip может подделать и внешний
+     * источник — это безопасно: DOMPurify режет script, on*-обработчики и js-схему,
+     * а data-link-url прогоняется через validateLinkUrl (ниже), поэтому спуф даёт
+     * лишь обычную ссылку/сноску, не XSS.
+     * @private
+     */
+    _buildOwnPasteFragment(html) {
+        // §7: DOMPurify НЕ валидирует URL в data-атрибутах (только href/src),
+        // поэтому data-link-url проверяем сами (validateLinkUrl в
+        // _reconstructPastedCapsules). Хуки allowlist не мутируем.
+        const clean = SafeHTML.sanitize(html, {
+            USE_PROFILES: false,
+            ALLOWED_TAGS: ['b', 'i', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'],
+            ALLOWED_ATTR: ['style', 'class', 'href',
+                'data-link-id', 'data-link-url', 'data-footnote-id', 'data-footnote-text'],
+            // Round-trip живёт в том же контракте словаря форматирования, что
+            // превью/PUT: style фильтруется до CSS-allowlist профиля 'acts' (хук
+            // afterSanitizeAttributes читает __cssAllowlist), а не «любое
+            // DOMPurify-безопасное свойство». Берём активный набор профиля
+            // (отражает серверный applyActsAllowlist).
+            __cssAllowlist: [...(SAFE_HTML_PROFILES.acts.__cssAllowlist || [])],
+        });
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
+        this._reconstructPastedCapsules(tmp);
+        const fragment = document.createDocumentFragment();
+        while (tmp.firstChild) fragment.appendChild(tmp.firstChild);
+        return fragment;
+    },
+
+    /**
+     * @private Реконструирует капсулы во вставленном фрагменте своими фабриками
+     * (createLinkMarker/createFootnoteMarker) со СВЕЖИМИ id — чтобы вставленная
+     * копия не делила id с оригиналом. URL ссылки прогоняется через validateLinkUrl
+     * (DOMPurify data-атрибуты не проверяет). Невалидная/пустая капсула (нет
+     * текста, пустой/битый URL, пустое тело сноски) разворачивается в plain-text.
+     * validateLinkUrl лежит в window (избегаем циклического импорта с
+     * links-footnotes.js).
+     * @param {HTMLElement} root
+     */
+    _reconstructPastedCapsules(root) {
+        const caps = root.querySelectorAll(
+            '.text-link, .text-footnote, [data-link-url], [data-footnote-text]');
+        caps.forEach(el => {
+            if (!el.parentNode) return; // уже заменён (вложенный случай)
+            const text = el.textContent || '';
+            const isLink = el.classList.contains('text-link') || el.hasAttribute('data-link-url');
+            let replacement = null;
+            if (isLink) {
+                const verdict = window.validateLinkUrl
+                    ? window.validateLinkUrl(el.getAttribute('data-link-url') || '')
+                    : { ok: false };
+                if (text.trim() && verdict.ok) {
+                    replacement = this.createLinkMarker(text, verdict.url);
+                }
+            } else {
+                const body = (el.getAttribute('data-footnote-text') || '').trim();
+                if (text.trim() && body) {
+                    replacement = this.createFootnoteMarker(text, body);
+                }
+            }
+            // Невалидная/пустая капсула → её видимый текст.
+            if (!replacement) replacement = document.createTextNode(text);
+            el.parentNode.replaceChild(replacement, el);
+        });
+    },
+
+    /**
+     * 4г: строит DocumentFragment из ВНЕШНЕГО вставленного HTML. <a href> на ЛЮБОЙ
+     * глубине → span.text-link (фабрика createLinkMarker, C5); прочий текст →
+     * textContent. Структура (абзацы/списки) теряется сознательно — режим «только
+     * ссылки». Word оборачивает <a> в mso-разметку, поэтому обходим всё дерево
+     * рекурсивно (а не только top-level), иначе вложенная ссылка терялась бы
+     * (BUG-4). Схему href валидирует validateLinkUrl (http/https/mailto/tel/ftp/
+     * file/#), как и при ручном вводе.
+     * @private
+     */
+    _buildExternalPasteFragment(html) {
         // DOMPurify сводит вход к <a href> + блочной разметке + тексту; прочее
         // вырезается (KEEP_CONTENT=true по умолчанию сохраняет текст внутри
         // удалённых тегов). BUG-4: дефолтный ALLOWED_URI_REGEXP вырезает href со
@@ -626,6 +943,12 @@ Object.assign(TextBlockManager.prototype, {
             return;
         }
 
+        // CARET-4: guard прозрачен для голого Backspace/Delete (без модификаторов —
+        // Ctrl+Backspace словом наружу этой задачей не покрыт).
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            this._skipGuardOnDelete(e);
+        }
+
         // BUG-6: Enter у границы inline-маркера (contenteditable=false). Нативный
         // SplitBlock расщепляет/клонирует маркер — фантомные пустые капсулы и
         // задвоение нумерации сносок. Перехватываем и вставляем перенос вручную,
@@ -640,13 +963,17 @@ Object.assign(TextBlockManager.prototype, {
                     e.preventDefault();
                     const br = document.createElement('br');
                     range.insertNode(br);
+                    // Единый сток ДО установки каретки: normalizeMarkers внутри
+                    // пере-расставляет caret-guard'ы у новой границы строки
+                    // (CARET-5). Каретку ставим ПОСЛЕ — иначе normalize сдвинул бы
+                    // guard, в который она встала.
+                    this.finalizeEdit(editor);
                     if (after) {
-                        // Капсула уходит в начало новой строки. Ставим стойкий
-                        // caret-guard перед ней и каретку в нём — той же ленивой
-                        // установкой, что делает клик мышью; иначе перед
-                        // капсулой-в-начале-строки клавиатурой не встать
-                        // (эфемерная setStartAfter(br)-позиция не закреплена в
-                        // узле, а normalizeMarkers тут не зовётся).
+                        // Капсула уходит в начало новой строки — ставим каретку в
+                        // её ведущий caret-guard (его только что пере-расставил
+                        // finalizeEdit), той же ленивой установкой, что делает
+                        // клик мышью; иначе перед капсулой-в-начале-строки
+                        // клавиатурой не встать.
                         this._placeCaretBesideMarker(after, false);
                     } else {
                         const caret = document.createRange();
@@ -655,9 +982,6 @@ Object.assign(TextBlockManager.prototype, {
                         sel.removeAllRanges();
                         sel.addRange(caret);
                     }
-                    this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                    this.renumberEditorFootnotes();
-                    this._toggleEmptyClass(editor);
                     return;
                 }
             }
@@ -666,7 +990,11 @@ Object.assign(TextBlockManager.prototype, {
         // Shift+Enter - двойной перенос
         if (e.key === 'Enter' && e.shiftKey) {
             e.preventDefault();
-            this.execCommand('insertHTML', '<br><br>');
+            // insertHTML напрямую (не через this.execCommand) — вставка остаётся
+            // в нативном undo-стеке, а сток берёт на себя finalizeEdit, без
+            // двойного saveContent.
+            document.execCommand('insertHTML', false, '<br><br>');
+            this.finalizeEdit(editor);
         }
         // Escape - выход
         else if (e.key === 'Escape') {
@@ -700,9 +1028,18 @@ Object.assign(TextBlockManager.prototype, {
         if (e.key === 'Home') {
             // ТЕКУЩАЯ визуальная строка начинается капсулой → каретка перед ней
             // (в guard). Берём первый узел строки каретки, а не всего блока (#12):
-            // иначе Home на строке-N прыгал бы к капсуле строки 1.
+            // иначе Home на строке-N прыгал бы к капсуле строки 1. CARET-3: строка
+            // может быть длиннее блока и переноситься на несколько экранных рядов —
+            // первый узел DOM-строки всё равно капсула, хотя каретка физически на
+            // wrap-продолжении; _isCaretOnCapsuleRow не даёт телепортировать мимо
+            // native Home для этого случая.
             const first = this._currentLineFirstNode(range, editor);
-            if (this._isCapsule(first)) {
+            // CARET-1 (симметрия Task 2): капсула в inline-правке (dblclick,
+            // editing-mode) — обычный редактируемый контент; Home внутри её тела
+            // должен работать нативно, а не выдёргивать каретку в ведущий guard.
+            // Тот же предикат _isEditingCapsule, что и в слоях целостности.
+            if (this._isCapsule(first) && !this._isEditingCapsule(first) &&
+                    this._isCaretOnCapsuleRow(range, first)) {
                 e.preventDefault();
                 this._placeCaretBesideMarker(first, false);
                 return true;
@@ -769,5 +1106,56 @@ Object.assign(TextBlockManager.prototype, {
         const isMarker = (n) => n && n.nodeType === Node.ELEMENT_NODE && n.classList &&
             (n.classList.contains('text-link') || n.classList.contains('text-footnote'));
         return { before: isMarker(beforeNode) ? beforeNode : null, after: isMarker(afterNode) ? afterNode : null };
-    }
+    },
+
+    /**
+     * @private CARET-4: guard-узел (U+FEFF) в направлении удаления с данной
+     * схлопнутой каретки — если Backspace/Delete упёрся бы именно в него.
+     * Guard всегда длиной 1, поэтому граница — либо каретка ВНУТРИ самого
+     * guard'а (offset 0 или 1), либо guard — непосредственный сосед контейнера
+     * каретки с нужной стороны.
+     * @param {Range} range схлопнутая каретка
+     * @param {boolean} forward true — Delete (вперёд), false — Backspace (назад)
+     * @returns {Text|null}
+     */
+    _guardInDeleteDirection(range, forward) {
+        const c = range.startContainer, o = range.startOffset;
+        if (this._isGuardNode(c)) {
+            return (forward ? o === 0 : o === c.data.length) ? c : null;
+        }
+        if (c.nodeType === Node.TEXT_NODE) {
+            if (forward ? o !== c.data.length : o !== 0) return null;
+            const sib = forward ? c.nextSibling : c.previousSibling;
+            return this._isGuardNode(sib) ? sib : null;
+        }
+        const sib = c.childNodes[forward ? o : o - 1] || null;
+        return this._isGuardNode(sib) ? sib : null;
+    },
+
+    /**
+     * CARET-4: guard прозрачен для Backspace/Delete. Реальный Backspace/Delete
+     * ПО guard-символу опустошает его text-node и тут же роняет узел (браузер,
+     * один батч мутаций) — MutationObserver (_onCapsuleMutations) молча
+     * восстанавливает guard, а слияние строк/удаление настоящего содержимого
+     * требует ВТОРОГО нажатия. keydown срабатывает раньше нативного удаления —
+     * сдвигаем каретку ЗА guard (сам guard не трогаем, DOM не мутируем) и НЕ
+     * вызываем preventDefault: нативная команда получает цель уже без guard'а
+     * между ней и кареткой (перенос, край блока или соседняя капсула — её
+     * атомарное удаление отрабатывает существующий слой beforeinput).
+     * @param {KeyboardEvent} e
+     * @private
+     */
+    _skipGuardOnDelete(e) {
+        if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+        const sel = window.getSelection();
+        if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return;
+        const forward = e.key === 'Delete';
+        const guard = this._guardInDeleteDirection(sel.getRangeAt(0), forward);
+        if (!guard) return;
+        const range = document.createRange();
+        range.setStart(guard, forward ? guard.data.length : 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    },
 });

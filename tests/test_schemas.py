@@ -17,7 +17,6 @@ from app.domains.acts.schemas.act_content import (
     ActDataSchema,
     TableCellSchema,
     TableSchema,
-    TextBlockFormattingSchema,
     TextBlockSchema,
     ViolationAdditionalContentSchema,
     ViolationContentItemSchema,
@@ -398,32 +397,31 @@ class TestViolationAdditionalContentItemsLimit:
             )
 
 
-# ── TextBlockFormattingSchema ──
+# ── TextBlockSchema: устаревшее поле formatting ──
 
 
-class TestTextBlockFormatting:
+class TestTextBlockLegacyFormatting:
+    """Директива владельца: объект formatting вырезан из модели.
 
-    def test_default_values(self):
-        f = TextBlockFormattingSchema()
-        assert f.fontSize == 14
-        assert f.alignment == "justify"
+    Старые акты хранят его в content-JSON — загрузка/PUT такого акта не должна
+    падать при extra="forbid" (before-валидатор молча выкидывает ключ).
+    """
 
-    def test_font_size_too_small(self):
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=7)
+    def test_legacy_formatting_key_ignored(self):
+        tb = TextBlockSchema.model_validate({
+            "id": "b1", "nodeId": "n1", "content": "<p>текст</p>",
+            "formatting": {
+                "fontSize": 14, "alignment": "center",
+                "bold": True, "italic": False, "underline": False,
+            },
+        })
+        assert "formatting" not in tb.model_dump()
+        assert tb.content == "<p>текст</p>"
 
-    def test_font_size_too_large(self):
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=73)
-
-    def test_invalid_alignment(self):
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(alignment="top")
-
-    def test_valid_alignment_values(self):
-        for a in ("left", "center", "right", "justify"):
-            f = TextBlockFormattingSchema(alignment=a)
-            assert f.alignment == a
+    def test_other_unknown_field_still_rejected(self):
+        # extra="forbid" сохранён: выкидывается только известное легаси-поле.
+        with pytest.raises(ValidationError, match="junk"):
+            TextBlockSchema(id="b1", nodeId="n1", junk=1)
 
 
 # ── ActDataSchema ──
@@ -479,10 +477,6 @@ class TestExtraForbidPolicy:
     def test_unknown_field_in_textblock_rejected(self):
         with pytest.raises(ValidationError, match="junk"):
             TextBlockSchema(id="tb1", nodeId="n1", junk=1)
-
-    def test_unknown_field_in_formatting_rejected(self):
-        with pytest.raises(ValidationError, match="lineHeight"):
-            TextBlockFormattingSchema(lineHeight=1.5)
 
     def test_unknown_field_in_violation_item_rejected(self):
         with pytest.raises(ValidationError, match="position"):
@@ -740,14 +734,9 @@ class TestDynamicLimitsFromSettings:
     @pytest.fixture(autouse=True)
     def _reset_registry(self):
         from app.core import settings_registry
-        # B-35: _textblock_font_bounds кэширует границы (@lru_cache) — между
-        # тестами, меняющими ACTS__TEXTBLOCKS__*, кэш сбрасываем.
-        from app.domains.acts.schemas.act_content import _textblock_font_bounds
         settings_registry.reset()
-        _textblock_font_bounds.cache_clear()
         yield
         settings_registry.reset()
-        _textblock_font_bounds.cache_clear()
 
     @staticmethod
     def _register(acts_settings):
@@ -790,36 +779,13 @@ class TestDynamicLimitsFromSettings:
             TableSchema(id="t", nodeId="n", grid=grid3)
         TableSchema(id="t", nodeId="n", grid=grid3[:2])
 
-    def test_font_size_bounds_from_settings(self):
-        """#13: границы шрифта берутся из ACTS__TEXTBLOCKS__*."""
+    def test_font_size_default_from_settings(self):
+        """EXP-2: базовый размер текстблока берётся из
+        ACTS__TEXTBLOCKS__FONT_SIZE_DEFAULT (единый источник /limits и экспорта)."""
         from app.domains.acts.settings import ActsSettings, TextblocksSettings
-        self._register(ActsSettings(textblocks=TextblocksSettings(font_size_min=10, font_size_max=20)))
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=8)
-        with pytest.raises(ValidationError):
-            TextBlockFormattingSchema(fontSize=22)
-        TextBlockFormattingSchema(fontSize=14)
-
-    def test_startup_hook_clears_poisoned_font_bounds_cache(self):
-        """#2/B-35: кэш границ, заполненный ФОЛБЭК-дефолтами до регистрации
-        настроек (как на импорте формата), сбрасывается startup-хуком —
-        env-границы ACTS__TEXTBLOCKS__* начинают действовать в рантайме.
-
-        Без хука кэш «застревал» на 8..72: UI-гейт видел env-лимит, а валидатор
-        схемы — нет, и PUT /content отклонял допустимый размер."""
-        import asyncio
-        from app.domains.acts.schemas.act_content import _textblock_font_bounds
-        from app.domains.acts.settings import ActsSettings, TextblocksSettings
-        from app.domains.acts._lifecycle import _clear_font_bounds_cache
-
-        # Реестр пуст → первый вызов кэширует фолбэк-дефолты (8..72).
-        assert _textblock_font_bounds() == (8, 72)
-        # Настройки регистрируются ПОСЛЕ (как на старте) — кэш ещё отравлен.
-        self._register(ActsSettings(
-            textblocks=TextblocksSettings(font_size_min=10, font_size_max=90)
-        ))
-        assert _textblock_font_bounds() == (8, 72)  # застряло на дефолтах
-        # Startup-хук сбрасывает кэш — читаются реальные границы.
-        asyncio.run(_clear_font_bounds_cache(None))
-        assert _textblock_font_bounds() == (10, 90)
-        TextBlockFormattingSchema(fontSize=90)  # теперь валиден
+        self._register(ActsSettings(textblocks=TextblocksSettings(font_size_default=20)))
+        from app.core import settings_registry
+        from app.domains.acts import DOMAIN_NAME
+        assert settings_registry._registry[DOMAIN_NAME].textblocks.font_size_default == 20
+        # Дефолт — 16px.
+        assert TextblocksSettings().font_size_default == 16

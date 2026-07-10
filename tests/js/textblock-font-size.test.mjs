@@ -54,6 +54,8 @@ function makeEditor() {
     innerHTML: '<p>x</p>',
     style: {},
     focus() {},
+    // finalizeEdit (единый сток) опрашивает капсулы и число сносок.
+    querySelector: () => null,
     querySelectorAll: () => [],
   };
 }
@@ -64,6 +66,8 @@ function makeManager(editor) {
   mgr.fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
   mgr.saved = [];
   mgr.saveContent = (id, content) => mgr.saved.push({ id, content });
+  // _toggleEmptyClass живёт в textblock-editor.js (тут не импортирован) — стаб.
+  mgr._toggleEmptyClass = () => {};
   mgr.updateToolbarState = () => {};
   return mgr;
 }

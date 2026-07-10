@@ -38,6 +38,8 @@ export const DEFAULT_STRUCTURE_LIMITS = {
     minColWidthPx: AppConfig.limits.table.minColWidthPx,
     fontSizeMin: AppConfig.limits.textblock.fontSizeMin,
     fontSizeMax: AppConfig.limits.textblock.fontSizeMax,
+    // Базовый размер текстблока (px) — единый источник для редактора/превью.
+    fontSizeDefault: AppConfig.limits.textblock.fontSizeDefault,
     // B-13: макс. число текстблоков на узел — фолбэк до ответа /acts/limits.
     textBlocksPerNode: AppConfig.content.limits.textBlocksPerNode,
 };
@@ -81,12 +83,19 @@ export function loadImageLimits() {
             if (tb) {
                 if (typeof tb.font_size_min === 'number') _structure.fontSizeMin = tb.font_size_min;
                 if (typeof tb.font_size_max === 'number') _structure.fontSizeMax = tb.font_size_max;
+                // EXP-2: базовый размер текстблока (редактор/превью) — из настроек.
+                if (typeof tb.font_size_default === 'number') _structure.fontSizeDefault = tb.font_size_default;
                 // B-13: серверный лимит числа текстблоков на узел.
                 if (typeof tb.per_node === 'number') _structure.textBlocksPerNode = tb.per_node;
             }
             // B-5/4е: единый allowlist санитайзера из той же выдачи /acts/limits.
             if (data && data.sanitizer) {
                 applyActsAllowlist(data.sanitizer);
+            }
+            // §6.8: kill-switch телеметрии редактора из той же выдачи. false →
+            // модуль перестаёт слать батчи (бэк и так ответит 204 без записи).
+            if (data && typeof data.editor_telemetry_enabled === 'boolean') {
+                window.EditorTelemetry?.setEnabled?.(data.editor_telemetry_enabled);
             }
         } catch (_) {
             // Сеть/CORS — дефолты, серверная валидация прикроет.
@@ -109,7 +118,8 @@ export function getImageLimits() {
  * Текущие структурные лимиты таблиц/шрифта (дефолты до ответа сервера).
  *
  * @returns {{maxRows:number, maxCols:number, minColWidthPx:number,
- *            fontSizeMin:number, fontSizeMax:number}}
+ *            fontSizeMin:number, fontSizeMax:number, fontSizeDefault:number,
+ *            textBlocksPerNode:number}}
  */
 export function getStructureLimits() {
     return _structure;

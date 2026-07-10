@@ -56,6 +56,7 @@ async def get_acts_limits(
         "textblocks": {
             "font_size_min": textblocks.font_size_min,
             "font_size_max": textblocks.font_size_max,
+            "font_size_default": textblocks.font_size_default,
             "per_node": textblocks.per_node,
         },
         "sanitizer": {
@@ -63,4 +64,7 @@ async def get_acts_limits(
             "allowed_css_properties": sanitizer.allowed_css_properties,
             "allowed_data_attrs": sanitizer.allowed_data_attrs,
         },
+        # §6.8: kill-switch телеметрии редактора. Фронт кэширует ответ /limits
+        # и, получив false, перестаёт слать батчи в /acts/editor-telemetry.
+        "editor_telemetry_enabled": acts_cfg.editor_telemetry_enabled,
     }

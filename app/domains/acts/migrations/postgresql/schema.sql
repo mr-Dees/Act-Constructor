@@ -206,12 +206,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
     content TEXT NOT NULL,
-    formatting JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT check_formatting_is_object
-        CHECK (jsonb_typeof(formatting) = 'object'),
 
     UNIQUE(act_id, textblock_id)
 );
@@ -361,6 +357,27 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
 );
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
+
+-- ============================================================================
+-- ТАБЛИЦА ТЕЛЕМЕТРИИ ЗДОРОВЬЯ РЕДАКТОРА (§6.8)
+-- ============================================================================
+-- Минимальная наблюдаемость самовосстановлений редактора: фронт копит счётчики
+-- событий (self-heal observer'а, починки капсул, ошибки сохранения, пустой
+-- paste) и батчами шлёт их сюда. Read-API нет — данные смотрим SQL'ем.
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_editor_telemetry (
+    id VARCHAR(36) PRIMARY KEY,
+    act_id INTEGER NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    event_type VARCHAR(32) NOT NULL
+        CONSTRAINT check_editor_telemetry_event_type_values
+        CHECK (event_type IN ('observer_heal', 'capsule_repair', 'dup_id_fix',
+                              'save_failure', 'empty_paste')),
+    event_count INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_editor_telemetry IS 'Счётчики событий здоровья редактора актов (self-heal, починки капсул, ошибки сохранения)';
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ

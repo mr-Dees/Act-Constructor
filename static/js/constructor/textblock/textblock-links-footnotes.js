@@ -79,6 +79,26 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Публичная фабрика inline-маркера сноски — зеркало createLinkMarker для
+     * paste-потока round-trip (CARET-2). Создаёт detached span.text-footnote с
+     * уникальным id и телом сноски в data-footnote-text; НЕ вставляет в DOM и НЕ
+     * навешивает обработчики. Номер (data-footnote-number) проставит renumber.
+     * @param {string} text Видимый текст сноски
+     * @param {string} footnoteText Тело сноски
+     * @returns {HTMLSpanElement}
+     */
+    createFootnoteMarker(text, footnoteText) {
+        const markerId = 'footnote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const span = document.createElement('span');
+        span.className = 'text-footnote';
+        span.setAttribute('data-footnote-id', markerId);
+        span.setAttribute('data-footnote-text', footnoteText);
+        span.contentEditable = 'false';
+        span.textContent = text;
+        return span;
+    },
+
+    /**
      * Общий поток создания/редактирования inline-маркера (ссылка/сноска):
      * поиск существующего маркера в выделении → prompt значения → обновление
      * атрибута существующего ЛИБО вставка нового span с наследованием
@@ -133,6 +153,12 @@ Object.assign(TextBlockManager.prototype, {
                 return;
             }
             resolvedValue = verdict.url;
+        } else {
+            // EXP-3: тело сноски триммим перед записью в data-footnote-text —
+            // «пробельная» сноска не должна возникать. Критерий пустоты бэка
+            // (inline.py payload.strip()) и нумерации (numberFootnotes .trim())
+            // одинаков; без трима обёрточные пробелы разъехались бы с экспортом.
+            resolvedValue = value.trim();
         }
 
         const range = selection.getRangeAt(0);
@@ -202,12 +228,10 @@ Object.assign(TextBlockManager.prototype, {
             this.attachLinkFootnoteHandlers();
         }
 
-        const textBlockId = this.activeEditor.dataset.textBlockId;
-        // Капсула появилась/изменилась — пере-расставляем caret-guard'ы.
-        this.normalizeMarkers(this.activeEditor);
-        this.saveContent(textBlockId, this.activeEditor.innerHTML);
-        // B-10: создание/правка маркера могли добавить сноску — пере-нумеровать.
-        this.renumberEditorFootnotes();
+        // Единый сток с принудительной перенумерацией: создание/правка маркера
+        // могли добавить сноску ЛИБО изменить её номер без изменения числа
+        // .text-footnote (правка текста существующей сноски).
+        this.finalizeEdit(this.activeEditor, { renumber: true });
     },
 
     /**
@@ -215,6 +239,18 @@ Object.assign(TextBlockManager.prototype, {
      */
     enableInlineEditing(element) {
         const originalText = element.textContent;
+        // Редактор капсулы фиксируем сразу: this.activeEditor к моменту выхода из
+        // правки мог обнулиться (blur-очистка тулбара по таймауту при фокусе на
+        // capsule), а finalizeEdit требует конкретный редактор (требование №2).
+        const editor = element.closest('.textblock-editor');
+
+        // CARET-1: гасим висящий автосток редактора — таймер, взведённый вводом
+        // в редактор прямо перед двойным кликом, иначе выстрелит во время
+        // inline-правки и сбросит contenteditable капсулы (normalizeMarkers).
+        if (editor && editor.saveTimeout) {
+            clearTimeout(editor.saveTimeout);
+            editor.saveTimeout = null;
+        }
 
         element.classList.add('editing-mode');
         element.contentEditable = 'true';
@@ -240,11 +276,12 @@ Object.assign(TextBlockManager.prototype, {
 
                 if (!newText) {
                     element.textContent = originalText;
-                } else {
-                    if (this.activeEditor) {
-                        const textBlockId = this.activeEditor.dataset.textBlockId;
-                        this.saveContent(textBlockId, this.activeEditor.innerHTML);
-                    }
+                } else if (editor) {
+                    // Единый сток вместо прямого saveContent (Task 1, требование №2):
+                    // editing-mode уже снят выше, поэтому normalizeMarkers вернёт
+                    // капсуле contenteditable=false и пере-расставит caret-guard'ы,
+                    // а saveContent запишет правку (перенумерация — по счётчику).
+                    this.finalizeEdit(editor);
                 }
             } else {
                 element.textContent = originalText;
@@ -350,15 +387,19 @@ Object.assign(TextBlockManager.prototype, {
             formattedSpan.style.fontSize = fontSize;
         }
 
+        // B-25: гасим слушатели капсулы ДО replaceChild — иначе AbortController
+        // остаётся «живым» на узле, который уже покинул DOM. Пересоздавать его
+        // не нужно: element полностью выбрасывается, новый маркер на его место
+        // не встаёт.
+        if (element._lfAbort) {
+            element._lfAbort.abort();
+        }
         element.parentNode.replaceChild(formattedSpan, element);
 
         if (this.activeEditor) {
-            const textBlockId = this.activeEditor.dataset.textBlockId;
-            // Капсула удалена — пере-расставляем caret-guard'ы.
-            this.normalizeMarkers(this.activeEditor);
-            this.saveContent(textBlockId, this.activeEditor.innerHTML);
-            // B-10: сноска удалена — пере-нумеровать оставшиеся.
-            this.renumberEditorFootnotes();
+            // Единый сток с принудительной перенумерацией: удалённая сноска
+            // требует пере-нумерации оставшихся.
+            this.finalizeEdit(this.activeEditor, { renumber: true });
         }
     },
 
@@ -536,15 +577,42 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * B-10: проставляет сквозную нумерацию сносок активного редактора
-     * (data-footnote-number) с учётом сносок в предшествующих по дереву блоках.
-     * Вызывается из потока фокуса и после создания/удаления маркера (не из
+     * B-10: проставляет сквозную нумерацию сносок редактора (data-footnote-number)
+     * с учётом сносок в предшествующих по дереву блоках. По умолчанию — активный
+     * редактор; finalizeEdit передаёт СВОЙ editor (тот же, на котором считал число
+     * сносок для гейта, иначе счёт и мутация могли бы разойтись). Вызывается из
+     * потока фокуса и после создания/удаления маркера (не из
      * attachLinkFootnoteHandlers — нумерация не привязана к навешиванию слушателей).
+     * @param {HTMLElement} [editor=this.activeEditor]
      */
-    renumberEditorFootnotes() {
-        if (!this.activeEditor) return;
-        const offset = footnoteOffsetForBlock(this.activeEditor.dataset.textBlockId);
-        numberFootnotes(this.activeEditor, offset + 1);
+    renumberEditorFootnotes(editor = this.activeEditor) {
+        if (!editor) return;
+        const offset = footnoteOffsetForBlock(editor.dataset.textBlockId);
+        numberFootnotes(editor, offset + 1);
+    },
+
+    /**
+     * TREE-1/CORE-3: сквозная нумерация сносок по ВСЕМ редакторам листа единым
+     * проходом — аналог numberFootnotes(sheet) в превью. Обход идёт по document
+     * order контейнера #itemsContainer, который renderAll строит в порядке дерева
+     * (тот же порядок, что у листа превью и DOCX), поэтому соответствие
+     * «сноска→номер» совпадает с превью/экспортом. Один счётчик на весь лист —
+     * O(N), НЕ per-editor offset (иначе O(N²)). Работает и в read-only: капсулы
+     * там отрендерены, просто редактор нередактируем.
+     *
+     * Поддерживает когерентность кэша editor.__lastFootnoteCount (гейт
+     * finalizeEdit): после прохода каждому редактору проставляем его текущее
+     * число .text-footnote тем же критерием (ВСЕ капсулы, включая пустые), что
+     * считает сам finalizeEdit, — иначе гейт стрелял бы вхолостую или молчал.
+     * @param {ParentNode} [container=document.getElementById('itemsContainer')]
+     */
+    renumberAllFootnotes(container = document.getElementById('itemsContainer')) {
+        if (!container || typeof container.querySelectorAll !== 'function') return;
+        // Единый сквозной проход — тот же обход листа, что numberFootnotes(sheet).
+        numberFootnotes(container, 1);
+        container.querySelectorAll('.textblock-editor').forEach((ed) => {
+            ed.__lastFootnoteCount = ed.querySelectorAll('.text-footnote').length;
+        });
     }
 });
 

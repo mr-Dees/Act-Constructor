@@ -34,6 +34,16 @@ export class LockLostError extends Error {
 window.LockLostError = LockLostError;
 
 /**
+ * PERSIST-6: предел тела запроса для fetch с keepalive. Спецификация
+ * ограничивает суммарное тело всех keepalive-запросов ~64KB; при превышении
+ * fetch(..., {keepalive:true}) бросает синхронно. Порог держим чуть ниже 64KB
+ * (запас на заголовки). Тело крупнее — обычный fetch как best-effort (при
+ * закрытии вкладки может не долететь).
+ * @type {number}
+ */
+const KEEPALIVE_MAX_BODY_BYTES = 60 * 1024;
+
+/**
  * Клиент для взаимодействия с API
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
@@ -730,12 +740,23 @@ export class APIClient {
         APIClient._saveInFlightPromise = new Promise((r) => { _resolveSave = r; });
 
         try {
-            // Блокируем отслеживание на время сохранения
-            window.StorageManager.disableTracking();
+            // PERSIST-4: запоминаем эпоху грязности ДО сериализации. Трекинг
+            // выключаем ТОЛЬКО вокруг синхронного exportActData (flush
+            // активного редактора внутри него не должен поднять эпоху — эти
+            // правки как раз уходят в data). Символы, напечатанные во время
+            // await PUT ниже, инкрементят эпоху при включённом трекинге, и
+            // после ответа мы это заметим (см. решение о markAsSyncedWithDB).
+            const epochBeforeSave = window.StorageManager.getDirtyEpoch();
 
             // B-16: flush зависших правок + сериализация одной воронкой —
             // иначе PUT уедет без последних символов активного редактора.
-            const data = window.StorageManager.exportActData();
+            window.StorageManager.disableTracking();
+            let data;
+            try {
+                data = window.StorageManager.exportActData();
+            } finally {
+                window.StorageManager.enableTracking();
+            }
             data.saveType = saveType;
             data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
 
@@ -785,11 +806,12 @@ export class APIClient {
                 window.StorageManager.setBaseUpdatedAt(result.updated_at);
             }
 
-            // Помечаем как синхронизированное с БД
-            window.StorageManager.markAsSyncedWithDB();
-
-            // Содержимое теперь в БД — снимок-черновик больше не нужен.
-            window.StorageManager.removeSnapshot(actId);
+            // PERSIST-4/A1: единый финал успешного PUT (эпоха-гейт синхронизации
+            // + снятие снимка при стабильной эпохе; гашение offline-машинерии в
+            // любом случае). Если за время PUT пользователь печатал (эпоха
+            // выросла), эти правки в отправленную data НЕ попали — акт остаётся
+            // dirty и дошлётся следующим циклом.
+            window.StorageManager.finalizeDbSave(actId, epochBeforeSave);
 
             // Бэкенд может вернуть мягкое предупреждение (Finding 3/8): сохранение
             // прошло, но есть на что обратить внимание. Для периодического
@@ -827,6 +849,9 @@ export class APIClient {
 
         } catch (err) {
             console.error('Ошибка сохранения акта в БД:', err);
+            // §6.8: сохранение в БД не удалось — фиксируем в телеметрии редактора
+            // (фоновые сбои сохранения иначе молчат).
+            window.EditorTelemetry?.track?.('save_failure');
             // Для LockLostError не показываем toast — вызывающая сторона сделает
             // редирект на список с плашкой autoExit (одинаковый UX с фоновым autoExit'ом).
             // Для периодического (фонового) сохранения toast на каждый тик не
@@ -840,10 +865,9 @@ export class APIClient {
             APIClient._saveInFlight = false;
             APIClient._saveInFlightPromise = null;
             if (_resolveSave) _resolveSave();
-            // Включаем отслеживание обратно
-            setTimeout(() => {
-                window.StorageManager.enableTracking();
-            }, AppConfig.timings.enableTrackingAfterSave);
+            // PERSIST-4: трекинг больше не выключается на весь PUT — он
+            // выключается только вокруг синхронного exportActData выше (и там же
+            // включается обратно), чтобы правки во время await PUT не терялись.
         }
     }
 
@@ -855,10 +879,14 @@ export class APIClient {
      * _saveInFlight (дожидается in-flight, затем держит гард). Бросает ошибку
      * наверх БЕЗ собственного toast (решение об UX принимает StorageManager).
      * @param {number} actId
+     * @param {{keepalive?: boolean}} [opts={}] - PERSIST-6: при keepalive:true
+     *   (эскалация из beforeunload) запрос помечается keepalive, чтобы пережить
+     *   закрытие вкладки — но только если тело влезает в лимит keepalive
+     *   (KEEPALIVE_MAX_BODY_BYTES); тело крупнее уходит обычным fetch.
      * @returns {Promise<Object>} ответ PUT
      * @throws {Error|LockLostError}
      */
-    static async forceSaveToDb(actId) {
+    static async forceSaveToDb(actId, { keepalive = false } = {}) {
         const username = AuthManager.getCurrentUser();
         if (!username) {
             throw new Error('Пользователь не авторизован');
@@ -876,17 +904,45 @@ export class APIClient {
         }
         APIClient._saveInFlight = true;
         try {
+            // PERSIST-4: та же эпоха грязности, что в saveActContent. Запоминаем
+            // ДО сериализации; трекинг выключаем только вокруг синхронного
+            // exportActData (flush активного редактора внутри него не должен
+            // поднять эпоху — эти правки уходят в data). Без гейта
+            // markAsSyncedWithDB хоронил бы символы, напечатанные во время PUT
+            // (body уже собран exportActData) → потеря при reload.
+            const epochBeforeSave = window.StorageManager.getDirtyEpoch();
+
             // flush+сериализация одной воронкой (B-16).
-            const data = window.StorageManager.exportActData();
+            window.StorageManager.disableTracking();
+            let data;
+            try {
+                data = window.StorageManager.exportActData();
+            } finally {
+                window.StorageManager.enableTracking();
+            }
             data.saveType = 'manual';
             data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
+
+            const body = JSON.stringify(data);
+            // PERSIST-6: keepalive только если тело влезает в лимит — иначе
+            // fetch с keepalive бросит синхронно. Крупное тело (типичный кейс
+            // переполнения LS) уходит обычным fetch как best-effort.
+            const bodyBytes = new Blob([body]).size;
+            if (keepalive && bodyBytes > KEEPALIVE_MAX_BODY_BYTES) {
+                // Без этого предупреждения деградация в обычный fetch молчалива —
+                // о том, что аварийное сохранение не переживёт закрытие вкладки,
+                // никто не узнаёт до потери правок.
+                console.warn('Черновик больше 60КБ — сохранение при закрытии вкладки не гарантировано.');
+            }
+            const useKeepalive = keepalive && bodyBytes <= KEEPALIVE_MAX_BODY_BYTES;
 
             const resp = await this._fetchWithTimeout(
                 AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`),
                 {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data),
+                    body,
+                    ...(useKeepalive ? { keepalive: true } : {}),
                 }
             );
             if (!resp.ok) {
@@ -895,8 +951,16 @@ export class APIClient {
             }
             const result = await resp.json();
             if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
-            window.StorageManager.markAsSyncedWithDB();
+            // PERSIST-4/A1: единый финал (эпоха-гейт синхронизации + снятие снимка
+            // + гашение offline-машинерии). Eviction снимка живёт здесь, а не в
+            // _escalateQuotaToDb — атомарно с гейтом (как в saveActContent).
+            window.StorageManager.finalizeDbSave(actId, epochBeforeSave);
             return result;
+        } catch (err) {
+            // §6.8: аварийное сохранение в БД не удалось — фиксируем в телеметрии
+            // редактора и пробрасываем (UX-решение принимает StorageManager).
+            window.EditorTelemetry?.track?.('save_failure');
+            throw err;
         } finally {
             APIClient._saveInFlight = false;
         }

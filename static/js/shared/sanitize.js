@@ -49,6 +49,9 @@ const DEFAULT_CONFIG = {
 export const ACTS_CSS_PROPERTIES = [
     'font-size', 'color', 'background-color',
     'font-weight', 'font-style', 'text-decoration', 'text-decoration-line',
+    // TB-1: per-line выравнивание — execCommand justify* пишет text-align
+    // в style блочных элементов; без свойства в allowlist превью теряло центр.
+    'text-align',
 ];
 const ACTS_TAGS_FALLBACK = [
     'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del',
@@ -123,21 +126,59 @@ function _warnIfDrift(label, server, fallback) {
 let _activeCssAllowlist = null;
 let _cssHookRegistered = false;
 
+// TB-1 (per-tag политика): блочные теги несут ТОЛЬКО text-align с
+// enum-значением — зеркало фактического контракта редактора: font-size
+// эмитится на span (Range-хирургия applyFontSize), text-align — на блоках
+// (execCommand justify*). div-level font-size отрисовался бы в превью, но
+// DOCX его игнорирует (_extract_size_pt читается только у span) — был бы
+// новый шов превью↔экспорт. Зеркало бэка — _BLOCK_STYLE_TAGS в
+// html_sanitizer.py.
+const BLOCK_STYLE_TAGS = ['div', 'p'];
+const TEXT_ALIGN_VALUES = ['left', 'center', 'right', 'justify'];
+
+/**
+ * Пер-элементная фильтрация inline-style профиля с CSS-allowlist: блочным
+ * тегам (div/p) остаётся только text-align с enum-значением, остальным —
+ * свойства из allowlist. Чистая функция (страж-тест гоняет её в node без
+ * DOM); хук ниже скармливает ей пары из node.style.
+ * @param {string} tagName - имя тега (регистр любой)
+ * @param {Array<[string,string]>} declarations - пары [свойство, значение]
+ * @param {string[]} cssAllowlist - allowlist свойств для не-блочных тегов
+ * @returns {string[]} строки-декларации, которые остаются
+ */
+export function filterCssDeclarations(tagName, declarations, cssAllowlist) {
+    const tag = String(tagName || '').toLowerCase();
+    const isBlock = BLOCK_STYLE_TAGS.includes(tag);
+    const kept = [];
+    for (const [prop, value] of declarations) {
+        if (isBlock) {
+            if (prop !== 'text-align') continue;
+            const v = String(value || '').trim().toLowerCase();
+            if (!TEXT_ALIGN_VALUES.includes(v)) continue;
+            kept.push(`text-align:${v};`);
+        } else if (cssAllowlist.includes(prop)) {
+            kept.push(`${prop}:${value};`);
+        }
+    }
+    return kept;
+}
+
 function ensureCssAllowlistHook() {
     if (_cssHookRegistered) return;
     const DP = window.DOMPurify;
     if (!DP || typeof DP.addHook !== 'function') return;
+    // Хук НЕ мутирует allowlist-массивы (advisory GHSA про мутацию конфига
+    // из хуков) — только пер-вызовная перезапись style конкретного элемента.
     DP.addHook('afterSanitizeAttributes', (node) => {
         if (!_activeCssAllowlist) return;
         if (!node || !node.style || typeof node.hasAttribute !== 'function') return;
         if (!node.hasAttribute('style')) return;
-        const kept = [];
+        const declarations = [];
         for (let i = node.style.length - 1; i >= 0; i--) {
             const prop = node.style[i]; // уже kebab-case
-            if (_activeCssAllowlist.includes(prop)) {
-                kept.push(`${prop}:${node.style.getPropertyValue(prop)};`);
-            }
+            declarations.push([prop, node.style.getPropertyValue(prop)]);
         }
+        const kept = filterCssDeclarations(node.tagName, declarations, _activeCssAllowlist);
         if (kept.length) node.setAttribute('style', kept.join(''));
         else node.removeAttribute('style');
     });
@@ -237,4 +278,19 @@ function escapeHtml(str) {
 
 export const SafeHTML = { set, sanitize, escapeHtml };
 window.SafeHTML = SafeHTML;
+
+/**
+ * CORE-1: единая точка рендера пользовательского контента акта (текстблок-
+ * редактор, превью) — всегда профилем 'acts'. Раньше редактор звал
+ * SafeHTML.set(el, html) БЕЗ профиля (дефолтный blocklist DEFAULT_CONFIG
+ * пропускал теги вне allowlist'а, например <img src=...> из легаси-контента) —
+ * редактируемая поверхность расходилась с тем, что реально допускает
+ * бэк-санитайзер и что отрисует превью.
+ * @param {HTMLElement} el
+ * @param {string} html
+ */
+export function renderActContent(el, html) {
+    set(el, html, 'acts');
+}
+
 export { CHAT_MD_CONFIG };

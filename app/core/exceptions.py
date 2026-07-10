@@ -86,8 +86,6 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_acts_validation_status_values": (
         "Недопустимое состояние валидации акта. Допустимые значения: ok, warning, error"
     ),
-    # ── acts: act_textblocks ─────────────────────────────────────────────────
-    "check_formatting_is_object": "Данные форматирования должны быть объектом JSON",
     # ── acts: act_violations ─────────────────────────────────────────────────
     "check_description_list_is_object_or_null": (
         "Поле description_list должно быть объектом JSON или отсутствовать"
@@ -125,6 +123,11 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Допустимые значения: pending, verified, rejected"
     ),
     "check_metrics_is_array": "Поле metrics должно быть массивом JSON",
+    # ── acts: act_editor_telemetry ───────────────────────────────────────────
+    "check_editor_telemetry_event_type_values": (
+        "Недопустимый тип события телеметрии редактора. Допустимые значения: "
+        "observer_heal, capsule_repair, dup_id_fix, save_failure, empty_paste"
+    ),
     # ── chat: chat_files ─────────────────────────────────────────────────────
     "check_chat_files_file_size_positive": "Размер файла должен быть больше нуля",
     # ── chat: chat_messages ──────────────────────────────────────────────────

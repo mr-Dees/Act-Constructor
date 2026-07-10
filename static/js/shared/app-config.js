@@ -430,12 +430,10 @@ export class AppConfig {
             // Таблицы
             tableRows: 3,
             tableCols: 3,
-            columnWidth: 100,
-
-            // Текстовые блоки. Начертание (жирный/курсив/подчёркивание) живёт
-            // только в content как inline-HTML (B-1) — дефолтов formatting нет.
-            fontSize: 14,
-            alignment: 'justify'
+            columnWidth: 100
+            // Текстовые блоки: форматирование целиком в inline-HTML content
+            // (директива владельца, EXP-2). Базовый размер — из /acts/limits
+            // (limits.textblock.fontSizeDefault), контейнерных дефолтов нет.
         },
 
         // Сообщения об ошибках
@@ -620,9 +618,12 @@ export class AppConfig {
         },
 
         textblock: {
-            // Размер шрифта (бэк: TextBlockFormattingSchema.fontSize ge=8 le=72)
+            // Границы размера шрифта span'ов (бэк: ACTS__TEXTBLOCKS__FONT_SIZE_*)
             fontSizeMin: 8,
-            fontSizeMax: 72
+            fontSizeMax: 72,
+            // Базовый (экранный) размер текстблока в px — база редактора/превью,
+            // экспорт конвертирует ×0.75 (16px → 12pt, EXP-2).
+            fontSizeDefault: 16
         }
     };
 

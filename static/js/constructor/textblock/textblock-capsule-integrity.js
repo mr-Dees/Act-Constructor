@@ -18,25 +18,58 @@ Object.assign(TextBlockManager.prototype, {
      * @returns {string}
      */
     validateAndRepairCapsules(html) {
-        if (typeof html !== 'string') return html;
+        return this._repairCapsulesReport(html).html;
+    },
+
+    /**
+     * @private CORE-2b: как validateAndRepairCapsules, но возвращает ещё и
+     * признак РЕАЛЬНОЙ структурной починки (дубль-id / расщеплённый клон /
+     * пустая капсула), НЕ считая косметику — снятие contenteditable, стрип
+     * guard'ов, ре-сериализацию <template> (они меняют строку всегда, поэтому
+     * сравнение repaired!==input ненадёжно). Нужен write-back'у на blur: живой
+     * DOM синхронизируем с починенным content ТОЛЬКО когда валидатор реально
+     * чинил капсулу, иначе — DOM-шторм на каждом blur.
+     * @param {string} html
+     * @returns {{html: string, changed: boolean}}
+     */
+    _repairCapsulesReport(html) {
+        if (typeof html !== 'string') return { html, changed: false };
         if (html.indexOf('text-link') === -1 && html.indexOf('text-footnote') === -1) {
-            return this._stripGuards ? this._stripGuards(html) : html;
+            const stripped = this._stripGuards ? this._stripGuards(html) : html;
+            return { html: stripped, changed: false };
         }
         const tpl = document.createElement('template');
         tpl.innerHTML = html;
-        this._repairCapsulesInRoot(tpl.content);
-        return tpl.innerHTML;
+        const changed = this._repairCapsulesInRoot(tpl.content);
+        // §6.8: валидатор реально чинил капсулу (пустая развёрнута / клон склеен /
+        // дубль-id переназначен) — фиксируем в телеметрии.
+        if (changed) window.EditorTelemetry?.track?.('capsule_repair');
+        return { html: tpl.innerHTML, changed };
     },
 
     /**
      * @private Починка капсул внутри root-узла (DocumentFragment ИЛИ живой
      * editor). Общая логика для валидатора и слоя-observer (DRY).
      * @param {DocumentFragment|HTMLElement} root
+     * @returns {boolean} была ли СТРУКТУРНАЯ починка (пустая капсула развёрнута,
+     *   расщеплённый клон склеен, дубль-id переназначен). Косметика (снятие
+     *   contenteditable, стрип guard'ов) сюда НЕ входит — нужно write-back'у.
      */
     _repairCapsulesInRoot(root) {
         const guardChar = this.CAP_GUARD_CHAR;
         // id → первая встреченная капсула с этим id (в document order)
         const seen = new Map();
+        // #11: множество ВСЕХ id капсул документа, включая ещё не обойдённые.
+        // Дериватив дубля ('<id>_d<n>') не должен совпасть с литеральным id,
+        // стоящим ПОЗЖЕ по порядку: иначе тот при обходе счёлся бы дублем и был
+        // переименован зря (+ ложный dup_id_fix). Собираем один раз до цикла.
+        const allIds = new Set();
+        root.querySelectorAll('.text-link, .text-footnote').forEach(span => {
+            const idAttr = span.classList.contains('text-link') ? 'data-link-id' : 'data-footnote-id';
+            const id = span.getAttribute(idAttr);
+            if (id) allIds.add(id);
+        });
+        let changed = false;
         root.querySelectorAll('.text-link, .text-footnote').forEach(span => {
             const isLink = span.classList.contains('text-link');
             const idAttr = isLink ? 'data-link-id' : 'data-footnote-id';
@@ -53,6 +86,7 @@ Object.assign(TextBlockManager.prototype, {
             if (!val || !val.trim()) {
                 const text = document.createTextNode(span.textContent || '');
                 if (span.parentNode) span.parentNode.replaceChild(text, span);
+                changed = true;
                 return;
             }
 
@@ -63,16 +97,22 @@ Object.assign(TextBlockManager.prototype, {
                 if (this._areAdjacentSplit(first, span, valAttr)) {
                     first.textContent = (first.textContent || '') + (span.textContent || '');
                     if (span.parentNode) span.parentNode.removeChild(span);
+                    changed = true;
                     return;
                 }
-                const fresh = this._freshMarkerId();
+                const fresh = this._derivedDuplicateId(id, seen, allIds);
                 span.setAttribute(idAttr, fresh);
                 seen.set(fresh, span);
+                changed = true;
+                // §6.8: детерминированная починка дубль-id — отдельный счётчик
+                // (подмножество capsule_repair, детализация в телеметрии).
+                window.EditorTelemetry?.track?.('dup_id_fix');
                 return;
             }
             if (id) seen.set(id, span);
         });
         if (this._cleanCapGuards) this._cleanCapGuards(root);
+        return changed;
     },
 
     /**
@@ -96,15 +136,42 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * @private Свежий id маркера.
-     * Схема совпадает с createLinkMarker и _createOrEditInlineMarker:
-     * prefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9).
-     * Префикс 'm_' (generic) — намеренно: де-дуплицируем и ссылки, и сноски,
-     * поэтому не 'link_'/'footnote_'.
+     * @private CORE-2: ДЕТЕРМИНИРОВАННЫЙ id для дубля капсулы. Прежний
+     * _freshMarkerId (Date.now()+Math.random()) давал на каждом save РАЗНЫЙ id —
+     * если необработанный ввод оставлял в DOM дубль-id, каждое сохранение писало
+     * иной content («вечно грязный» акт), а живой DOM расходился с сохранённым до
+     * ре-рендера. Дериватив от исходного id + порядкового номера дубля: тот же
+     * вход → побайтно тот же выход; после первой починки дубля уже нет, повторный
+     * прогон валидатора ничего не трогает (идемпотентность). Суффикс '_d<n>'
+     * держит id opaque (нигде не парсится) и проходит DOMPurify (значение data-*
+     * не ограничено). Коллизию с уже назначенным (seen) ИЛИ существующим где-либо
+     * в документе (allIds, #11) id обходим инкрементом n, сохраняя детерминизм
+     * (порядок обхода — document order).
+     * @param {string} baseId дублирующийся id
+     * @param {Map} seen уже назначенные id (в т.ч. деривативы)
+     * @param {Set} [allIds] все исходные id документа, включая ещё не обойдённые
      * @returns {string}
      */
-    _freshMarkerId() {
-        return 'm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    _derivedDuplicateId(baseId, seen, allIds = null) {
+        let n = 1;
+        const taken = (cand) => seen.has(cand) || (allIds !== null && allIds.has(cand));
+        while (taken(baseId + '_d' + n)) n += 1;
+        return baseId + '_d' + n;
+    },
+
+    /**
+     * @private Капсула в режиме inline-правки (двойной клик — enableInlineEditing):
+     * временно contenteditable='true' + класс 'editing-mode'. В этом режиме её тело —
+     * обычный редактируемый текст, поэтому слои целостности (beforeinput, expand,
+     * observer) НЕ трактуют её как атомарный contenteditable=false-атом: не расширяют
+     * за неё диапазон, не перенаправляют ввод, не удаляют целиком, не откатывают
+     * contenteditable. Единый предикат «капсула в правке» для ВСЕХ слоёв (CARET-1) —
+     * тот же критерий, что использует observer.
+     * @param {Node} node
+     * @returns {boolean}
+     */
+    _isEditingCapsule(node) {
+        return this._isCapsule(node) && node.classList.contains('editing-mode');
     },
 
     /**
@@ -138,9 +205,10 @@ Object.assign(TextBlockManager.prototype, {
                     if (target) {
                         e.preventDefault();
                         this._deleteCapsuleWhole(target);
-                        if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
-                        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                        this._toggleEmptyClass(editor);
+                        // Единый сток: удаление капсулы могло убрать сноску —
+                        // finalizeEdit перенумеровывает по изменению их числа
+                        // (CARET-7) и пере-расставляет guard'ы у оставшихся капсул.
+                        this.finalizeEdit(editor);
                     }
                 }
                 return;
@@ -151,11 +219,12 @@ Object.assign(TextBlockManager.prototype, {
                 e.preventDefault();
                 const range = this._expandStaticRangeOutOfMarkers(r, editor);
                 range.deleteContents();
-                if (this.renumberEditorFootnotes) this.renumberEditorFootnotes();
+                // Единый сток ДО восстановления каретки: normalize двигает
+                // guard'ы, перенумерация — по изменению числа сносок (удаление
+                // клипнутой капсулы; CARET-7).
+                this.finalizeEdit(editor);
                 const sel = window.getSelection();
                 if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-                this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
-                this._toggleEmptyClass(editor);
             }
             return;
         }
@@ -190,11 +259,12 @@ Object.assign(TextBlockManager.prototype, {
         const sc = range.startContainer, so = range.startOffset;
         const ec = range.endContainer, eo = range.endOffset;
 
-        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом).
+        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Капсулу в
+        // режиме inline-правки пропускаем — её тело сейчас обычный текст (CARET-1).
         const insideCapsule = (node) => {
             let el = node && node.nodeType === 3 ? node.parentElement : node;
             while (el && el !== editor) {
-                if (this._isCapsule(el)) return el;
+                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
                 el = el.parentElement;
             }
             return null;
@@ -221,8 +291,13 @@ Object.assign(TextBlockManager.prototype, {
                 after = this._isInsignificantText(rawAfter)
                     ? this._significantSibling(rawAfter, 'nextSibling') : rawAfter;
             }
-            if (this._isCapsule(before)) return { capsule: before, side: 'after' };  // капсула слева
-            if (this._isCapsule(after)) return { capsule: after, side: 'before' };   // капсула справа
+            // Капсула в inline-правке к атомарному удалению не относится (CARET-1).
+            if (this._isCapsule(before) && !this._isEditingCapsule(before)) {
+                return { capsule: before, side: 'after' };  // капсула слева
+            }
+            if (this._isCapsule(after) && !this._isEditingCapsule(after)) {
+                return { capsule: after, side: 'before' };   // капсула справа
+            }
         }
         return null;
     },
@@ -259,6 +334,17 @@ Object.assign(TextBlockManager.prototype, {
             attributeFilter: ['contenteditable'],
         });
         editor.__capsuleObserver = observer;
+
+        // CARET-8: на время IME-композиции observer буферизует mutation-records и
+        // НЕ обрабатывает — heal под активной композицией (мутация узла-цели
+        // insertCompositionText) сорвал бы ввод. По compositionend накопленное
+        // прогоняется обычным pipeline. Слушатели вешаем один раз на элемент
+        // (флаг), в тон idempotent-disconnect выше; editor берётся замыканием.
+        if (!editor.__compositionBound) {
+            editor.__compositionBound = true;
+            editor.addEventListener('compositionstart', () => this._onCompositionStart(editor));
+            editor.addEventListener('compositionend', () => this._flushComposition(editor));
+        }
     },
 
     /**
@@ -275,6 +361,14 @@ Object.assign(TextBlockManager.prototype, {
      */
     _onCapsuleMutations(records, editor) {
         if (editor.__healing) return;
+        // CARET-8: во время IME-композиции копим records без обработки (мутация
+        // узла под активной композицией сорвала бы ввод); прогон — по
+        // compositionend через _flushComposition.
+        if (editor.__composing) {
+            if (!editor.__composingRecords) editor.__composingRecords = [];
+            records.forEach(rec => editor.__composingRecords.push(rec));
+            return;
+        }
         const guardChar = this.CAP_GUARD_CHAR;
         let needGuardRestore = false;
         const capsulesToFix = [];
@@ -294,12 +388,13 @@ Object.assign(TextBlockManager.prototype, {
                 });
             } else if (rec.type === 'attributes') {
                 // contenteditable сброшен с капсулы → чиним. НО пропускаем
-                // капсулу в режиме inline-правки (#1): enableInlineEditing по
+                // капсулу в режиме inline-правки (#1/CARET-1): enableInlineEditing по
                 // двойному клику НАМЕРЕННО ставит contenteditable='true' + класс
                 // 'editing-mode'; откат на 'false' убил бы правку текста
                 // ссылки/сноски (focus попадал бы в уже не редактируемый span).
+                // Единый предикат _isEditingCapsule — тот же, что и в слоях 1/2.
                 if (this._isCapsule(rec.target) &&
-                        !rec.target.classList.contains('editing-mode') &&
+                        !this._isEditingCapsule(rec.target) &&
                         rec.target.getAttribute('contenteditable') !== 'false') {
                     capsulesToFix.push(rec.target);
                 }
@@ -307,6 +402,10 @@ Object.assign(TextBlockManager.prototype, {
         }
 
         if (!guardNodeToRestore && !needGuardRestore && !capsulesToFix.length) return;
+
+        // §6.8: observer реально чинит целостность капсул — фиксируем в телеметрии
+        // (self-heal молчит, иначе о поломках узнаём только от пользователей).
+        window.EditorTelemetry?.track?.('observer_heal');
 
         editor.__healing = true;
         try {
@@ -339,6 +438,36 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private CARET-8: начало IME-композиции — переводим observer в режим
+     * буферизации (_onCapsuleMutations копит records без обработки). Буфер
+     * лениво инициализируем: повторный compositionstart поверх недослитого
+     * буфера просто продолжает накопление (слив — на следующем compositionend).
+     * @param {HTMLElement} editor
+     */
+    _onCompositionStart(editor) {
+        editor.__composing = true;
+        if (!editor.__composingRecords) editor.__composingRecords = [];
+    },
+
+    /**
+     * @private CARET-8: конец IME-композиции — снимаем режим буферизации и
+     * прогоняем накопленные records (плюс ещё не доставленные observer'ом —
+     * takeRecords) обычным pipeline. Реальный IME в node/UT недоступен: путь
+     * покрыт имитацией через прямой вызов _onCompositionStart/_flushComposition +
+     * синтетические records.
+     * @param {HTMLElement} editor
+     */
+    _flushComposition(editor) {
+        editor.__composing = false;
+        const observer = editor.__capsuleObserver;
+        const pending = observer ? observer.takeRecords() : [];
+        const buffered = editor.__composingRecords || [];
+        editor.__composingRecords = null;
+        const all = buffered.length ? buffered.concat(pending) : pending;
+        if (all.length) this._onCapsuleMutations(all, editor);
+    },
+
+    /**
      * @private Текст напечатан в guard-узел → выносим символы наружу (после
      * guard), возвращаем guard к чистому U+FEFF, ставим каретку за вынесенным
      * текстом. Вызывается только внутри _onCapsuleMutations (_healing уже взведён).
@@ -361,7 +490,10 @@ Object.assign(TextBlockManager.prototype, {
                 sel.addRange(range);
             }
         }
-        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
+        // Единый сток: вынесенный из guard текст — реальная правка content
+        // (changelog, TB-5). finalizeEdit зовётся под взведённым __healing;
+        // повторный проход observer'а гасится ранним return + takeRecords.
+        this.finalizeEdit(editor);
     },
 
     /** @private StaticRange → живой Range, расширенный за целые капсулы и их guard'ы. */
@@ -372,7 +504,8 @@ Object.assign(TextBlockManager.prototype, {
         const ancestor = (node) => {
             let el = node && node.nodeType === 3 ? node.parentElement : node;
             while (el && el !== editor) {
-                if (this._isCapsule(el)) return el;
+                // Капсула в inline-правке — обычный контент, за неё не расширяем (CARET-1).
+                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
                 el = el.parentElement;
             }
             return null;

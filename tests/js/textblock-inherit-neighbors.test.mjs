@@ -8,7 +8,12 @@ import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TextBlockManager } from '../../static/js/constructor/textblock/textblock-core.js';
+// _caretHomeSibling/_isZeroWidthNode/_isCapsule (TB-2) живут в textblock-editor.js,
+// на том же TextBlockManager.prototype — импорт обязателен ДО вызова inheritFromNeighbors.
+import '../../static/js/constructor/textblock/textblock-editor.js';
 import '../../static/js/constructor/textblock/textblock-formatting.js';
+
+globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
 
 /** span-сосед: inline-стили заданы в style, length>0; computed «врёт» дефолтами. */
 function makeSpan(inlineStyle) {
@@ -76,4 +81,154 @@ test('сосед без inline-стилей (style.length===0) пропуска�
   mgr.inheritFromNeighbors(marker);
 
   assert.deepEqual(marker.style, {}, 'наследование от пустого span');
+});
+
+// TB-2: остановка обхода на первом значимом узле (не «издалека»).
+
+test('TB-2: «Раз(24px)| два три» — реальный текст между span и маркером блокирует наследование', () => {
+  globalThis.window = globalThis;
+  const styledSpan = makeSpan({ fontSize: '24px' }); // "Раз"
+  const betweenText = { nodeType: 3, data: ' два три' };
+  const marker = makeMarker();
+
+  betweenText.previousSibling = styledSpan;
+  marker.previousSibling = betweenText;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, undefined, 'маркер унаследовал размер издалека через реальный текст');
+});
+
+test('TB-2: маркер вплотную к span 18px СКВОЗЬ caret-guard (U+FEFF) — наследует', () => {
+  globalThis.window = globalThis;
+  const styledSpan = makeSpan({ fontSize: '18px' });
+  // U+FEFF (caret-guard) через код символа — не держать невидимку буквально в исходнике.
+  const guard = { nodeType: 3, data: String.fromCharCode(0xFEFF) };
+  const marker = makeMarker();
+
+  guard.previousSibling = styledSpan;
+  marker.previousSibling = guard;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, '18px', 'guard (zero-width) должен быть прозрачен для наследования');
+});
+
+test('TB-2 (ревью): якорь размера 18px — ДОНОР независимо от содержимого, даже когда ДАЛЬШЕ есть другой стилизованный span 24px', () => {
+  // Цепочка ревьюера: [span 24px "Раз"] → [span-якорь 18px c U+200B] → [marker].
+  // Якорь — самый явный сигнал «пользователь выставил размер тут»; обход НЕ
+  // должен проскакивать его как «просто zero-width» и уходить к дальнему 24px.
+  globalThis.window = globalThis;
+  const farSpan = makeSpan({ fontSize: '24px' }); // "Раз" — реальный текст, но не сосед
+  const sizeAnchor = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    style: { fontSize: '18px', length: 1 },
+    textContent: String.fromCharCode(0x200B), // якорь applyFontSize — визуально пуст
+    classList: { contains: () => false },
+  };
+  const marker = makeMarker();
+
+  sizeAnchor.previousSibling = farSpan;
+  marker.previousSibling = sizeAnchor;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, '18px', 'маркер унаследовал размер ИЗДАЛЕКА мимо ближайшего якоря');
+});
+
+test('TB-2: одиночный осиротевший якорь размера 20px вплотную (дальше ничего нет) — наследует 20px', () => {
+  globalThis.window = globalThis;
+  const sizeAnchor = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    style: { fontSize: '20px', length: 1 },
+    textContent: String.fromCharCode(0x200B),
+    classList: { contains: () => false },
+    previousSibling: null,
+  };
+  const marker = makeMarker();
+  marker.previousSibling = sizeAnchor;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, '20px');
+});
+
+test('TB-2: пустой span БЕЗ style (не якорь размера) между — прозрачен, наследуется дальний span', () => {
+  globalThis.window = globalThis;
+  const farSpan = makeSpan({ fontSize: '16px' });
+  // Визуально пуст (только zero-width текст), но БЕЗ font-size — в отличие от
+  // якоря размера, такой span не донор и должен пропускаться, как guard.
+  const bareZeroWidthSpan = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    style: {},
+    textContent: String.fromCharCode(0x200B),
+    classList: { contains: () => false },
+  };
+  const marker = makeMarker();
+
+  bareZeroWidthSpan.previousSibling = farSpan;
+  marker.previousSibling = bareZeroWidthSpan;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, '16px', 'пустой span без style должен быть прозрачен для обхода');
+});
+
+test('TB-2: <br> перед маркером блокирует наследование (новая строка)', () => {
+  globalThis.window = globalThis;
+  const styledSpan = makeSpan({ fontSize: '20px' });
+  const breakNode = { nodeType: 1, tagName: 'BR', classList: { contains: () => false } };
+  const marker = makeMarker();
+
+  breakNode.previousSibling = styledSpan;
+  marker.previousSibling = breakNode;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, undefined, 'маркер унаследовал размер через <br>');
+});
+
+test('TB-2: соседняя капсула блокирует наследование (капсула — не донор формата)', () => {
+  globalThis.window = globalThis;
+  const styledSpan = makeSpan({ fontSize: '22px' });
+  // Капсула физически тоже <span> (со своим inline-стилем) — не должна
+  // трактоваться как обычный span-сосед для наследования.
+  const otherCapsule = {
+    nodeType: 1,
+    tagName: 'SPAN',
+    style: { fontSize: '30px', length: 1 },
+    classList: { contains: (c) => c === 'text-link' },
+  };
+  const marker = makeMarker();
+
+  otherCapsule.previousSibling = styledSpan;
+  marker.previousSibling = otherCapsule;
+
+  const mgr = Object.create(TextBlockManager.prototype);
+  mgr.activeEditor = {};
+
+  mgr.inheritFromNeighbors(marker);
+
+  assert.equal(marker.style.fontSize, undefined, 'маркер унаследовал размер от соседней капсулы');
 });

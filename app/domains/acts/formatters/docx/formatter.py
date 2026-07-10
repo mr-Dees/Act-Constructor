@@ -12,7 +12,11 @@ from docx.shared import Pt
 from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.formatters.docx.builders.cover import build_cover_block
 from app.domains.acts.formatters.docx.builders.header_footer import apply_header_footer
-from app.domains.acts.formatters.docx.builders.inline import _PX_TO_PT, apply_inline_html
+from app.domains.acts.formatters.docx.builders.inline import (
+    _PX_TO_PT,
+    apply_inline_html,
+    split_block_segments,
+)
 from app.domains.acts.formatters.docx.builders.rubricator import build_rubricator_plate
 from app.domains.acts.formatters.docx.builders.signature import build_signature
 from app.domains.acts.formatters.docx.builders.tables import build_table
@@ -27,14 +31,13 @@ from app.domains.acts.formatters.docx.styles import (
     apply_document_defaults,
     ensure_footnote_styles,
 )
-from app.domains.acts.schemas.act_content import TextBlockFormattingSchema
-
-# Текстблок рендерится по formatting (выравнивание/размер) + inline-разметке
-# content (начертание). Размер: дефолтный fontSize → body_pt (12pt), изменённый
-# → px→pt (×0.75); выравнивание на размер не влияет (M.1, фикс #9). Начертание
-# (жирный/курсив/подчёркивание) — только из inline-тегов content (B-1).
-# Дефолт схемы (alignment='justify' = тело акта) совпадает с «нетронутым» рендером.
-_DEFAULT_TB_FORMATTING = TextBlockFormattingSchema()
+# Текстблок: размер базы — единый экранный дефолт настроек
+# (ACTS__TEXTBLOCKS__FONT_SIZE_DEFAULT, 16px) через px→pt ×0.75 = 12pt (EXP-2);
+# выравнивание — per-line из style="text-align" блочных элементов content
+# (TB-1: HTML — источник истины). Начертание (жирный/курсив/подчёркивание) —
+# только из inline-тегов content (B-1).
+# Фолбэк размера, когда форматтер собран без настроек (юнит-тесты DocxFormatter()).
+_DEFAULT_TB_FONT_SIZE_PX = 16
 
 # px → pt (16px → 12pt) — единый источник в builders/inline.py (_PX_TO_PT).
 
@@ -94,31 +97,60 @@ class DocxFormatter:
             body_run.font.size = Pt(Sizes.body_pt)
 
     def _render_textblock(self, doc, schema) -> None:
-        """Текстблок по его formatting (M.1) + inline-разметке content.
+        """Текстблок: верхнеуровневые блочные элементы content → отдельные w:p.
 
-        Выравнивание применяется буквально через _TB_ALIGNMENT_MAP: дефолт
-        схемы (alignment='justify') даёт то же, что прежний «нетронутый»
-        рендер, а явный выбор (напр. 'left') уважается, а не подменяется на
-        JUSTIFY. Размер: дефолтный fontSize → body_pt (12pt), изменённый →
-        px→pt (×0.75) — смена только выравнивания шрифт НЕ уменьшает (#9).
-        Начертание (жирный/курсив/подчёркивание) задаётся ИСКЛЮЧИТЕЛЬНО
-        inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html выставляет
-        run.bold/italic/underline per-run; базового применения из formatting нет.
+        Выравнивание — per-line из style="text-align" каждого верхнеуровневого
+        <div>/<p> через _TB_ALIGNMENT_MAP (TB-1: источник истины — HTML). Блок
+        без text-align и контент вне блочной разметки (голый текст/span — легаси)
+        получают
+        дефолт JUSTIFY — как прежний «нетронутый» рендер; <br> внутри блока
+        остаётся мягким переносом w:br. Вертикальная геометрия — как у прежней
+        одноабзацной модели: промежуточным w:p обнуляется space_after (граница
+        сегментов = бывший w:br, межабзацного зазора быть не должно),
+        Normal-спейсинг (3pt after) сохраняет только последний w:p блока —
+        расстояние до следующего контента не меняется.
+
+        Размер базы — единый экранный дефолт настроек ×0.75 (EXP-2: 16px → 12pt);
+        span'ы с собственным font-size конвертируются тем же ×0.75 в
+        apply_inline_html. Начертание (жирный/курсив/подчёркивание) задаётся
+        ИСКЛЮЧИТЕЛЬНО inline-тегами <b>/<i>/<u> в content (B-1): apply_inline_html
+        выставляет run.bold/italic/underline per-run.
         """
-        para = doc.add_paragraph()
-        fmt = schema.formatting
-        para.alignment = _TB_ALIGNMENT_MAP.get(fmt.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY)
-        base_size_pt = (
-            Sizes.body_pt
-            if fmt.fontSize == _DEFAULT_TB_FORMATTING.fontSize
-            else fmt.fontSize * _PX_TO_PT
+        # EXP-4: пустой текстблок не печатает пустой абзац — гейт тем же
+        # критерием, что превью (_hasContent = content.trim() истинно). Пустой
+        # или пробельный content не даёт ни одного w:p (раньше — пустой
+        # абзац-строка, «висевшая» в DOCX там, где превью блок не рисует).
+        if not schema.content or not schema.content.strip():
+            return
+        base_px = (
+            self._acts_settings.textblocks.font_size_default
+            if self._acts_settings is not None
+            else _DEFAULT_TB_FONT_SIZE_PX
         )
-        # Начертание — единственным источником истины выступают inline-теги
-        # <b>/<i>/<u> в content (apply_inline_html выставляет run.bold/italic/
-        # underline per-run). Базовое применение из formatting.{bold,italic,
-        # underline} УБРАНО (B-1/B-37): прежний пост-цикл форсил начертание на
-        # ВСЕ runs, перетирая per-run inline-состояние.
-        apply_inline_html(para, schema.content, base_size_pt=base_size_pt)
+        base_size_pt = base_px * _PX_TO_PT
+        segments = split_block_segments(schema.content)
+        if not segments:
+            # Контент непуст (прошёл гейт), но без верхнеуровневых сегментов —
+            # один пустой абзац-строка (паритет с превью, рендерящим блок).
+            para = doc.add_paragraph()
+            para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            return
+        paragraphs = []
+        for segment in segments:
+            para = doc.add_paragraph()
+            para.alignment = _TB_ALIGNMENT_MAP.get(
+                segment.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY
+            )
+            # Пустой сегмент (<div><br></div>) — пустая строка-абзац;
+            # apply_inline_html сам no-op на пустом html.
+            apply_inline_html(para, segment.html, base_size_pt=base_size_pt)
+            paragraphs.append(para)
+        # Границы сегментов — бывшие w:br: без обнуления Normal (3pt after)
+        # раздвинул бы строки, разделённые Enter. space_before Normal и так
+        # даёт 0 — наследуется. Последний w:p спейсинг не трогает: расстояние
+        # от текстблока до следующего контента — как у одноабзацной модели.
+        for para in paragraphs[:-1]:
+            para.paragraph_format.space_after = Pt(0)
 
     def _add_table_title(self, doc, node) -> None:
         """Заголовок таблицы: жирная подпись без нумерации (таблица — не пункт)."""

@@ -4,6 +4,7 @@
  */
 import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
+import { ChangelogTracker } from '../changelog-tracker.js';
 
 export class TextBlockManager {
     constructor() {
@@ -93,9 +94,78 @@ export class TextBlockManager {
             const stripped = this._stripGuards ? this._stripGuards(content) : content;
             textBlock.content = this.validateAndRepairCapsules
                 ? this.validateAndRepairCapsules(stripped) : stripped;
+            // TB-5: changelog пишем в общем стоке saveContent, чтобы правки МИМО
+            // input-события (смена размера, Enter-ветки, HTML-paste, нативное
+            // удаление) тоже попадали в аудит-историю. _recordDebounced
+            // коалесцирует серию правок одного блока в одну запись (ключ
+            // modify_textblock_<id>).
+            if (typeof ChangelogTracker !== 'undefined') {
+                ChangelogTracker._recordDebounced(
+                    'modify_textblock', textBlockId, '', { field: 'content' }, 5000);
+            }
             // Контентная правка одного блока → точечный патч превью.
             PreviewManager.updateBlock('textblock', textBlockId);
         }
+    }
+
+    /**
+     * Единый сток завершения правки текстблока: пересчитывает производные
+     * состояния в фиксированном порядке, чтобы ни один путь правки (Enter у
+     * капсулы, paste, нативное удаление, смена размера, observer-heal) не забывал
+     * часть шагов (класс багов «забытый вызов»). Порядок важен: нормализация
+     * двигает caret-guard'ы, поэтому вызывающие, которые сами ставят каретку,
+     * обязаны звать finalizeEdit ДО установки каретки.
+     * @param {HTMLElement} editor Редактор блока (обычно this.activeEditor).
+     * @param {{renumber?: boolean}} [opts]
+     *   renumber=true — принудительная перенумерация сносок (потоки создания/
+     *   правки/удаления маркера, где номер может измениться без изменения числа
+     *   .text-footnote).
+     */
+    finalizeEdit(editor, opts = {}) {
+        if (!editor || !editor.dataset) return;
+
+        // (а) Guard'ы капсул — если в блоке ЕСТЬ капсулы (обычная правка) ЛИБО в
+        // живом DOM остались guard-символы U+FEFF. Второе условие даёт самоочистку
+        // после удаления ПОСЛЕДНЕЙ капсулы из ЛЮБОГО пути (removeLinkOrFootnote,
+        // beforeinput): normalizeMarkers на редакторе без капсул только вычищает
+        // guard'ы (_cleanCapGuards), новых не ставит. Иначе пропуск (перф: обычный
+        // ввод в plain-текст без невидимок). U+200B-якорь размера намеренно НЕ
+        // триггерит — normalizeMarkers его и не трогает.
+        const hasCapsules = !!editor.querySelector('[data-link-url],[data-footnote-text]');
+        const hasGuardChars = (editor.textContent || '').includes('\uFEFF');
+        if ((hasCapsules || hasGuardChars) && typeof this.normalizeMarkers === 'function') {
+            this.normalizeMarkers(editor);
+        }
+
+        // (б) Перенумерация сносок — по изменению их числа с прошлого стока (кэш
+        // editor.__lastFootnoteCount ловит нативное удаление/paste поверх сноски,
+        // где create/remove-потоки не срабатывают — CARET-7) ЛИБО по явному
+        // запросу opts.renumber. Перенумеровываем ГЛОБАЛЬНО (весь лист, TREE-1):
+        // смена числа сносок в ЭТОМ блоке сдвигает сквозные номера в ПОСЛЕДУЮЩИХ
+        // блоках. Гейт по счётчику держит это дёшево — обычный ввод без правки
+        // сносок сюда не заходит. Счётчик считаем на ПЕРЕДАННОМ editor; глобальный
+        // проход примирит __lastFootnoteCount всех редакторов, а строка ниже
+        // фиксирует его и для этого (единственный путь, когда проход не звался).
+        const footnoteCount = editor.querySelectorAll('.text-footnote').length;
+        if ((opts.renumber === true || footnoteCount !== editor.__lastFootnoteCount) &&
+                typeof this.renumberAllFootnotes === 'function') {
+            this.renumberAllFootnotes();
+        }
+        editor.__lastFootnoteCount = footnoteCount;
+
+        // (в) Класс пустоты (placeholder).
+        this._toggleEmptyClass(editor);
+
+        // (в.1) TB-4: снять осиротевшие якоря размера (пустой span из одного
+        // U+200B без каретки внутри) ДО сериализации — иначе копятся в content.
+        // Якорь ПОД КАРЕТКОЙ переживает save (B-2). Метод — в textblock-editor.js.
+        if (typeof this._cleanOrphanSizeAnchors === 'function') {
+            this._cleanOrphanSizeAnchors(editor);
+        }
+
+        // (г) Запись в state.content + точечный патч превью (changelog — внутри
+        // saveContent, общий для всех путей правки).
+        this.saveContent(editor.dataset.textBlockId, editor.innerHTML);
     }
 
     /**

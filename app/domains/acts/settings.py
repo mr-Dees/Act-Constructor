@@ -131,12 +131,15 @@ class TextblocksSettings(BaseModel):
     """
     Границы форматирования текстблоков (размер шрифта редактора).
 
-    Единый источник для серверной схемы (TextBlockFormattingSchema),
-    GET /acts/limits и фронт-тулбара. Дефолты совпадают с фолбэками схемы
+    Единый источник границ размера шрифта для GET /acts/limits и фронт-тулбара
+    (кламп размера в дропдауне). Дефолты границ совпадают с фолбэками схемы
     (FONT_SIZE_MIN/FONT_SIZE_MAX).
     """
     font_size_min: int = Field(default=8, gt=0)
     font_size_max: int = Field(default=72, gt=0)
+    # Базовый (экранный) размер текстблока в px — единый источник для редактора,
+    # превью (через /acts/limits) и экспорта (база px→pt ×0.75, EXP-2). 16px → 12pt.
+    font_size_default: int = Field(default=16, gt=0)
     # Максимальное число текстблоков-детей одного узла дерева (B-13). Фронт
     # ограничивает добавление блоков узлу, но прямой API эту проверку обходил —
     # серверный гейт в ActContentService._validate_tree. Отдаётся через
@@ -163,6 +166,8 @@ class SanitizerSettings(BaseModel):
     allowed_css_properties: list[str] = Field(default=[
         "font-size", "color", "background-color",
         "font-weight", "font-style", "text-decoration", "text-decoration-line",
+        # TB-1: per-line выравнивание живёт в style блочных элементов content.
+        "text-align",
     ])
     # Разрешённые data-атрибуты span (сноски/ссылки) — без них DOCX-экспорт
     # теряет содержимое сносок/ссылок.
@@ -183,3 +188,7 @@ class ActsSettings(BaseModel):
     tables: TablesSettings = TablesSettings()
     textblocks: TextblocksSettings = TextblocksSettings()
     sanitizer: SanitizerSettings = SanitizerSettings()
+    # Kill-switch телеметрии здоровья редактора (§6.8). Выключено → эндпоинт
+    # /acts/editor-telemetry отвечает 204 без записи, а фронт (получив флаг
+    # через GET /acts/limits) перестаёт слать батчи.
+    editor_telemetry_enabled: bool = Field(default=True)

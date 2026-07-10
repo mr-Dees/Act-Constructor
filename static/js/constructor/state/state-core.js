@@ -680,19 +680,14 @@ export const AppState = {
      */
     _serializeTextBlocks() {
         const serialized = {};
-        const defaults = AppConfig.content.defaults;
 
         for (const [blockId, block] of Object.entries(_unwrap(this.textBlocks))) {
+            // Форматирование целиком в inline-HTML content (директива владельца):
+            // контейнерного объекта formatting больше нет.
             serialized[blockId] = {
                 id: block.id,
                 nodeId: block.nodeId,
-                content: block.content || '',
-                // Начертание (жирный/курсив/подчёркивание) — только в content
-                // как inline-HTML (B-1); отдельных полей formatting больше нет.
-                formatting: {
-                    fontSize: block.formatting?.fontSize ?? defaults.fontSize,
-                    alignment: block.formatting?.alignment ?? defaults.alignment
-                }
+                content: block.content || ''
             };
         }
 

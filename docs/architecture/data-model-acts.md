@@ -122,24 +122,21 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `deletable`               | bool, default true           | можно ли удалить таблицу                                                                                |
 | `kind`                    | `TableKind`, default `'regular'` | подвид таблицы (`act_content.py:60,143`): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`; зеркалит `node.kind`. CHECK `check_table_kind_values` в миграциях PG/GP |
 
-`TextBlockFormattingSchema` (`act_content.py::TextBlockFormattingSchema`):
-
-| Поле        | Тип / default                          | Назначение                                  |
-|-------------|-----------------------------------------|---------------------------------------------|
-| `fontSize`  | int 8–72, default 14                    | базовый размер шрифта                       |
-| `alignment` | `"left" | "center" | "right" | "justify"`, default `"justify"` (как тело акта) | выравнивание                                |
-| `bold`      | bool, default false                     | жирный                                      |
-| `italic`    | bool, default false                     | курсив                                      |
-| `underline` | bool, default false                     | подчёркивание                                |
-
 `TextBlockSchema` (`act_content.py::TextBlockSchema`):
 
 | Поле          | Тип / default                              | Назначение                                                            |
 |---------------|---------------------------------------------|-----------------------------------------------------------------------|
 | `id`          | str                                         | ID блока                                                              |
 | `nodeId`      | str                                         | ID узла-носителя                                                       |
-| `content`     | str, default `""`                           | HTML с inline-форматированием                                          |
-| `formatting`  | `TextBlockFormattingSchema`                 | базовые параметры                                                      |
+| `content`     | str, default `""`                           | HTML — единственный источник форматирования: `<b>/<i>/<u>`, `span[style="font-size"]`, `text-align` блочных элементов, капсулы ссылок/сносок |
+
+Прежний контейнерный объект `formatting {fontSize, alignment, bold, italic,
+underline}` **вырезан целиком** (директива владельца): он писался один раз
+при создании блока и правками не обновлялся — всё форматирование живёт в
+`content`. `model_validator` `_drop_legacy_formatting` молча отбрасывает поле
+из данных старых актов на загрузке; базовый размер шрифта — единый дефолт
+настроек (`ACTS__TEXTBLOCKS__FONT_SIZE_*`, экранные 16px → 12pt ×0.75), не
+хранится per-block. Deep-dive — [`textblock-editor-architecture.md`](textblock-editor-architecture.md) §2/§10.
 
 `ViolationSchema` (`act_content.py::ViolationSchema`) — нарушение, прикреплённое к узлу:
 

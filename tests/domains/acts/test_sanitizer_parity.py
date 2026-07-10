@@ -40,8 +40,7 @@ def _act_dict():
     return {
         "tree": {"id": "root", "label": "Акт", "content": _XSS,
                  "children": [{"id": "1", "label": "Раздел", "content": _XSS}]},
-        "textBlocks": {"tb1": {"id": "tb1", "nodeId": "n1", "content": _XSS,
-                               "formatting": {"fontSize": 14}}},
+        "textBlocks": {"tb1": {"id": "tb1", "nodeId": "n1", "content": _XSS}},
         "violations": {"v1": _violation_dict()},
         "tables": {},
     }

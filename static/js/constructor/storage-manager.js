@@ -82,6 +82,19 @@ export class StorageManager {
     static _trackingDepth = 0;
 
     /**
+     * PERSIST-4: «эпоха грязности» — монотонный счётчик реальных мутаций
+     * состояния. Инкрементится в той же точке, что и dirty-переход
+     * (markAsUnsaved), под тем же tracking-гардом: пока трекинг выключен
+     * (вокруг синхронной сериализации), эпоха заморожена. saveActContent
+     * запоминает эпоху перед PUT и, если она выросла за время await (значит
+     * пользователь печатал во время сохранения), НЕ помечает акт
+     * синхронизированным — эти правки в отправленную data не попали.
+     * @private
+     * @type {number}
+     */
+    static _dirtyEpoch = 0;
+
+    /**
      * Серверный updated_at акта на момент последней успешной синхронизации
      * с БД (из ответа GET-контента или PUT-сохранения). Пишется в метаданные
      * снимка localStorage (baseUpdatedAt) и используется решением о
@@ -171,6 +184,19 @@ export class StorageManager {
     static _quotaEscalationNotified = false;
 
     /**
+     * PERSIST-3: срок жизни ЧУЖОГО снимка-черновика (снимка другого акта) в
+     * localStorage — 7 дней. Пока чужой снимок моложе этого срока, вкладка
+     * текущего акта его НЕ удаляет: иначе несинхронизированный черновик
+     * соседнего акта, открытого в другой вкладке, был бы стёрт (потеря
+     * правок). Удаляются только заведомо протухшие (заброшенные ≥ 7 дней)
+     * чужие снимки — для высвобождения места. 7 дней — компромисс между
+     * «не терять активные черновики» и «не копить мусор бесконечно».
+     * @private
+     * @type {number}
+     */
+    static FOREIGN_SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+    /**
      * Инициализация менеджера хранилища
      *
      * НЕ восстанавливает состояние автоматически.
@@ -218,9 +244,13 @@ export class StorageManager {
         // Регистрируется через общий реестр beforeunload-обработчиков LifecycleHelper,
         // чтобы можно было централизованно снять обработчик при destroy/teardown.
         const beforeUnloadHandler = (e) => {
-            // Сохраняем в localStorage перед закрытием
+            // Сохраняем в localStorage перед закрытием.
+            // PERSIST-6: keepalive — если снимок не влезет в LS и уйдёт в
+            // аварийную эскалацию БД, обычный fetch браузер отменит при
+            // закрытии вкладки. keepalive:true даёт запросу пережить unload
+            // (в пределах лимита тела ~64KB, см. forceSaveToDb).
             if (this._hasUnsavedChanges) {
-                this.saveState(true);
+                this.saveState(true, { keepalive: true });
             }
 
             // При программном выходе не показываем диалог браузера
@@ -267,6 +297,10 @@ export class StorageManager {
         // сервером (HTTP 422) на каждом PUT /content независимо от saveType.
         this._periodicDbSaveInterval = setInterval(async () => {
             if (AppState._dragInProgress) return;
+            // PERSIST-1: read-only зритель не пишет в БД — иначе фоновый PUT
+            // ловит 403 и показывает тост «Не удалось сохранить». Обычно RO-акт
+            // и не грязный, но это защита в глубину на случай случайной пометки.
+            if (AppConfig.readOnlyMode?.isReadOnly) return;
             if (this._dbSaveInProgress) return; // B-15: другое сохранение уже пишет
             if (this.hasUnsyncedChanges() && window.currentActId) {
                 this._dbSaveInProgress = true;
@@ -416,6 +450,18 @@ export class StorageManager {
                 if (confirmed) {
                     try {
                         await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
+                        // E1: saveActContent — no-op (return null), если параллельный
+                        // (периодический) PUT уже в полёте; дождёмся его, иначе тост
+                        // «Изменения сохранены» подтвердил бы несостоявшуюся запись.
+                        if (APIClient._saveInFlightPromise) {
+                            await APIClient._saveInFlightPromise.catch(() => {});
+                        }
+                        // Если акт всё ещё не синхронизирован (тот PUT no-op'нулся/
+                        // упал, либо правки печатались во время PUT) — форсим
+                        // гарантированный PUT, чтобы подтверждение не было ложным.
+                        if (this.hasUnsyncedChanges()) {
+                            await APIClient.forceSaveToDb(window.currentActId);
+                        }
                         Notifications.success('Изменения сохранены');
                     } catch (err) {
                         console.error('Ошибка сохранения:', err);
@@ -505,6 +551,10 @@ export class StorageManager {
         if (this._trackingDepth > 0) {
             return;
         }
+        // PERSIST-4: реальная мутация состояния — двигаем эпоху грязности.
+        // После tracking-гарда: пока трекинг выключен (сериализация), эпоха
+        // не растёт (иначе exportActData сам себе поднял бы эпоху).
+        this._dirtyEpoch++;
         this._setState('unsaved');
         // Запускаем дебаунс автосохранения
         this._debouncedSave();
@@ -532,6 +582,41 @@ export class StorageManager {
     static markAsSyncedWithDB() {
         this._setState('saved');
         this._resetDbSaveFailureState();
+    }
+
+    /**
+     * PERSIST-4/A1: единый финал успешного PUT в БД для saveActContent и
+     * forceSaveToDb (устраняет дубль эпоха-гейта в двух save-путях).
+     *
+     * Эпоха стабильна → правок во время await PUT не было: помечаем
+     * синхронизированным (заодно гасит offline-машинерию) и снимаем
+     * снимок-черновик. Эпоха выросла → правки печатались во время PUT и в
+     * отправленную data не попали: акт остаётся грязным (дошлётся следующим
+     * циклом), НО сам PUT прошёл — сервер достижим, поэтому всё равно гасим
+     * offline-машинерию (дедуп-предупреждение + подписку 'online'). Без этого
+     * после разового сбоя сохранения следующий реальный сбой уже не
+     * предупредил бы, пока не случится стабильный по эпохе успех (A1).
+     *
+     * @param {number} actId
+     * @param {number} epochBeforeSave эпоха грязности, снятая ДО сериализации
+     */
+    static finalizeDbSave(actId, epochBeforeSave) {
+        if (this.getDirtyEpoch() === epochBeforeSave) {
+            this.markAsSyncedWithDB();
+            this.removeSnapshot(actId);
+        } else {
+            this._resetDbSaveFailureState();
+        }
+    }
+
+    /**
+     * PERSIST-4: текущее значение эпохи грязности (счётчика реальных мутаций).
+     * saveActContent запоминает его перед PUT и сравнивает после — если эпоха
+     * выросла, за время сохранения появились новые правки.
+     * @returns {number}
+     */
+    static getDirtyEpoch() {
+        return this._dirtyEpoch;
     }
 
     /**
@@ -582,9 +667,11 @@ export class StorageManager {
      * успешного PUT в БД — «снимок есть» означает «есть несохранённые правки».
      *
      * @param {boolean} [silent=false] - Не показывать лог о сохранении
+     * @param {{keepalive?: boolean}} [opts={}] - PERSIST-6: keepalive
+     *   пробрасывается в аварийную эскалацию БД (актуально из beforeunload).
      * @returns {boolean} true если сохранение успешно (или сохранять нечего)
      */
-    static saveState(silent = false) {
+    static saveState(silent = false, opts = {}) {
         // pfe-3: re-entrancy guard. Если запись снимка уже идёт (периодический
         // тик прилетел во время явного save или наоборот) — пропускаем повтор,
         // чтобы два сохранения не пересеклись на одном снимке.
@@ -620,7 +707,7 @@ export class StorageManager {
             // не сдаёмся, а эскалируем в БД (надёжный носитель) и освобождаем LS.
             if (stateJson.length > AppConfig.localStorage.maxStorageSize) {
                 console.warn('Размер данных превышает лимит localStorage — эскалация в БД');
-                this._escalateQuotaToDb();
+                this._escalateQuotaToDb(opts);
                 return false;
             }
 
@@ -647,7 +734,7 @@ export class StorageManager {
             // B-3: переполнение localStorage — снимок не записан, правки сейчас
             // только в памяти. Эскалируем в БД, затем освобождаем LS.
             if (error.name === 'QuotaExceededError') {
-                this._escalateQuotaToDb();
+                this._escalateQuotaToDb(opts);
             } else {
                 Notifications.error('Ошибка сохранения данных');
             }
@@ -711,8 +798,10 @@ export class StorageManager {
      * серию переполнений. fire-and-forget: не блокирует синхронный saveState
      * (его зовёт и beforeunload).
      * @private
+     * @param {{keepalive?: boolean}} [opts={}] - PERSIST-6: keepalive пробрасывается
+     *   в forceSaveToDb (запрос переживёт закрытие вкладки при вызове из beforeunload).
      */
-    static _escalateQuotaToDb() {
+    static _escalateQuotaToDb(opts = {}) {
         const actId = window.currentActId || null;
         if (!actId) {
             Notifications.error('Недостаточно места для сохранения. Упростите структуру акта.');
@@ -720,9 +809,11 @@ export class StorageManager {
         }
         if (this._quotaEscalationInFlight) return; // не плодим параллельные эскалации
         this._quotaEscalationInFlight = true;
-        APIClient.forceSaveToDb(actId)
+        APIClient.forceSaveToDb(actId, { keepalive: opts.keepalive })
             .then(() => {
-                this.removeSnapshot(actId); // eviction: освободить LS
+                // Eviction (removeSnapshot) теперь внутри forceSaveToDb, под
+                // эпоха-гейтом PERSIST-4: снимок снимается только если за время
+                // PUT не появилось новых правок (иначе черновик ещё нужен).
                 // #5: тост только один раз на серию переполнений — иначе крупный
                 // акт спамил бы «сохранено в БД» на каждую правку. Флаг сбросится,
                 // когда обычная запись снимка в LS снова пройдёт (вернулись в норму).
@@ -793,24 +884,72 @@ export class StorageManager {
     }
 
     /**
-     * Удаляет снимки других актов и legacy-ключи старого формата.
-     * Политика: localStorage не резиновый — живёт только снимок текущего акта.
+     * Удаляет ПРОТУХШИЕ снимки других актов и legacy-ключи старого формата.
+     *
+     * PERSIST-3: снимки соседних актов больше НЕ стираются огулом — иначе
+     * вкладка с актом B затирала несинхронизированный черновик акта A,
+     * открытого в другой вкладке (потеря правок). Свежий чужой снимок
+     * (моложе FOREIGN_SNAPSHOT_TTL_MS) сохраняется; удаляются только
+     * заброшенные (метка savedAt старше срока) и повреждённые — для
+     * высвобождения места. Legacy-ключи единого снимка удаляются всегда.
      * @private
      * @param {number|string} currentActId ID текущего акта
      */
     static _purgeForeignSnapshots(currentActId) {
         const prefix = `${AppConfig.localStorage.stateKeyPrefix}:`;
         const currentKey = this._snapshotKey(currentActId);
+        const now = Date.now();
         const toRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith(prefix) && key !== currentKey) {
+            if (!key || !key.startsWith(prefix) || key === currentKey) {
+                continue;
+            }
+            if (this._isForeignSnapshotStale(key, now)) {
                 toRemove.push(key);
             }
         }
-        // Legacy-ключи единого снимка (формат до per-act ключей).
+        // Legacy-ключи единого снимка (формат до per-act ключей) — удаляем всегда.
         toRemove.push('audit_workstation_state', 'audit_workstation_timestamp');
         toRemove.forEach(key => localStorage.removeItem(key));
+    }
+
+    /**
+     * PERSIST-3: протух ли чужой снимок (безопасен ли к удалению).
+     *
+     * Свежим (→ сохраняем) считается снимок с валидной меткой savedAt не
+     * старше FOREIGN_SNAPSHOT_TTL_MS — за ним может стоять активный
+     * несинхронизированный черновик в соседней вкладке. Протухшим (→ удаляем)
+     * считается снимок с savedAt старше срока, а также повреждённый (не-JSON)
+     * или без валидной savedAt — восстановить из него нечего, а реальный
+     * черновик всегда пишется с savedAt.
+     * @private
+     * @param {string} key Ключ localStorage чужого снимка
+     * @param {number} now Текущее время (Date.now()) для сравнения
+     * @returns {boolean} true — снимок можно удалить
+     */
+    static _isForeignSnapshotStale(key, now) {
+        let raw;
+        try {
+            raw = localStorage.getItem(key);
+        } catch {
+            return false;
+        }
+        if (!raw) return false;
+        let snapshot;
+        try {
+            snapshot = JSON.parse(raw);
+        } catch {
+            // Повреждённый чужой снимок восстановить нельзя — освобождаем место.
+            return true;
+        }
+        const savedAtMs = Date.parse(snapshot?.savedAt);
+        if (!Number.isFinite(savedAtMs)) {
+            // Нет валидной метки времени — реальный черновик всегда её пишет,
+            // значит снимок легаси/битый: удаляем.
+            return true;
+        }
+        return (now - savedAtMs) > this.FOREIGN_SNAPSHOT_TTL_MS;
     }
 
     /**

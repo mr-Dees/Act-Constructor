@@ -37,7 +37,11 @@ import {
     resetInvoices,
     checkImageLimits,
 } from '../../static/js/constructor/clipboard/node-clipboard.js';
-import { estimateActImageBytes } from '../../static/js/constructor/violation/violation-image-validator.js';
+import {
+    estimateActImageBytes,
+    getStructureLimits,
+    resetImageLimitsForTests,
+} from '../../static/js/constructor/violation/violation-image-validator.js';
 import { CONTENT_TYPE_IMAGE } from '../../static/js/constructor/violation/violation-content-item.js';
 import { TreeUtils } from '../../static/js/constructor/tree/tree-utils.js';
 import { AppConfig } from '../../static/js/shared/app-config.js';
@@ -78,6 +82,7 @@ beforeEach(() => {
 afterEach(() => {
     Object.assign(Notifications, originalNotifications);
     AppConfig.readOnlyMode.isReadOnly = false;
+    resetImageLimitsForTests();
 });
 
 // ── Хелперы ────────────────────────────────────────────────────────────────────
@@ -488,6 +493,58 @@ test('КП-6: вставка с превышением maxDepth отклонен
 
     assert.equal(NodeClipboard.pasteInto(d3.id), false);
     assert.equal(notified.error.filter(m => /вложенност/i.test(m)).length, 1);
+});
+
+// ── PERSIST-2: лимит текстблоков-на-узел при вставке (insertNodeAt) ────────────
+
+test('paste: узел-текстблок отклоняется, если цель уже на лимите текстблоков', () => {
+    AppState.initializeTree(true);
+    getStructureLimits().textBlocksPerNode = 1;
+
+    const src = addItem('4', 'Источник');
+    assert.ok(AppState.addTextBlockToNode(src.id).valid);
+    const srcTextBlock = src.children.find(c => c.type === 'textblock');
+    assert.ok(NodeClipboard.copyNode(srcTextBlock.id), 'копируем одиночный текстблок');
+
+    const dest = addItem('4', 'Назначение на лимите');
+    assert.ok(AppState.addTextBlockToNode(dest.id).valid); // уже 1 текстблок = лимит
+
+    const childrenBefore = AppState.findNodeById(dest.id).children.length;
+    assert.equal(NodeClipboard.pasteInto(dest.id), false, 'вставка отклонена — цель на лимите');
+    assert.equal(AppState.findNodeById(dest.id).children.length, childrenBefore, 'ничего не вставлено');
+    assert.equal(notified.error.filter(m => /текстовых блоков/i.test(m)).length, 1, 'тост про лимит текстблоков');
+});
+
+test('paste: поддерево нарушает ТЕКУЩИЙ лимит текстблоков (лимит снижен после копирования) — отказ, дерево не меняется', () => {
+    AppState.initializeTree(true);
+    getStructureLimits().textBlocksPerNode = 5;
+
+    const src = addItem('4', 'Источник с 3 текстблоками');
+    assert.ok(AppState.addTextBlockToNode(src.id).valid);
+    assert.ok(AppState.addTextBlockToNode(src.id).valid);
+    assert.ok(AppState.addTextBlockToNode(src.id).valid);
+    assert.ok(NodeClipboard.copyNode(src.id));
+
+    // Лимит снижается между копированием и вставкой.
+    getStructureLimits().textBlocksPerNode = 2;
+
+    const dest = addItem('4', 'Назначение');
+    const childrenBefore = AppState.findNodeById(dest.id).children?.length || 0;
+    assert.equal(NodeClipboard.pasteInto(dest.id), false, 'вставка отклонена — поддерево нарушает текущий лимит');
+    assert.equal(AppState.findNodeById(dest.id).children?.length || 0, childrenBefore, 'ничего не вставлено');
+});
+
+test('paste: текстблок в цель НЕ на лимите — проходит как раньше', () => {
+    AppState.initializeTree(true);
+    getStructureLimits().textBlocksPerNode = 2;
+
+    const src = addItem('4', 'Источник');
+    assert.ok(AppState.addTextBlockToNode(src.id).valid);
+    const srcTextBlock = src.children.find(c => c.type === 'textblock');
+    assert.ok(NodeClipboard.copyNode(srcTextBlock.id));
+
+    const dest = addItem('4', 'Назначение');
+    assert.equal(NodeClipboard.pasteInto(dest.id), true, 'вставка проходит — цель не на лимите');
 });
 
 // ── read-only ──────────────────────────────────────────────────────────────────

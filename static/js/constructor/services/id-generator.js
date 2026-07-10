@@ -62,6 +62,12 @@ export class AuditIdService {
     static async assignMissingPointIds(actId, treeData) {
         if (!actId || !treeData) return;
 
+        // PERSIST-1: в режиме только чтения не генерируем audit_point_id —
+        // присвоение node.auditPointId мутирует дерево и через markAsUnsaved
+        // помечает акт грязным, из-за чего фоновые сохранения уходят PUT'ом →
+        // 403 + тост «Не удалось сохранить» у зрителя, который не редактировал.
+        if (AppConfig.readOnlyMode?.isReadOnly) return;
+
         try {
             // Собираем item-узлы без auditPointId
             const missingNodes = [];

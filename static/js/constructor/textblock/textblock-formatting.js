@@ -2,29 +2,19 @@
  * Расширение TextBlockManager для работы с форматированием
  */
 import { TextBlockManager } from './textblock-core.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
-     * Применяет сохранённое форматирование к элементу редактора
+     * Применяет базовый размер шрифта к редактору из /acts/limits (единый
+     * источник с превью и экспортом, EXP-2: дефолт 16px). Выравнивание здесь НЕ
+     * задаётся: оно живёт per-line в inline-HTML content (TB-1), дефолт по
+     * ширине — CSS-правилом на .textblock-editor.
      * @param {HTMLElement} editor - DOM-элемент редактора
-     * @param {Object} formatting - Объект с настройками форматирования
      */
-    applyFormatting(editor, formatting) {
-        if (!formatting) return;
-
-        if (formatting.fontSize) {
-            editor.style.fontSize = `${formatting.fontSize}px`;
-        }
-
-        if (formatting.alignment) {
-            const alignmentMap = {
-                'left': 'left',
-                'center': 'center',
-                'right': 'right',
-                'justify': 'justify'
-            };
-            editor.style.textAlign = alignmentMap[formatting.alignment] || 'left';
-        }
+    applyBaseFontSize(editor) {
+        if (!editor) return;
+        editor.style.fontSize = `${getStructureLimits().fontSizeDefault}px`;
     },
 
     /**
@@ -65,40 +55,62 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private TB-2: непосредственный узел-донор форматирования для
+     * inheritFromNeighbors (обход previousSibling). НЕ переиспользует
+     * _caretHomeSibling (textblock-editor.js): та функция для каретко-навигации
+     * умышленно прозрачна к span-якорю размера (U+200B из applyFontSize без
+     * выделения) — якорь не должен блокировать Home/стрелки. Здесь наоборот:
+     * якорь — самый явный сигнал «пользователь выставил размер тут» и обязан
+     * быть донором, даже когда всё его содержимое — чистый zero-width.
+     * Правило: span с font-size — донор НЕЗАВИСИМО от содержимого (проверяется
+     * ДО zero-width-пропуска); голый zero-width БЕЗ font-size (caret-guard,
+     * span без style) — прозрачен, обход идёт дальше; любой другой значимый
+     * узел (текст, <br>, капсула, span без font-size) — стена.
+     * @param {Node} element
+     * @returns {Node|null}
+     */
+    _formatDonorSibling(element) {
+        let n = element.previousSibling;
+        while (n) {
+            const isFontSizeSpan = n.nodeType === 1 && n.tagName === 'SPAN'
+                && !this._isCapsule(n) && !!n.style.fontSize;
+            if (isFontSizeSpan || !this._isZeroWidthNode(n)) return n;
+            n = n.previousSibling;
+        }
+        return null;
+    },
+
+    /**
      * Наследует форматирование от соседних элементов (span'ов с форматированием)
      */
     inheritFromNeighbors(element) {
         if (!element) return;
 
-        let prevNode = element.previousSibling;
         let nextNode = element.nextSibling;
 
-        // Ищем предыдущий span с форматированием
-        while (prevNode) {
-            if (prevNode.nodeType === 1 && prevNode.tagName === 'SPAN' && prevNode.style.length > 0) {
-                // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
-                // computed: computed резолвит унаследованные/дефолтные значения
-                // (например fontWeight '400'), которые иначе жёстко прибились бы
-                // к маркеру как inline и раздули разметку.
-                const inline = prevNode.style;
+        // TB-2: наследуем ТОЛЬКО от НЕПОСРЕДСТВЕННОГО донора (_formatDonorSibling).
+        // Капсула физически тоже <span> — исключаем её явно: она не донор формата.
+        const prevNode = this._formatDonorSibling(element);
+        if (prevNode && prevNode.nodeType === 1 && prevNode.tagName === 'SPAN'
+                && !this._isCapsule(prevNode) && prevNode.style.length > 0) {
+            // Копируем ТОЛЬКО inline-стили соседа (element.style.*), а не
+            // computed: computed резолвит унаследованные/дефолтные значения
+            // (например fontWeight '400'), которые иначе жёстко прибились бы
+            // к маркеру как inline и раздули разметку.
+            const inline = prevNode.style;
 
-                if (inline.fontSize && !element.style.fontSize) {
-                    element.style.fontSize = inline.fontSize;
-                }
-                if (inline.fontWeight && !element.style.fontWeight) {
-                    element.style.fontWeight = inline.fontWeight;
-                }
-                if (inline.fontStyle && !element.style.fontStyle) {
-                    element.style.fontStyle = inline.fontStyle;
-                }
-                if (inline.textDecoration && !element.style.textDecoration) {
-                    element.style.textDecoration = inline.textDecoration;
-                }
-
-                break;
+            if (inline.fontSize && !element.style.fontSize) {
+                element.style.fontSize = inline.fontSize;
             }
-
-            prevNode = prevNode.previousSibling;
+            if (inline.fontWeight && !element.style.fontWeight) {
+                element.style.fontWeight = inline.fontWeight;
+            }
+            if (inline.fontStyle && !element.style.fontStyle) {
+                element.style.fontStyle = inline.fontStyle;
+            }
+            if (inline.textDecoration && !element.style.textDecoration) {
+                element.style.textDecoration = inline.textDecoration;
+            }
         }
     },
 

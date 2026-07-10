@@ -30,6 +30,10 @@
  * раньше ребёнка (родителя удалили позже — он выше в стеке), поэтому
  * отказ возможен только в вырожденных случаях (вытеснение по глубине 20).
  *
+ * Решение «лимит текстблоков на узле» (PERSIST-2): в отличие от «родитель
+ * удалён» — ОТКАЗ БЕЗ выбрасывания снимка (транзиентная причина: пользователь
+ * может освободить место в целевом узле и повторить Ctrl+Z).
+ *
  * Восстановление идёт через официальные мутаторы AppState
  * (insertNodeAt + словарные присваивания через tracked-Proxy), поэтому
  * _nodeIndex/_parentIndex и dirty-tracking остаются консистентными.
@@ -41,6 +45,7 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 import { AppState, _unwrap } from './state-core.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 
@@ -154,15 +159,29 @@ export const UndoDeleteManager = {
         }
         if (!this.canUndo()) return false;
 
-        const snapshot = this._stack.pop();
+        const snapshot = this._stack.at(-1);
 
         // Узел уже в дереве (например, откат каскада вернул его сам) —
-        // восстанавливать нечего, снимок выбрасывается.
+        // восстанавливать нечего, снимок бесполезен и выбрасывается.
         if (AppState._findNodeRaw?.(snapshot.nodeId)) {
+            this._stack.pop();
             Notifications.info('Элемент уже восстановлен');
             return false;
         }
 
+        // PERSIST-2: лимит текстблоков-на-узел — ДО pop(). В отличие от «родитель
+        // удалён» ниже (перманентный отказ — снимок выбрасывает _restoreNode),
+        // лимит транзиентен: пользователь может освободить место и повторить
+        // Ctrl+Z, поэтому снимок при отказе по лимиту остаётся в стеке.
+        if (AppState._findNodeRaw?.(snapshot.parentId)) {
+            const limitCheck = ValidationTree.canInsertTextBlockSubtree(snapshot.parentId, snapshot.node);
+            if (!limitCheck.valid) {
+                Notifications.error(limitCheck.message);
+                return false;
+            }
+        }
+
+        this._stack.pop();
         const restored = this._restoreNode(snapshot);
 
         if (!restored) return false;

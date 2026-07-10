@@ -4,7 +4,8 @@
  * Создает HTML-представление текстовых блоков с сохранением
  * форматирования и стилей.
  */
-import { SafeHTML } from '../../shared/sanitize.js';
+import { renderActContent } from '../../shared/sanitize.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 export class PreviewTextBlockRenderer {
     /**
@@ -39,31 +40,23 @@ export class PreviewTextBlockRenderer {
         const content = document.createElement('div');
         content.className = 'preview-textblock-content';
 
-        this._applyFormatting(content, textBlock.formatting);
+        this._applyBaseFontSize(content);
         // textBlock.content — пользовательский HTML, см. C-XSS-1.
         // Профиль 'acts' — allowlist, синхронный с бэк-санитайзером (5.2.3).
-        SafeHTML.set(content, textBlock.content, 'acts');
+        renderActContent(content, textBlock.content);
 
         return content;
     }
 
     /**
-     * Применяет КОНТЕЙНЕРНОЕ форматирование текстблока: размер и выравнивание.
-     * Начертание (жирный/курсив/подчёркивание) — единственным источником истины
-     * выступает inline-HTML внутри content (теги <b>/<i>/<u>), поэтому здесь
-     * НЕ применяется (B-1: убран мёртвый дубль formatting.{bold,italic,underline}).
+     * Применяет базовый размер шрифта текстблока из /acts/limits (единый
+     * источник с редактором и экспортом, EXP-2: дефолт 16px). Выравнивание и
+     * начертание живут в inline-HTML content (per-line text-align — TB-1, теги
+     * <b>/<i>/<u> — B-1); дефолт «по ширине» — CSS на .preview-textblock-content.
      * @private
      */
-    static _applyFormatting(element, formatting) {
-        if (!formatting) return;
-
-        if (formatting.fontSize) {
-            element.style.fontSize = `${formatting.fontSize}px`;
-        }
-
-        if (formatting.alignment) {
-            element.style.textAlign = formatting.alignment;
-        }
+    static _applyBaseFontSize(element) {
+        element.style.fontSize = `${getStructureLimits().fontSizeDefault}px`;
     }
 }
 

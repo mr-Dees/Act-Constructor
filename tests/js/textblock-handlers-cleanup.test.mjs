@@ -106,3 +106,48 @@ test('attach после initial tooltip-обработчиков снимает 
   assert.equal(link.listeners.filter(l => l.type === 'mouseenter').length, 1,
     'mouseenter задвоился: initial tooltip-обработчик не снят');
 });
+
+// ── B-25: removeLinkOrFootnote тоже обязан абортить _lfAbort перед отсоединением ──
+
+test('B-25: removeLinkOrFootnote абортит _lfAbort капсулы ДО replaceChild', () => {
+  const link = makeListenerTrackingElement('text-link');
+  link.textContent = 'ссылка';
+  link.previousSibling = null;
+  link.nextSibling = null;
+
+  let abortedAtReplaceTime = null;
+  const replaceCalls = [];
+  const controllerRef = {};
+  link.parentNode = {
+    replaceChild(newNode, oldNode) {
+      // Снимок в момент самого replaceChild — доказывает ПОРЯДОК (abort ДО
+      // отсоединения от DOM), а не просто то, что abort случился где-то внутри.
+      abortedAtReplaceTime = controllerRef.value && controllerRef.value.signal.aborted;
+      replaceCalls.push({ newNode, oldNode });
+    },
+  };
+
+  const mgr = makeManager([link]);
+  mgr.attachLinkFootnoteHandlers();
+  controllerRef.value = link._lfAbort;
+  assert.ok(controllerRef.value, 'предусловие: attachLinkFootnoteHandlers навешивает _lfAbort');
+  assert.ok(link.listeners.length > 0, 'предусловие: слушатели навешаны');
+
+  let finalizeCalled = false;
+  mgr.finalizeEdit = () => { finalizeCalled = true; };
+  const origGetComputedStyle = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = () => ({ fontSize: '16px' });
+  try {
+    mgr.removeLinkOrFootnote(link);
+  } finally {
+    globalThis.getComputedStyle = origGetComputedStyle;
+  }
+
+  assert.equal(abortedAtReplaceTime, true,
+    'B-25: _lfAbort.abort() должен случиться ДО replaceChild, а не после');
+  assert.equal(link.listeners.length, 0,
+    'слушатели должны сняться (signal.aborted снимает их синхронно)');
+  assert.equal(replaceCalls.length, 1, 'узел должен быть заменён ровно один раз');
+  assert.equal(replaceCalls[0].oldNode, link);
+  assert.ok(finalizeCalled, 'finalizeEdit всё равно вызывается после замены');
+});

@@ -1,41 +1,34 @@
 /**
- * B-1: превью текстблока применяет КОНТЕЙНЕРОМ только размер и выравнивание
- * (fontSize/textAlign). Начертание (жирный/курсив/подчёркивание) — единственным
- * источником истины выступает inline-HTML в content; полей formatting.b/i/u нет.
+ * EXP-2: превью текстблока задаёт КОНТЕЙНЕРОМ только базовый размер шрифта из
+ * /acts/limits (fontSizeDefault, дефолт 16px). Выравнивание и начертание живут
+ * в inline-HTML content (per-line text-align — TB-1, теги <b>/<i>/<u> — B-1);
+ * контейнерного объекта formatting больше нет (директива владельца).
  */
 import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { PreviewTextBlockRenderer } from '../../static/js/constructor/preview/preview-textblock-renderer.js';
+import { getStructureLimits } from '../../static/js/constructor/violation/violation-image-validator.js';
 
-function apply(formatting) {
+test('_applyBaseFontSize ставит базовый размер из limits (дефолт 16px)', () => {
     const el = { style: {} };
-    PreviewTextBlockRenderer._applyFormatting(el, formatting);
-    return el.style;
-}
-
-test('formatting применяет только размер и выравнивание (начертание — в content, B-1)', () => {
-    const style = apply({
-        fontSize: 16, alignment: 'center', bold: true, italic: true, underline: true,
-    });
-    assert.equal(style.fontSize, '16px');
-    assert.equal(style.textAlign, 'center');
-    // B-1: bold/italic/underline из formatting НЕ применяются — единственный
-    // источник начертания — inline-HTML в content (теги <b>/<i>/<u>).
-    assert.equal(style.fontWeight, undefined);
-    assert.equal(style.fontStyle, undefined);
-    assert.equal(style.textDecoration, undefined);
+    PreviewTextBlockRenderer._applyBaseFontSize(el);
+    assert.equal(el.style.fontSize, `${getStructureLimits().fontSizeDefault}px`);
+    // Единый источник с редактором и экспортом — дефолт 16px.
+    assert.equal(el.style.fontSize, '16px');
 });
 
-test('выключенные b/i/u не задают стилей', () => {
-    const style = apply({ fontSize: 14, alignment: 'left', bold: false, italic: false, underline: false });
-    assert.equal(style.fontWeight, undefined);
-    assert.equal(style.fontStyle, undefined);
-    assert.equal(style.textDecoration, undefined);
+test('выравнивание НЕ задаётся контейнером (per-line в content, дефолт — CSS)', () => {
+    const el = { style: {} };
+    PreviewTextBlockRenderer._applyBaseFontSize(el);
+    assert.equal(el.style.textAlign, undefined);
 });
 
-test('отсутствующий formatting не ломает рендер', () => {
-    assert.deepEqual(apply(null), {});
-    assert.deepEqual(apply(undefined), {});
+test('начертание НЕ применяется контейнером (единственный источник — content)', () => {
+    const el = { style: {} };
+    PreviewTextBlockRenderer._applyBaseFontSize(el);
+    assert.equal(el.style.fontWeight, undefined);
+    assert.equal(el.style.fontStyle, undefined);
+    assert.equal(el.style.textDecoration, undefined);
 });

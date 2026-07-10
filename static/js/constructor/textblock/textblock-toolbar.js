@@ -214,9 +214,12 @@ Object.assign(TextBlockManager.prototype, {
     applyFontSize(fontSize) {
         if (!this.activeEditor) return;
 
-        // Кламп по границам шрифта из настроек (ACTS__TEXTBLOCKS__* через
-        // /limits): схема отвергнет размер вне диапазона — не даём UI выйти
-        // за него даже если в списке остались крайние значения.
+        // TB-6: кламп размера к [min,max] из /acts/limits (env-границы
+        // ACTS__TEXTBLOCKS__FONT_SIZE_*). После вырезания formatting-объекта
+        // (Task 5) серверная схема размер больше не валидирует — границу держат
+        // тулбар здесь и мягкий кламп бэк-санитайзера на save (html_sanitizer.py).
+        // Не даём UI выйти за диапазон, даже если в палитре остались крайние
+        // значения.
         const { fontSizeMin, fontSizeMax } = getStructureLimits();
         fontSize = Math.max(fontSizeMin, Math.min(fontSizeMax, fontSize));
 
@@ -276,24 +279,38 @@ Object.assign(TextBlockManager.prototype, {
             // теряется при reload/preview/export. Вставляем span с ZWSP-якорем и
             // ставим каретку внутрь — будущий ввод унаследует размер.
             const range = selection.getRangeAt(0);
-            const span = document.createElement('span');
-            span.style.fontSize = `${fontSize}px`;
-            span.appendChild(document.createTextNode('​'));
-            range.insertNode(span);
-            const caret = document.createRange();
-            caret.setStart(span.firstChild, 1); // после ZWSP
-            caret.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(caret);
+            // CORE-5: если каретка уже внутри пустого якоря размера (span из
+            // одного U+200B, оставшийся от предыдущей смены на этой же каретке) —
+            // ПРАВИМ его font-size вместо вкладывания нового span. Иначе повторные
+            // смены копят вложенность <span><span><span>…</span></span></span>.
+            const anchor = this._reusableSizeAnchor(range);
+            if (anchor) {
+                anchor.style.fontSize = `${fontSize}px`;
+                const zwsp = anchor.firstChild;
+                if (zwsp) {
+                    const caret = document.createRange();
+                    caret.setStart(zwsp, (zwsp.textContent || '').length); // после ZWSP
+                    caret.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(caret);
+                }
+            } else {
+                const span = document.createElement('span');
+                span.style.fontSize = `${fontSize}px`;
+                span.appendChild(document.createTextNode('​'));
+                range.insertNode(span);
+                const caret = document.createRange();
+                caret.setStart(span.firstChild, 1); // после ZWSP
+                caret.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(caret);
+            }
         }
 
-        const textBlockId = this.activeEditor.dataset.textBlockId;
-        // Форматирование могло завернуть caret-guard в font-span — чистим и
-        // пере-расставляем (U+200B-якорь размера при этом не затрагивается).
-        // normalizeMarkers объявлен в textblock-editor.js — в браузере всегда
-        // загружен через entry; guard на случай частичного импорта в unit-тестах.
-        if (typeof this.normalizeMarkers === 'function') this.normalizeMarkers(this.activeEditor);
-        this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        // Единый сток: форматирование могло завернуть caret-guard в font-span —
+        // finalizeEdit → normalizeMarkers чистит и пере-расставляет их (только при
+        // наличии капсул; U+200B-якорь размера при этом не затрагивается).
+        this.finalizeEdit(this.activeEditor);
         // B-4: при прямом программном вызове (stepFontSize/hotkey) тулбар иначе
         // остаётся с устаревшим значением размера.
         this.updateToolbarState();
@@ -436,7 +453,14 @@ Object.assign(TextBlockManager.prototype, {
 
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
             acceptNode: (node) => {
-                if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
+                // TB-4: пропускаем узлы из одних невидимок (U+200B-якорь размера,
+                // U+FEFF-guard) и чистый пробел. Осиротевший якорь иначе примешивал
+                // бы свой размер к выделению → ложный смешанный «—» в дропдауне и
+                // сбитая база Ctrl+Shift+>/<. trim() U+200B не режет — используем
+                // zero-width-предикат (_isZeroWidthNode) плюс отсев пробела.
+                if (this._isZeroWidthNode?.(node) || !node.textContent.trim()) {
+                    return NodeFilter.FILTER_REJECT;
+                }
                 return range.intersectsNode(node)
                     ? NodeFilter.FILTER_ACCEPT
                     : NodeFilter.FILTER_REJECT;
@@ -477,8 +501,35 @@ Object.assign(TextBlockManager.prototype, {
             el = el.parentElement;
         }
         const fb = probe?.nodeType === 3 ? probe.parentElement : probe;
+        // Фолбэк — дефолт из лимитов (EXP-2, 16px), не хардкод старой базы (14px).
         return fb && this.activeEditor?.contains(fb)
-            ? parseInt(window.getComputedStyle(fb).fontSize) : 14;
+            ? parseInt(window.getComputedStyle(fb).fontSize) : getStructureLimits().fontSizeDefault;
+    },
+
+    /**
+     * @private CORE-5: пустой якорь размера, В КОТОРОМ стоит схлопнутая каретка —
+     * span из одного U+200B с inline font-size (материализация размера на каретке
+     * из прошлого applyFontSize). Возвращает его, чтобы повторная смена размера
+     * ПРАВИЛА font-size существующего якоря, а не вкладывала новый span. Реальный
+     * текст в span (якорь уже «наполнен» вводом) → не якорь: _isZeroWidthNode
+     * вернёт false, размер там ставится обычным путём. Капсулы исключены.
+     * @param {Range} range схлопнутая каретка
+     * @returns {HTMLElement|null}
+     */
+    _reusableSizeAnchor(range) {
+        if (!range || !range.startContainer) return null;
+        if (typeof this._isZeroWidthNode !== 'function'
+            || typeof this._isCapsule !== 'function') return null;
+        const start = range.startContainer;
+        let el = start.nodeType === 3 ? start.parentElement : start;
+        while (el && el !== this.activeEditor && this.activeEditor?.contains?.(el)) {
+            if (el.tagName === 'SPAN' && el.style?.fontSize
+                && !this._isCapsule(el) && this._isZeroWidthNode(el)) {
+                return el;
+            }
+            el = el.parentElement;
+        }
+        return null;
     },
 
     /**
@@ -487,13 +538,22 @@ Object.assign(TextBlockManager.prototype, {
      * range.extractContents() клонирует частично выделенный маркер (дубль ссылки
      * в начале строки). Сдвигаем start перед маркером, end — после, чтобы маркер
      * переместился во фрагмент целиком.
+     * @param {Range} range
+     * @param {HTMLElement} [editor=this.activeEditor] Редактор-владелец диапазона.
+     *   Параметризован (тот же паттерн, что renumberEditorFootnotes) ради
+     *   read-only-копирования: RO-редакторы НЕ ставят activeEditor, а copy-путь
+     *   передаёт свой editor — иначе обход границ не находил бы капсулы и клонировал
+     *   бы половину маркера.
      * @private
      */
-    _expandRangeOutOfMarkers(range) {
+    _expandRangeOutOfMarkers(range, editor = this.activeEditor) {
         const markerAncestor = (node) => {
             let el = node?.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== this.activeEditor && this.activeEditor?.contains(el)) {
-                if (el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) {
+            while (el && el !== editor && editor?.contains(el)) {
+                // Капсула в inline-правке (editing-mode) — обычный редактируемый
+                // контент, за её границы диапазон НЕ расширяем (CARET-1).
+                if ((el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) &&
+                        !this._isEditingCapsule(el)) {
                     return el;
                 }
                 el = el.parentElement;
@@ -512,17 +572,30 @@ Object.assign(TextBlockManager.prototype, {
  * ближайшему из палитры (унифицированный акт). Одноразовый идемпотентный проход
  * при загрузке: правит content (span[style]); при изменении возвращает
  * changed=true → вызывающий помечает акт как несохранённый.
+ * TB-6: снап идёт по ПЕРЕСЕЧЕНИЮ палитры и [min,max] из /acts/limits — env-
+ * границы (ACTS__TEXTBLOCKS__FONT_SIZE_*) уважаются, размер не «легализуется»
+ * за пределы диапазона. Границы берутся из getStructureLimits(); параметр
+ * limits — только для тестов (детерминированный диапазон без AppConfig).
  * @param {Object<string,{content:string}>} textBlocks
  * @param {number[]} palette - доступные размеры (textBlockManager.fontSizes)
+ * @param {{fontSizeMin:number, fontSizeMax:number}} [limits] - переопределение границ
  * @returns {{changed: boolean, count: number}}
  */
-export function normalizeFontSizes(textBlocks, palette) {
+export function normalizeFontSizes(textBlocks, palette, limits) {
     if (!textBlocks || typeof textBlocks !== 'object'
         || !Array.isArray(palette) || !palette.length) {
         return { changed: false, count: 0 };
     }
-    const snap = (px) => palette.reduce((best, cur) =>
-        Math.abs(cur - px) < Math.abs(best - px) ? cur : best);
+    const { fontSizeMin, fontSizeMax } = limits || getStructureLimits();
+    // Кандидаты снапа — палитра, суженная до диапазона; пустое пересечение
+    // (границы уже палитры) → фолбэк на всю палитру плюс финальный кламп.
+    const inRange = palette.filter(s => s >= fontSizeMin && s <= fontSizeMax);
+    const candidates = inRange.length ? inRange : palette;
+    const snap = (px) => {
+        const nearest = candidates.reduce((best, cur) =>
+            Math.abs(cur - px) < Math.abs(best - px) ? cur : best);
+        return Math.max(fontSizeMin, Math.min(fontSizeMax, nearest));
+    };
     let changed = false;
     let count = 0;
     // #3: инертный <template> — тело парсится без загрузки ресурсов, поэтому

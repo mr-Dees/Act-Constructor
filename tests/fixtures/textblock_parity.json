@@ -1,0 +1,101 @@
+{
+  "_comment": "Общие фикстуры паритета редактор ↔ allowlist ↔ DOCX (Task 6, идея 12). Один JSON гоняют pytest (tests/domains/acts/formatters/docx/test_textblock_parity.py: inline.py + bleach-round-trip) и node (tests/js/textblock-parity.test.mjs: allowlist-конфиги + filterCssDeclarations). Инвариант: всё, что рендерит DOCX, санитайзер сохраняет, а фронт-allowlist допускает. При правке набора синхронно смотреть оба теста.",
+  "fixtures": [
+    {
+      "name": "plain",
+      "content": "Просто текст",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 0, "alignments": ["justify"] },
+      "allowlist_tags": [],
+      "allowlist_css": [],
+      "allowlist_attrs": []
+    },
+    {
+      "name": "inline_faces",
+      "content": "<b>жирный</b> <i>курсив</i> <u>подчёркнутый</u> <s>зачёркнутый</s>",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 0 },
+      "allowlist_tags": ["b", "i", "u", "s"],
+      "allowlist_css": [],
+      "allowlist_attrs": []
+    },
+    {
+      "name": "font_size_span",
+      "content": "<span style=\"font-size: 20px\">крупно</span> обычный",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 0, "sizes_pt": [15.0] },
+      "allowlist_tags": ["span"],
+      "allowlist_css": ["font-size"],
+      "allowlist_attrs": ["style"]
+    },
+    {
+      "name": "align_center_div",
+      "content": "<div style=\"text-align: center;\">центр</div>",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 0, "alignments": ["center"] },
+      "allowlist_tags": ["div"],
+      "allowlist_css": ["text-align"],
+      "allowlist_attrs": ["style"]
+    },
+    {
+      "name": "three_aligned_divs",
+      "content": "<div style=\"text-align: left;\">л</div><div style=\"text-align: center;\">ц</div><div style=\"text-align: right;\">п</div>",
+      "docx": { "paragraphs": 3, "hyperlinks": 0, "footnotes": 0, "alignments": ["left", "center", "right"] },
+      "allowlist_tags": ["div"],
+      "allowlist_css": ["text-align"],
+      "allowlist_attrs": ["style"]
+    },
+    {
+      "name": "link_capsule",
+      "content": "См. <span class=\"text-link\" data-link-url=\"https://cbr.ru/\">сайт</span> тут",
+      "docx": { "paragraphs": 1, "hyperlinks": 1, "footnotes": 0 },
+      "allowlist_tags": ["span"],
+      "allowlist_css": [],
+      "allowlist_attrs": ["class", "data-link-url"]
+    },
+    {
+      "name": "link_capsule_sized",
+      "content": "<span class=\"text-link\" style=\"font-size: 20px\" data-link-url=\"https://a.b/\">крупная ссылка</span>",
+      "docx": { "paragraphs": 1, "hyperlinks": 1, "footnotes": 0, "sizes_pt": [15.0] },
+      "allowlist_tags": ["span"],
+      "allowlist_css": ["font-size"],
+      "allowlist_attrs": ["class", "style", "data-link-url"]
+    },
+    {
+      "name": "footnote_capsule",
+      "content": "До <span class=\"text-footnote\" data-footnote-text=\"Источник X\">факта</span> и после",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 1 },
+      "allowlist_tags": ["span"],
+      "allowlist_css": [],
+      "allowlist_attrs": ["class", "data-footnote-text"]
+    },
+    {
+      "name": "footnote_capsule_sized",
+      "content": "<span class=\"text-footnote\" style=\"font-size: 20px\" data-footnote-text=\"прим\">крупный якорь</span>",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 1, "sizes_pt": [15.0] },
+      "allowlist_tags": ["span"],
+      "allowlist_css": ["font-size"],
+      "allowlist_attrs": ["class", "style", "data-footnote-text"]
+    },
+    {
+      "name": "empty_block_lines",
+      "content": "<div>a</div><div><br></div><div>b</div>",
+      "docx": { "paragraphs": 3, "hyperlinks": 0, "footnotes": 0 },
+      "allowlist_tags": ["div", "br"],
+      "allowlist_css": [],
+      "allowlist_attrs": []
+    },
+    {
+      "name": "nested_div",
+      "content": "<div>a<div>вложен</div></div>",
+      "docx": { "paragraphs": 1, "hyperlinks": 0, "footnotes": 0 },
+      "allowlist_tags": ["div"],
+      "allowlist_css": [],
+      "allowlist_attrs": []
+    },
+    {
+      "name": "empty_content",
+      "content": "",
+      "docx": { "paragraphs": 0, "hyperlinks": 0, "footnotes": 0 },
+      "allowlist_tags": [],
+      "allowlist_css": [],
+      "allowlist_attrs": []
+    }
+  ]
+}
