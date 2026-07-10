@@ -39,11 +39,11 @@ export class CkClientExpConfig {
         return buildColumns(this.fields, {
             extra: [
                 // Служебные колонки скрыты по умолчанию (hidden) — включаются из панели видимости.
-                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true },
-                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkClientExpConfig.formatDate(v) },
-                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkClientExpConfig.formatDate(v) },
-                { key: 'metric_name', label: 'Метрика', type: 'text' },
-                { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
+                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true, group: 'Системное' },
+                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkClientExpConfig.formatDate(v), group: 'Системное' },
+                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkClientExpConfig.formatDate(v), group: 'Системное' },
+                { key: 'metric_name', label: 'Метрика', type: 'text', group: 'Метрика' },
+                { key: 'act_sub_number', label: '№ суб-акта', type: 'text', group: 'Идентификация' },
             ],
             overrides: {
                 metric_code: { label: 'Код метрики', type: 'text' },
@@ -62,11 +62,10 @@ export class CkClientExpConfig {
             // таблице): идентификация → процесс → метрика (код метрики вплотную
             // к названию) → системное.
             order: [
-                'id',
                 'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'neg_finder_tb_id', 'act_item_number',
                 'process_number', 'block_owner', 'department_owner',
                 'metric_code', 'metric_name', 'metric_unic_clients', 'metric_element_counts', 'metric_amount_rubles', 'is_sent_to_top_brass', 'ck_comment',
-                'reestr_metric_id', 'created_at', 'updated_at',
+                'reestr_metric_id', 'id', 'created_at', 'updated_at',
             ],
         });
     }
