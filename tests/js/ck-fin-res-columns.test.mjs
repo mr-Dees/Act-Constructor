@@ -139,3 +139,27 @@ test('Дата СЗ (dt_sz) — фильтр одной датой (dateFilter=s
     assert.equal(c.dateFilter, undefined, `${k} должна оставаться диапазоном`);
   }
 });
+
+test('MPL_METRIC_CODES содержит 602', () => {
+  assert.ok(CkFinResConfig.MPL_METRIC_CODES.has('602'));
+});
+
+test('в полях формы есть mpl_breakdown типа amount-breakdown с подсказкой про 602, сразу после tb_breakdown', () => {
+  const flat = flattenFields(CkFinResConfig.fields);
+  const f = flat.find((x) => x.key === 'mpl_breakdown');
+  assert.ok(f, 'поле mpl_breakdown должно быть в конфиге формы');
+  assert.equal(f.type, 'amount-breakdown');
+  assert.match(f.description, /602/);
+  assert.ok(!f.required);
+  const idx = flat.findIndex((x) => x.key === 'mpl_breakdown');
+  const tbIdx = flat.findIndex((x) => x.key === 'tb_breakdown');
+  assert.equal(idx, tbIdx + 1, 'mpl_breakdown должно идти сразу после tb_breakdown');
+});
+
+test('mpl_breakdown: автовыведенная колонка скрыта по умолчанию, без сортировки/фильтра на бэке (спека не делает чипы/пивот по MPL — см. design §1.3)', () => {
+  const col = CkFinResConfig.columns.find((c) => c.key === 'mpl_breakdown');
+  assert.ok(col, 'колонка mpl_breakdown должна существовать (#15 — каждое поле формы среди колонок)');
+  assert.equal(col.hidden, true);
+  assert.equal(col.noSort, true);
+  assert.equal(col.noFilter, true);
+});

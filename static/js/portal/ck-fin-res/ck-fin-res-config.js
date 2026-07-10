@@ -14,6 +14,9 @@ export class CkFinResConfig {
     static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
 
+    /** Метрики с показателем «MPL 90+». Синхронизировано вручную с MPL_METRIC_CODES в fr_validation_service.py. */
+    static MPL_METRIC_CODES = new Set(['602']);
+
     static formatDate(val) {
         if (!val) return '';
         const d = new Date(val);
@@ -181,6 +184,14 @@ export class CkFinResConfig {
                     filterValue: (record) => (record.tb_breakdown || []).map(b => String(b.neg_finder_tb_id)),
                     render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
                 },
+                // Поле формы mpl_breakdown (amount-breakdown) тоже автовыводится в
+                // колонку buildColumns — как и tb_breakdown выше. Но в отличие от него
+                // MPL сознательно не получает чипы/пивот (спека §1.3: «в таблице MPL —
+                // только агрегатом total_mpl_amount», колонка добавляется отдельно
+                // позже). Сырую развертку прячем служебно: ключа mpl_breakdown нет ни
+                // в ALLOWED_COLUMNS, ни в AGG_SORT_EXPR бэка — фильтр молча
+                // проигнорировался бы, а сортировка ушла бы в ValueError.
+                mpl_breakdown: { hidden: true, noSort: true, noFilter: true },
                 real_loss: { label: 'Реальные потери' },
                 is_sent_to_top_brass: { label: 'На НС', description: 'На наблюдательный совет' },
                 dt_sz: { format: (v) => CkFinResConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
@@ -250,6 +261,8 @@ export class CkFinResConfig {
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
             { key: 'tb_breakdown', label: 'Сумма по ТБ (руб.)', type: 'amount-breakdown', required: true,
               description: 'Сумма выявленных возможностей финансового результата банка — итог и развертка по ТБ' },
+            { key: 'mpl_breakdown', label: 'MPL 90+, руб.', type: 'amount-breakdown', required: false,
+              description: 'Заполняется только для метрики 602' },
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },
                 { key: 'is_sent_to_top_brass', label: 'На наблюдательный совет', type: 'checkbox' },

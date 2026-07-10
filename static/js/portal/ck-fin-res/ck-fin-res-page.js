@@ -13,6 +13,7 @@ import { ColumnVisibility } from '../../shared/datatable/column-visibility.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
 import { FRBreakdownEditor } from './fr-breakdown-editor.js';
+import { extractMplBreakdown, mergeTbBreakdowns } from './fr-breakdown-logic.js';
 
 export class CkFinResPage {
     static _dictionaries = {};
@@ -96,13 +97,24 @@ export class CkFinResPage {
         this._applyTbView(this._viewState.getExtra('tbView', 'chips'), columns);
 
         // Форма
+        this._formContainerEl = document.getElementById('ckFormPanel');
         CkForm.init({
             fields: cfg.fields,
             dictionaries: this._dictionaries,
-            containerEl: document.getElementById('ckFormPanel'),
+            containerEl: this._formContainerEl,
             onProcessPick: (field) => this._openProcessPicker(field),
             onBreakdownEdit: (field) => this._openBreakdownEditor(field),
             sectionStateKey: cfg.sectionStateKey,
+        });
+
+        // Активность поля MPL зависит от выбранной метрики. Форма пересоздаёт
+        // DOM при fill()/clear() — слушатель на самом select умер бы после
+        // первого рендера, поэтому вешаем делегированный change на стабильный
+        // контейнер формы.
+        this._formContainerEl.addEventListener('change', (e) => {
+            if (e.target && e.target.id === 'ck-field-metric_code') {
+                this._syncMplField({ notifyOnClear: true });
+            }
         });
 
         // Toolbar кнопки
@@ -138,7 +150,9 @@ export class CkFinResPage {
             group_key: k,
             row_ids: g.row_ids || [],
             tb_breakdown: g.tb_breakdown || [],
+            mpl_breakdown: extractMplBreakdown(g.tb_breakdown || []),
             total_amount: g.total_amount,
+            total_mpl_amount: g.total_mpl_amount,
             total_counts: g.total_counts,
             tb_count: g.tb_count,
             divergent_fields: g.divergent_fields || [],
@@ -183,6 +197,7 @@ export class CkFinResPage {
 
     static _onRowSelect(record) {
         CkForm.fill(record);
+        this._syncMplField();
         this._updateSubheader(record);
         // Данные строк ТБ группы разошлись по общим полям (ETL-рассинхрон) —
         // предупреждаем один раз при выборе записи.
@@ -194,6 +209,7 @@ export class CkFinResPage {
     static _onAddRecord() {
         this._dataTable.clearSelection();
         CkForm.clear();
+        this._syncMplField();
         this._updateSubheader(null);
     }
 
@@ -214,13 +230,19 @@ export class CkFinResPage {
         }
 
         const data = CkForm.collectData();
-        // Развертка по ТБ уходит отдельным полем breakdown группового запроса —
-        // из common её убираем (common описывает только общегрупповые поля).
-        const breakdown = (data.tb_breakdown || []).map(b => ({
-            neg_finder_tb_id: String(b.neg_finder_tb_id),
-            metric_amount_rubles: String(b.metric_amount_rubles),
-            metric_element_counts: Number(b.metric_element_counts || 0),
-        }));
+        const isMpl = CkFinResConfig.MPL_METRIC_CODES.has(String(data.metric_code || '').trim());
+        const mplItems = data.mpl_breakdown || [];
+        delete data.mpl_breakdown;
+        if (isMpl && !mplItems.length) {
+            Notifications.error('Для метрики 602 требуется распределение «MPL 90+» по ТБ');
+            return;
+        }
+        // Развертка по ТБ (основная + MPL) уходит отдельным полем breakdown
+        // группового запроса — из common её убираем (common описывает только
+        // общегрупповые поля). Вне метрики 602 MPL в слияние не идёт — все
+        // строки уходят с mpl_amount_rubles='0.00' независимо от того, что
+        // осталось в dataset формы.
+        const breakdown = mergeTbBreakdowns(data.tb_breakdown || [], isMpl ? mplItems : []);
         delete data.tb_breakdown;
         const mode = CkForm.getMode();
         const record = CkForm.getCurrentRecord();
@@ -294,24 +316,57 @@ export class CkFinResPage {
 
     static _openBreakdownEditor(field) {
         const cfg = CkFinResConfig;
+        const isMpl = field.key === 'mpl_breakdown';
+        if (isMpl && !this._isMplMetric()) {
+            Notifications.warning('Поле «MPL 90+» доступно только для метрики 602');
+            return;
+        }
         const current = CkForm.getBreakdownValue(field.key);
         const lossEl = document.getElementById('ck-field-real_loss');
         const nsEl = document.getElementById('ck-field-is_sent_to_top_brass');
         const rec = CkForm.getCurrentRecord();
         FRBreakdownEditor.show({
-            subtitle: rec
-                ? `Пункт ${rec.act_item_number || '—'} · ${rec.metric_code || ''} «${rec.metric_name || ''}»`
-                : 'Новая запись',
+            subtitle: isMpl
+                ? 'MPL 90+, руб.'
+                : (rec
+                    ? `Пункт ${rec.act_item_number || '—'} · ${rec.metric_code || ''} «${rec.metric_name || ''}»`
+                    : 'Новая запись'),
             terbanks: this._dictionaries.terbanks || [],
             colorOf: (id) => cfg.tbColor(id),
             breakdown: current,
             flags: { loss: !!(lossEl && lossEl.checked), ns: !!(nsEl && nsEl.checked) },
+            showCounts: !isMpl,
+            showFlags: !isMpl,
             onApply: ({ breakdown, flags }) => {
                 CkForm.setBreakdownValue(field.key, breakdown);
                 if (lossEl) lossEl.checked = !!flags.loss;
                 if (nsEl) nsEl.checked = !!flags.ns;
             },
         });
+    }
+
+    static _currentMetricCode() {
+        const el = document.getElementById('ck-field-metric_code');
+        return el ? String(el.value || '').trim() : '';
+    }
+
+    static _isMplMetric() {
+        return CkFinResConfig.MPL_METRIC_CODES.has(this._currentMetricCode());
+    }
+
+    /** Активность поля MPL: вне метрики 602 поле приглушено, значение очищается. */
+    static _syncMplField({ notifyOnClear = false } = {}) {
+        const input = document.getElementById('ck-field-mpl_breakdown');
+        if (!input) return;
+        const wrap = input.closest('.ck-form__field') || input.parentElement;
+        const enabled = this._isMplMetric();
+        wrap.classList.toggle('ck-form__field--mpl-disabled', !enabled);
+        if (!enabled && (CkForm.getBreakdownValue('mpl_breakdown') || []).length) {
+            CkForm.setBreakdownValue('mpl_breakdown', []);
+            if (notifyOnClear) {
+                Notifications.warning('Метрика изменена: распределение «MPL 90+» очищено');
+            }
+        }
     }
 
     static _updateSubheader(record) {

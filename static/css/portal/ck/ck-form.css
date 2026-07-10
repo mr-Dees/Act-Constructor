@@ -126,6 +126,16 @@
     margin-top: 2px;
 }
 
+/* Поле «MPL 90+» (ЦКФР) вне метрики 602: видно, но неактивно. */
+.ck-form__field--mpl-disabled .ck-form__breakdown {
+    opacity: .55;
+}
+
+.ck-form__field--mpl-disabled .ck-form__picker-trigger {
+    pointer-events: none;
+    opacity: .55;
+}
+
 /* Сворачиваемые секции формы (disclosure). Шеврон/состояние выводятся из
    aria-expanded на кнопке-заголовке — единый источник истины. */
 .ck-form__section {
