@@ -74,19 +74,22 @@ export class CkFinResConfig {
         return Number(v || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    /** Ячейка «Сумма — итого»: число + мини-бар композиции по ТБ. */
-    static renderTotalAmount(raw, record) {
+    /** Ячейка «итого»: число + мини-бар композиции по ТБ (общая для суммы и NPL).
+     * list — развёртка показателя ({neg_finder_tb_id, metric_amount_rubles} — у
+     * NPL значение тоже лежит в ключе metric_amount_rubles, см. extractNplBreakdown);
+     * hasValue — есть ли распределение (текст пустого состояния различается). */
+    static renderAmountTotal(raw, list, { hasValue, emptyText }) {
         const wrap = document.createElement('div');
         const num = document.createElement('div');
         num.className = 'frb-cell-total';
-        num.textContent = record.tb_count ? `${this.fmtMoney(raw)} ₽` : 'не распределено';
+        num.textContent = hasValue ? `${this.fmtMoney(raw)} ₽` : emptyText;
         wrap.appendChild(num);
-        const list = record.tb_breakdown || [];
-        const total = list.reduce((s, b) => s + Number(b.metric_amount_rubles || 0), 0);
+        const items = list || [];
+        const total = items.reduce((s, b) => s + Number(b.metric_amount_rubles || 0), 0);
         if (total > 0) {
             const bar = document.createElement('div');
             bar.className = 'frb-cell-minibar';
-            for (const b of list) {
+            for (const b of items) {
                 const seg = document.createElement('span');
                 seg.style.width = `${(Number(b.metric_amount_rubles || 0) / total) * 100}%`;
                 seg.style.background = this.tbColor(b.neg_finder_tb_id);
@@ -98,12 +101,11 @@ export class CkFinResConfig {
         return wrap;
     }
 
-    /** Ячейка «ТБ, выявившие отклонение»: чипы с суммами. */
-    static renderTbChips(raw, record, dicts) {
+    /** Ячейка чипов ТБ с суммами (общая для tb_breakdown и npl_breakdown). */
+    static renderBreakdownChips(list, dicts) {
         const wrap = document.createElement('div');
         wrap.className = 'frb-cell-chips';
-        const list = record.tb_breakdown || [];
-        if (!list.length) { wrap.textContent = '—'; return wrap; }
+        if (!list || !list.length) { wrap.textContent = '—'; return wrap; }
         for (const b of list) {
             const chip = document.createElement('span');
             chip.className = 'frb-chip';
@@ -120,17 +122,18 @@ export class CkFinResConfig {
         return wrap;
     }
 
-    /** Pivot-колонки: по одной числовой колонке на каждый ТБ словаря. */
-    static tbPivotColumns(dicts) {
+    /** Pivot-колонки по ТБ словаря: для суммы (piv:) и NPL (pivnpl:) — одна фабрика. */
+    static tbPivotColumns(dicts, { keyPrefix = 'piv', breakdownField = 'tb_breakdown', labelSuffix = '' } = {}) {
         return ((dicts && dicts.terbanks) || []).map(t => {
             const id = String(t.tb_id);
             return {
-                key: `piv:${id}`, label: this.tbAbbr(id, dicts), type: 'number',
-                align: 'right', width: 120, hidden: true, noFilter: true, noSort: true,
-                description: t.full_name || t.short_name,
+                key: `${keyPrefix}:${id}`,
+                label: `${this.tbAbbr(id, dicts)}${labelSuffix}`,
+                type: 'number', align: 'right', width: 120, hidden: true, noFilter: true, noSort: true,
+                description: `${t.full_name || t.short_name || ''}${labelSuffix ? ' — NPL 90+' : ''}`,
                 render: (raw, record) => {
                     const span = document.createElement('span');
-                    const b = (record.tb_breakdown || []).find(x => String(x.neg_finder_tb_id) === id);
+                    const b = (record[breakdownField] || []).find(x => String(x.neg_finder_tb_id) === id);
                     span.textContent = b ? this.fmtMoney(b.metric_amount_rubles) : '—';
                     if (!b) span.className = 'frb-cell-zero';
                     return span;
@@ -184,7 +187,7 @@ export class CkFinResConfig {
                 { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
                 { key: 'metric_name', label: 'Метрика', type: 'text' },
                 { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
-                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', render: (raw, record) => CkFinResConfig.renderTotalAmount(raw, record) },
+                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', render: (raw, record) => CkFinResConfig.renderAmountTotal(raw, record.tb_breakdown || [], { hasValue: !!record.tb_count, emptyText: 'не распределено' }) },
                 // total_npl_amount — чистый read-only агрегат (как total_amount): бэк уже
                 // отдаёт его в группе и знает и в AGG_FILTER_EXPR (диапазон-фильтр), и в
                 // AGG_SORT_EXPR (сортировка) — noSort намеренно не ставим, сортировка
@@ -197,9 +200,11 @@ export class CkFinResConfig {
                     align: 'right',
                     width: 140,
                     filterPicker: 'numrange',
-                    render: (v) => {
-                        const n = Number(v || 0);
-                        return document.createTextNode(n > 0 ? CkFinResConfig.fmtMoney(n) : '—');
+                    // hasValue — по наличию развертки, не по raw>0 (симметрично total_amount):
+                    // «—» вместо «не распределено» — NPL законно пуст у метрик ≠ 602.
+                    render: (raw, record) => {
+                        const list = record.npl_breakdown || [];
+                        return CkFinResConfig.renderAmountTotal(raw, list, { hasValue: list.length > 0, emptyText: '—' });
                     },
                 },
                 // noFilter: ключа tb_count нет в ALLOWED_COLUMNS бэка — фильтр молча игнорировался бы; сортировка (COUNT(*)) поддержана.
@@ -241,28 +246,25 @@ export class CkFinResConfig {
                     // его как строку и никогда не совпал бы. filterValue отдаёт массив
                     // голых tb_id — по нему уже работает массивная семантика specMatches.
                     filterValue: (record) => (record.tb_breakdown || []).map(b => String(b.neg_finder_tb_id)),
-                    render: (raw, record, dicts) => CkFinResConfig.renderTbChips(raw, record, dicts),
+                    render: (raw, record, dicts) => CkFinResConfig.renderBreakdownChips(record.tb_breakdown || [], dicts),
                 },
-                // Поле формы npl_breakdown (amount-breakdown) тоже автовыводится в
-                // колонку buildColumns — как и tb_breakdown выше. Но в отличие от него
-                // NPL сознательно не получает чипы/пивот (спека §1.3: «в таблице NPL —
-                // только агрегатом total_npl_amount», колонка добавляется отдельно
-                // позже). Сырую развертку прячем служебно: ключа npl_breakdown нет ни
-                // в ALLOWED_COLUMNS, ни в AGG_SORT_EXPR бэка — фильтр молча
-                // проигнорировался бы, а сортировка ушла бы в ValueError.
-                // hidden:true защищает только ДЕФОЛТ: «⚙ → Выбрать все» дёргает
-                // TableViewState.setAllVisible(true), который обнуляет весь _hidden
-                // безусловно, игнорируя _defaultHidden. Поэтому колонка обязана уметь
-                // отрендериться сама — format-заглушка вместо утечки String([...]) →
-                // "[object Object]" на 602-строках. Отдельный label — чтобы служебная
-                // колонка не путалась в панели с настоящей «NPL 90+, руб.»
-                // (total_npl_amount из Task 6, там же будет видимой по умолчанию).
+                // Автовыведенная из fields колонка npl_breakdown переопределяется в чипы —
+                // полная симметрия с tb_breakdown (спека 2026-07-10 §2). Ключ npl_breakdown —
+                // membership-алиас бэка («группа содержит выбранный ТБ со строкой NPL>0»).
                 npl_breakdown: {
-                    label: 'NPL 90+ — развёртка (служебная)',
-                    hidden: true,
+                    label: 'NPL 90+ по ТБ',
+                    type: 'dictionary',
+                    width: 260,
                     noSort: true,
-                    noFilter: true,
-                    format: () => '—',
+                    filterPicker: 'checkbox',
+                    filterOptions: Object.keys(CkFinResConfig.TB_ABBR).map((id) => ({
+                        value: id,
+                        label: `${CkFinResConfig.TB_ABBR[id]} — ${CkFinResConfig.TB_NAMES[id]}`,
+                        short: CkFinResConfig.TB_ABBR[id],
+                    })),
+                    // extractNplBreakdown уже отдаёт только строки с NPL>0.
+                    filterValue: (record) => (record.npl_breakdown || []).map(b => String(b.neg_finder_tb_id)),
+                    render: (raw, record, dicts) => CkFinResConfig.renderBreakdownChips(record.npl_breakdown || [], dicts),
                 },
                 real_loss: { label: 'Реальные потери' },
                 is_sent_to_top_brass: { label: 'На НС', description: 'На наблюдательный совет' },
@@ -280,7 +282,7 @@ export class CkFinResConfig {
                 'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
-                'metric_code', 'metric_name', 'total_amount', 'total_npl_amount', 'tb_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
+                'metric_code', 'metric_name', 'total_amount', 'total_npl_amount', 'tb_breakdown', 'npl_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
                 'reestr_metric_id', 'created_at', 'updated_at',
             ],

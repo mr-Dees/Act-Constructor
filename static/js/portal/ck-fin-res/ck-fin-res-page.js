@@ -41,13 +41,16 @@ export class CkFinResPage {
 
     static _initComponents() {
         const cfg = CkFinResConfig;
-        // Pivot-колонки (одна на ТБ словаря) добавляются к базовым — переключаются
-        // видимостью вместе с чипами через вид развертки (_applyTbView).
-        const columns = [...cfg.columns, ...cfg.tbPivotColumns(this._dictionaries)];
-        // Опции чекбокс-фильтра tb_breakdown из columns — статика (см. cfg.TB_NAMES);
-        // подменяем на живой словарь, как только он загружен.
-        const tbBreakdownCol = columns.find(c => c.key === 'tb_breakdown');
-        if (tbBreakdownCol) tbBreakdownCol.filterOptions = cfg.tbFilterOptions(this._dictionaries);
+        // Pivot-пары: колонка суммы и колонка NPL каждого ТБ идут рядом (сравнение
+        // показателей одного банка — в соседних ячейках).
+        const sumPivots = cfg.tbPivotColumns(this._dictionaries);
+        const nplPivots = cfg.tbPivotColumns(this._dictionaries, { keyPrefix: 'pivnpl', breakdownField: 'npl_breakdown', labelSuffix: ' · NPL' });
+        const columns = [...cfg.columns, ...sumPivots.flatMap((c, i) => [c, nplPivots[i]])];
+        // Живые опции ТБ-фильтров обеих чип-колонок (взамен статики TB_NAMES).
+        for (const key of ['tb_breakdown', 'npl_breakdown']) {
+            const c = columns.find(col => col.key === key);
+            if (c) c.filterOptions = cfg.tbFilterOptions(this._dictionaries);
+        }
 
         // Состояние представления (видимость/ширины) с persist в localStorage
         this._viewState = new TableViewState({
@@ -191,9 +194,11 @@ export class CkFinResPage {
     static _applyTbView(view, columns) {
         const pivot = view === 'pivot';
         for (const col of columns) {
-            if (String(col.key).startsWith('piv:')) this._viewState.setVisible(col.key, pivot);
+            const key = String(col.key);
+            if (key.startsWith('piv:') || key.startsWith('pivnpl:')) this._viewState.setVisible(key, pivot);
         }
         this._viewState.setVisible('tb_breakdown', !pivot);
+        this._viewState.setVisible('npl_breakdown', !pivot);
         this._viewState.setExtra('tbView', view);
         if (this._colvisApi) this._colvisApi.sync();
         this._dataTable.refresh();
