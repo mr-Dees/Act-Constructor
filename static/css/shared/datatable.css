@@ -10,6 +10,7 @@
     flex: 1;
     overflow: auto;
     min-height: 0;
+    scrollbar-gutter: stable; /* скроллбар не отбирает ширину при фильтрации — иначе горизонтальный скролл «уезжает» */
 }
 
 .dt-table {

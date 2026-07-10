@@ -382,3 +382,27 @@ test('дата-фильтр после рефакторинга оболочки
   });
   clearTimeout(dt._debounce); // #14: снять отложенный _renderBody от _setFilterSpec — тест не зовёт render()
 });
+
+// ── render(): сохранение позиции скролла контейнера (Задача 8) ─────────────
+
+test('render() сохраняет позицию скролла контейнера', () => {
+  withFakeDom(({ created }) => {
+    const dt = makeTable();
+
+    dt.render();
+    // .dt-wrapper ищем по created, а не querySelector: honest-фейк не чистит
+    // children при innerHTML='' (в отличие от настоящего DOM), поэтому после
+    // второго render() querySelector('.dt-wrapper') нашёл бы ПЕРВЫЙ (старый)
+    // wrapper — тест был бы зелёным и без фикса.
+    const wrapper1 = created.filter((el) => el.className === 'dt-wrapper').pop();
+    assert.ok(wrapper1, 'первый render() должен создать .dt-wrapper');
+    wrapper1.scrollLeft = 120;
+    wrapper1.scrollTop = 40;
+
+    dt.render();
+    const wrapper2 = created.filter((el) => el.className === 'dt-wrapper').pop();
+    assert.ok(wrapper2 && wrapper2 !== wrapper1, 'второй render() должен создать новый .dt-wrapper');
+    assert.equal(wrapper2.scrollLeft, 120, 'scrollLeft переносится на новый wrapper');
+    assert.equal(wrapper2.scrollTop, 40, 'scrollTop переносится на новый wrapper');
+  });
+});

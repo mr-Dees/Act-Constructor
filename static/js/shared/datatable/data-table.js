@@ -54,6 +54,7 @@ export class DataTable {
     this._debounce = null;
     this._reqSeq = 0;
     this._tbody = null;
+    this._wrapper = null;    // текущий .dt-wrapper — для переноса scrollLeft/Top при перерисовке
     this._popover = null;    // единственный открытый попап таблицы (оверлей на body)
   }
 
@@ -635,6 +636,10 @@ export class DataTable {
     clearTimeout(this._debounce); // #14: снять отложенный _renderBody, чтобы он не выстрелил после
     this._closePopover();         // перестройка шапки осиротила бы открытый попап (дата/чекбокс/диапазон)
     const cols = this._visibleColumns();
+    // Позиция скролла живёт на старом wrapper'е, который сейчас будет уничтожен
+    // пересборкой — переносим её на новый (иначе любая перерисовка: фильтр,
+    // сортировка, смена видимости колонок — сбрасывает скролл в ноль).
+    const prevScroll = this._wrapper ? { left: this._wrapper.scrollLeft, top: this._wrapper.scrollTop } : null;
     this._mount.innerHTML = '';
 
     const wrapper = document.createElement('div');
@@ -657,6 +662,11 @@ export class DataTable {
 
     wrapper.appendChild(table);
     this._mount.appendChild(wrapper);
+    this._wrapper = wrapper;
+    if (prevScroll) {
+      wrapper.scrollLeft = prevScroll.left;
+      wrapper.scrollTop = prevScroll.top;
+    }
 
     attachColumnResize({ theadEl: thead, columns: cols, viewState: this._view });
 
