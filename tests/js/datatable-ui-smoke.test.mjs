@@ -262,6 +262,90 @@ test('ColumnVisibility.mount без onApi работает как раньше (
   });
 });
 
+// ── ColumnVisibility: группы в панели (Задача 5) ────────────────────────────
+
+test('ColumnVisibility.mount: заголовок группы вставляется перед первой колонкой новой группы; безгрупповые в начале — без заголовка', () => {
+  withFakeDom(({ created }) => {
+    const columns = [
+      { key: 'a', label: 'A' }, // без group — идёт первой, без заголовка
+      { key: 'b', label: 'B', group: 'Б' },
+      { key: 'c', label: 'C', group: 'Б' },
+      { key: 'd', label: 'D', group: 'В' },
+    ];
+    const viewState = makeViewStateStub();
+
+    ColumnVisibility.mount({
+      anchorEl: makeFakeElement('button'), columns, viewState, onChange: () => {},
+    });
+
+    const grid = created.find((el) => el.className === 'dt-colvis-grid');
+    assert.ok(grid, 'grid должен быть создан');
+    const heads = grid.children.filter((el) => el.className === 'dt-colvis-grouplabel');
+    assert.equal(heads.length, 2, 'заголовки только на смене группы (Б, В) — не на каждой колонке');
+    assert.deepEqual(heads.map((h) => h.textContent), ['Б', 'В']);
+
+    // Заголовок «Б» должен стоять непосредственно перед чекбоксом колонки b.
+    const idxHeadB = grid.children.indexOf(heads[0]);
+    const idxLabelB = grid.children.findIndex((el) => el.className === 'dt-colvis-item'
+      && el.children[0].dataset.key === 'b');
+    assert.equal(idxHeadB, idxLabelB - 1, 'заголовок «Б» должен идти вплотную перед колонкой b');
+
+    // Колонка a (без группы, первая) — сразу первый элемент грида, без заголовка перед собой.
+    assert.equal(grid.children[0].className, 'dt-colvis-item');
+  });
+});
+
+test('ColumnVisibility.mount без единого col.group — ни одного заголовка (регресс для страниц без секций)', () => {
+  withFakeDom(({ created }) => {
+    const columns = [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }];
+    const viewState = makeViewStateStub();
+    ColumnVisibility.mount({ anchorEl: makeFakeElement('button'), columns, viewState, onChange: () => {} });
+    const heads = created.filter((el) => el.className === 'dt-colvis-grouplabel');
+    assert.equal(heads.length, 0, 'без group ни один заголовок не должен появиться');
+  });
+});
+
+test('чекбоксы панели несут dataset.key с ключом своей колонки', () => {
+  withFakeDom(({ created }) => {
+    const columns = [{ key: 'foo', label: 'Foo', group: 'Г' }, { key: 'bar', label: 'Bar' }];
+    const viewState = makeViewStateStub();
+    ColumnVisibility.mount({ anchorEl: makeFakeElement('button'), columns, viewState, onChange: () => {} });
+    const checkboxes = created.filter((el) => el.type === 'checkbox');
+    assert.deepEqual(checkboxes.map((cb) => cb.dataset.key), ['foo', 'bar']);
+  });
+});
+
+test('ColumnVisibility._sync (карта по ключу) снимает все галочки после setAllVisible(false), даже при вставленных заголовках', () => {
+  withFakeDom(({ created }) => {
+    const columns = [
+      { key: 'a', label: 'A', group: 'Б' },
+      { key: 'b', label: 'B', group: 'Б' },
+      { key: 'c', label: 'C', group: 'В' },
+    ];
+    const hidden = new Set();
+    const viewState = {
+      isVisible: (key) => !hidden.has(key),
+      setVisible: (key, on) => { if (on) hidden.delete(key); else hidden.add(key); },
+      setAllVisible: (on) => { hidden.clear(); if (!on) columns.forEach((c) => hidden.add(c.key)); },
+      resetToDefault: () => {},
+    };
+    let api = null;
+
+    ColumnVisibility.mount({
+      anchorEl: makeFakeElement('button'), columns, viewState, onChange: () => {},
+      onApi: (a) => { api = a; },
+    });
+
+    const checkboxes = created.filter((el) => el.type === 'checkbox');
+    assert.equal(checkboxes.length, 3);
+    assert.ok(checkboxes.every((cb) => cb.checked === true), 'изначально все видимы');
+
+    viewState.setAllVisible(false);
+    api.sync();
+    assert.ok(checkboxes.every((cb) => cb.checked === false), 'после setAllVisible(false) + sync все чекбоксы сняты');
+  });
+});
+
 test('filterPicker=checkbox: выбор двух значений строит {op:in}, пустой выбор снимает фильтр', () => {
   const dt = makeTable();
   const col = {

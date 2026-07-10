@@ -416,6 +416,18 @@
     overflow: auto;
 }
 
+/* Заголовок группы колонок в панели ⚙ (типографика — как группы сайдбара) */
+.dt-colvis-grouplabel {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    padding: 8px 0 4px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
 .dt-colvis-item {
     display: flex;
     align-items: center;

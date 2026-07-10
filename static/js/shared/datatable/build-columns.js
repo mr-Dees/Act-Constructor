@@ -67,6 +67,21 @@ export function flattenFields(fields) {
   return flat;
 }
 
+/** Карта key→section: имя секции формы становится группой панели видимости. */
+function sectionByKey(fields) {
+  const map = {};
+  for (const item of fields || []) {
+    if (!item || !Array.isArray(item.fields)) continue;
+    const collect = (f) => {
+      if (!f) return;
+      if (Array.isArray(f.row)) f.row.forEach(collect);
+      else if (f.key) map[f.key] = item.section;
+    };
+    item.fields.forEach(collect);
+  }
+  return map;
+}
+
 /**
  * Построить плоский список колонок из конфигурации полей формы.
  *
@@ -83,6 +98,9 @@ export function buildColumns(fields, opts = {}) {
 
   const extraCols = (opts.extra || []).map(e => ({ ...toColumn(e), ...e }));
   let cols = [...extraCols, ...flat.map(toColumn)];
+
+  const sections = sectionByKey(fields);
+  cols = cols.map(c => (c.group == null && sections[c.key] ? { ...c, group: sections[c.key] } : c));
 
   const overrides = opts.overrides || {};
   cols = cols.map(c => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));

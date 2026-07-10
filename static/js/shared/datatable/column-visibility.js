@@ -1,5 +1,5 @@
 /** Панель ⚙: опциональная доменная секция (preContent) над сеткой + чекбоксы
- * видимости колонок + Выбрать/Снять все + Сброс. */
+ * видимости колонок (сгруппированные подписями по col.group) + Выбрать/Снять все + Сброс. */
 export class ColumnVisibility {
   static mount({ anchorEl, columns, viewState, onChange, preContent, onApi }) {
     const panel = document.createElement('div');
@@ -9,11 +9,23 @@ export class ColumnVisibility {
 
     const grid = document.createElement('div');
     grid.className = 'dt-colvis-grid';
+    const boxByKey = new Map(); // key→checkbox для _sync — вставленные заголовки групп сдвигают позиции в grid
+    let lastGroup = null;
     for (const col of columns) {
+      const g = col.group || null;
+      if (g && g !== lastGroup) {
+        const head = document.createElement('div');
+        head.className = 'dt-colvis-grouplabel';
+        head.textContent = g;
+        grid.appendChild(head);
+      }
+      lastGroup = g;
+
       const label = document.createElement('label');
       label.className = 'dt-colvis-item';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
+      cb.dataset.key = col.key;
       cb.checked = viewState.isVisible(col.key);
       cb.addEventListener('change', () => {
         viewState.setVisible(col.key, cb.checked);
@@ -25,7 +37,9 @@ export class ColumnVisibility {
       label.appendChild(cb);
       label.appendChild(span);
       grid.appendChild(label);
+      boxByKey.set(col.key, cb);
     }
+    grid._dtBoxByKey = boxByKey;
 
     const actions = document.createElement('div');
     actions.className = 'dt-colvis-actions';
@@ -71,8 +85,11 @@ export class ColumnVisibility {
   }
 
   static _sync(grid, columns, viewState) {
-    const boxes = grid.querySelectorAll ? grid.querySelectorAll('input[type=checkbox]') : [];
-    boxes.forEach((cb, i) => { if (columns[i]) cb.checked = viewState.isVisible(columns[i].key); });
+    const byKey = grid._dtBoxByKey || new Map();
+    for (const col of columns) {
+      const cb = byKey.get(col.key);
+      if (cb) cb.checked = viewState.isVisible(col.key);
+    }
   }
 }
 

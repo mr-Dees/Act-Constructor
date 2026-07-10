@@ -104,3 +104,39 @@ test('checkbox с явным format в overrides → используется я
   );
   assert.equal(cols.find(c => c.key === 'flag').format, fmt);
 });
+
+// ── Группы колонок из секций формы (Задача 5) ───────────────────────────────
+
+const sectionedFields = [
+  { section: 'Метрика', key: 'metric', fields: [
+    { key: 'metric_code', label: 'Метрика', type: 'dictionary' },
+  ] },
+  { section: 'Прочее', key: 'misc', fields: [
+    { key: 'deviation_description', label: 'Описание', type: 'textarea' },
+  ] },
+];
+
+test('колонка из секции формы получает group = имя секции', () => {
+  const cols = buildColumns(sectionedFields);
+  assert.equal(cols.find(c => c.key === 'metric_code').group, 'Метрика');
+  assert.equal(cols.find(c => c.key === 'deviation_description').group, 'Прочее');
+});
+
+test('плоский конфиг без секций — group не выставляется ни одной колонке', () => {
+  const cols = buildColumns(fields); // fields сверху файла — без секций
+  assert.ok(cols.every(c => c.group === undefined));
+});
+
+test('extra-колонка с явным group сохраняет его (секции его не перекрывают)', () => {
+  const cols = buildColumns(sectionedFields, {
+    extra: [{ key: 'id', label: 'ID', type: 'id', group: 'Служебные' }],
+  });
+  assert.equal(cols.find(c => c.key === 'id').group, 'Служебные');
+});
+
+test('override с group перекрывает секционный', () => {
+  const cols = buildColumns(sectionedFields, {
+    overrides: { metric_code: { group: 'Другая группа' } },
+  });
+  assert.equal(cols.find(c => c.key === 'metric_code').group, 'Другая группа');
+});
