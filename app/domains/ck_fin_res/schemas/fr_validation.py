@@ -18,7 +18,7 @@ class FRValidationCreate(BaseModel):
     metric_name: str = Field(default="", max_length=500)
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")
-    mpl_amount_rubles: Decimal = Decimal("0")
+    npl_amount_rubles: Decimal = Decimal("0")
     is_sent_to_top_brass: bool = False
     km_id: str = Field(default="", max_length=200)
     num_sz: str = Field(default="", max_length=200)

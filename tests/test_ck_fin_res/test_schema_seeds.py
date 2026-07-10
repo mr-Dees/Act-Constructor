@@ -42,11 +42,11 @@ def test_seeds_backfill_tb_leader():
     assert "SET tb_leader" in SCHEMA, "Нет idempotent-бэкфилла tb_leader для сид-строк"
 
 
-def test_seeds_contain_mpl_demo_group():
+def test_seeds_contain_npl_demo_group():
     assert SCHEMA.count("metric_code = '602'") >= 2 or SCHEMA.count("metric_code='602'") >= 2, (
         "Ожидается демо-группа метрики 602 минимум из 2 строк ТБ"
     )
-    assert "mpl_amount_rubles" in SCHEMA
+    assert "npl_amount_rubles" in SCHEMA
 
 
 def test_ua_metric_dict_contains_602():

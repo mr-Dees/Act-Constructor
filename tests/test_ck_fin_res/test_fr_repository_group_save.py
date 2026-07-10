@@ -46,7 +46,7 @@ def _db_row(rid, tb, amount, counts, **over):
         "km_id": "КМ-09-41726", "act_item_number": "5.1.1", "metric_code": "2002",
         "neg_finder_tb_id": tb,
         "metric_amount_rubles": Decimal(amount), "metric_element_counts": counts,
-        "mpl_amount_rubles": Decimal("0"),
+        "npl_amount_rubles": Decimal("0"),
         "is_sent_to_top_brass": False, "real_loss": False, "applied_into_ua": True,
         "dt_sz": None, "rev_start_dt": None, "rev_end_dt": None,
         "execution_deadline": None, "assigment_id": None,
@@ -222,21 +222,21 @@ async def test_group_delete_deactivates_all(mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_mpl_change_versions_only_that_row(mock_conn):
-    """Изменение ТОЛЬКО MPL у одного ТБ версионирует только его строку."""
+async def test_npl_change_versions_only_that_row(mock_conn):
+    """Изменение ТОЛЬКО NPL у одного ТБ версионирует только его строку."""
     _tx(mock_conn)
     repo = FRValidationRepository(mock_conn)
-    r1 = _db_row(101, "7", "980000.00", 8, mpl_amount_rubles=Decimal("0"))
-    r2 = _db_row(102, "8", "215000.00", 3, mpl_amount_rubles=Decimal("0"))
+    r1 = _db_row(101, "7", "980000.00", 8, npl_amount_rubles=Decimal("0"))
+    r2 = _db_row(102, "8", "215000.00", 3, npl_amount_rubles=Decimal("0"))
     mock_conn.fetch.return_value = [r1, r2]
     mock_conn.execute.return_value = "UPDATE 1"
     res = await repo.group_save(
         group_key=KEY, expected_row_ids=[101, 102], common=_common_from(r1),
         breakdown=[
             {"neg_finder_tb_id": "7", "metric_amount_rubles": Decimal("980000.00"),
-             "metric_element_counts": 8, "mpl_amount_rubles": Decimal("120000.00")},
+             "metric_element_counts": 8, "npl_amount_rubles": Decimal("120000.00")},
             {"neg_finder_tb_id": "8", "metric_amount_rubles": Decimal("215000.00"),
-             "metric_element_counts": 3, "mpl_amount_rubles": Decimal("0")},
+             "metric_element_counts": 3, "npl_amount_rubles": Decimal("0")},
         ],
         username="12345",
     )
@@ -246,21 +246,21 @@ async def test_mpl_change_versions_only_that_row(mock_conn):
     assert 101 in dq_args and 102 not in dq_args
     inserted = mock_conn.executemany.call_args.args[1][0]
     values = dict(zip(_INSERT_FIELDS, inserted))
-    assert values["mpl_amount_rubles"] == Decimal("120000.00")
+    assert values["npl_amount_rubles"] == Decimal("120000.00")
 
 
 @pytest.mark.asyncio
-async def test_mpl_unchanged_row_not_rewritten(mock_conn):
-    """want совпадает с БД (включая MPL) → ни деактиваций, ни INSERT."""
+async def test_npl_unchanged_row_not_rewritten(mock_conn):
+    """want совпадает с БД (включая NPL) → ни деактиваций, ни INSERT."""
     _tx(mock_conn)
     repo = FRValidationRepository(mock_conn)
-    row = _db_row(101, "7", "980000.00", 8, mpl_amount_rubles=Decimal("120000.00"))
+    row = _db_row(101, "7", "980000.00", 8, npl_amount_rubles=Decimal("120000.00"))
     mock_conn.fetch.return_value = [row]
     res = await repo.group_save(
         group_key=KEY, expected_row_ids=[101], common=_common_from(row),
         breakdown=[
             {"neg_finder_tb_id": "7", "metric_amount_rubles": Decimal("980000.00"),
-             "metric_element_counts": 8, "mpl_amount_rubles": Decimal("120000.00")},
+             "metric_element_counts": 8, "npl_amount_rubles": Decimal("120000.00")},
         ],
         username="12345",
     )

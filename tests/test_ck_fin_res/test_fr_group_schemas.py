@@ -29,15 +29,15 @@ def test_breakdown_item_requires_positive_amount():
     assert item.metric_element_counts == 0
 
 
-class TestTBBreakdownItemMpl:
-    def test_mpl_default_zero(self):
+class TestTBBreakdownItemNpl:
+    def test_npl_default_zero(self):
         item = TBBreakdownItem(neg_finder_tb_id="7", metric_amount_rubles=Decimal("100"))
-        assert item.mpl_amount_rubles == Decimal("0")
+        assert item.npl_amount_rubles == Decimal("0")
 
-    def test_mpl_only_row_is_valid(self):
+    def test_npl_only_row_is_valid(self):
         item = TBBreakdownItem(
             neg_finder_tb_id="7", metric_amount_rubles=Decimal("0"),
-            mpl_amount_rubles=Decimal("120000.00"),
+            npl_amount_rubles=Decimal("120000.00"),
         )
         assert item.metric_amount_rubles == Decimal("0")
 
@@ -45,11 +45,11 @@ class TestTBBreakdownItemMpl:
         with pytest.raises(ValidationError):
             TBBreakdownItem(neg_finder_tb_id="7", metric_amount_rubles=Decimal("0"))
 
-    def test_negative_mpl_rejected(self):
+    def test_negative_npl_rejected(self):
         with pytest.raises(ValidationError):
             TBBreakdownItem(
                 neg_finder_tb_id="7", metric_amount_rubles=Decimal("1"),
-                mpl_amount_rubles=Decimal("-1"),
+                npl_amount_rubles=Decimal("-1"),
             )
 
 

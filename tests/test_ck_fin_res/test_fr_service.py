@@ -152,15 +152,15 @@ class TestGroupSave:
             await service.group_save(req, "testuser")
         fr_repo.group_save.assert_not_called()
 
-    async def test_mpl_on_non_602_metric_rejected(self, service, fr_repo, dict_repo):
-        """MPL заполнен у метрики, отличной от 602 — FRValidationError, репозиторий не вызывается."""
+    async def test_npl_on_non_602_metric_rejected(self, service, fr_repo, dict_repo):
+        """NPL заполнен у метрики, отличной от 602 — FRValidationError, репозиторий не вызывается."""
         dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
         req = FRGroupSaveRequest(
             group_key=_group_key(),
             expected_row_ids=[101, 102],
             common={"metric_code": "2002"},
             breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "0",
-                        "mpl_amount_rubles": "10", "metric_element_counts": 8}],
+                        "npl_amount_rubles": "10", "metric_element_counts": 8}],
         )
 
         with pytest.raises(FRValidationError) as exc:
@@ -168,8 +168,8 @@ class TestGroupSave:
         assert "602" in str(exc.value)
         fr_repo.group_save.assert_not_awaited()
 
-    async def test_602_without_mpl_rejected(self, service, fr_repo, dict_repo):
-        """Метрика 602 без MPL (только суммы по ТБ) — FRValidationError, репозиторий не вызывается."""
+    async def test_602_without_npl_rejected(self, service, fr_repo, dict_repo):
+        """Метрика 602 без NPL (только суммы по ТБ) — FRValidationError, репозиторий не вызывается."""
         dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
         req = FRGroupSaveRequest(
             group_key={**_group_key(), "metric_code": "602"},
@@ -184,8 +184,8 @@ class TestGroupSave:
         assert "602" in str(exc.value)
         fr_repo.group_save.assert_not_awaited()
 
-    async def test_602_with_mpl_passes(self, service, fr_repo, dict_repo):
-        """Метрика 602 с MPL хотя бы у одного ТБ — сохранение проходит в репозиторий."""
+    async def test_602_with_npl_passes(self, service, fr_repo, dict_repo):
+        """Метрика 602 с NPL хотя бы у одного ТБ — сохранение проходит в репозиторий."""
         dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
         fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
         req = FRGroupSaveRequest(
@@ -193,7 +193,7 @@ class TestGroupSave:
             expected_row_ids=[101, 102],
             common={"metric_code": "602"},
             breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
-                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+                        "npl_amount_rubles": "120000.00", "metric_element_counts": 8}],
         )
 
         result = await service.group_save(req, "testuser")
@@ -201,7 +201,7 @@ class TestGroupSave:
         fr_repo.group_save.assert_awaited_once()
         assert result == {"deactivated": 1, "inserted": 1, "skipped": 0}
 
-    async def test_mpl_rejected_when_renamed_away_from_602(self, service, fr_repo, dict_repo):
+    async def test_npl_rejected_when_renamed_away_from_602(self, service, fr_repo, dict_repo):
         """group_key ещё хранит старый '602', но common (записываемое) переименовывает
         метрику в '2001' — правило должно смотреть на common, а не на старый ключ."""
         dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
@@ -210,7 +210,7 @@ class TestGroupSave:
             expected_row_ids=[101, 102],
             common={"metric_code": "2001"},
             breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
-                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+                        "npl_amount_rubles": "120000.00", "metric_element_counts": 8}],
         )
 
         with pytest.raises(FRValidationError) as exc:
@@ -218,9 +218,9 @@ class TestGroupSave:
         assert "602" in str(exc.value)
         fr_repo.group_save.assert_not_awaited()
 
-    async def test_mpl_passes_when_renamed_into_602(self, service, fr_repo, dict_repo):
+    async def test_npl_passes_when_renamed_into_602(self, service, fr_repo, dict_repo):
         """group_key хранит старый '2001', common переименовывает метрику в '602' —
-        MPL должен приниматься, т.к. записываемая метрика — 602."""
+        NPL должен приниматься, т.к. записываемая метрика — 602."""
         dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
         fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
         req = FRGroupSaveRequest(
@@ -228,7 +228,7 @@ class TestGroupSave:
             expected_row_ids=[101, 102],
             common={"metric_code": "602"},
             breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
-                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+                        "npl_amount_rubles": "120000.00", "metric_element_counts": 8}],
         )
 
         result = await service.group_save(req, "testuser")

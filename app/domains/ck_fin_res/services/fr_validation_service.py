@@ -46,9 +46,9 @@ _STATIC_DICTS: dict[str, list[dict]] = {
     ],
 }
 
-# Метрики с показателем «MPL 90+». Синхронизировано вручную с MPL_METRIC_CODES
+# Метрики с показателем «NPL 90+». Синхронизировано вручную с NPL_METRIC_CODES
 # в static/js/portal/ck-fin-res/ck-fin-res-config.js.
-MPL_METRIC_CODES = frozenset({"602"})
+NPL_METRIC_CODES = frozenset({"602"})
 
 
 class FRValidationService:
@@ -119,11 +119,11 @@ class FRValidationService:
         # (старый ключ поиска группы): при переименовании метрики группы
         # правило должно проверяться против того, что реально сохраняется.
         metric = str(req.common.metric_code or "").strip()
-        has_mpl = any(item.mpl_amount_rubles > 0 for item in req.breakdown)
-        if metric not in MPL_METRIC_CODES and has_mpl:
-            raise FRValidationError("Показатель «MPL 90+» заполняется только для метрики 602")
-        if metric in MPL_METRIC_CODES and not has_mpl:
-            raise FRValidationError("Для метрики 602 требуется распределение «MPL 90+» по ТБ")
+        has_npl = any(item.npl_amount_rubles > 0 for item in req.breakdown)
+        if metric not in NPL_METRIC_CODES and has_npl:
+            raise FRValidationError("Показатель «NPL 90+» заполняется только для метрики 602")
+        if metric in NPL_METRIC_CODES and not has_npl:
+            raise FRValidationError("Для метрики 602 требуется распределение «NPL 90+» по ТБ")
         return await self.fr_repo.group_save(
             group_key=req.group_key.model_dump(),
             expected_row_ids=req.expected_row_ids,
