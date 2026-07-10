@@ -663,14 +663,17 @@ export class DataTable {
     wrapper.appendChild(table);
     this._mount.appendChild(wrapper);
     this._wrapper = wrapper;
-    if (prevScroll) {
-      wrapper.scrollLeft = prevScroll.left;
-      wrapper.scrollTop = prevScroll.top;
-    }
 
     attachColumnResize({ theadEl: thead, columns: cols, viewState: this._view });
 
     await this._renderBody();
+    // scrollTop восстанавливаем ПОСЛЕ наполнения тела: до этого tbody пуст,
+    // scrollHeight ≈ высоте шапки, и запись клэмпится браузером к 0 без
+    // повторной попытки. scrollLeft сюда же для симметрии (обе оси одного wrapper'а).
+    if (prevScroll) {
+      wrapper.scrollLeft = prevScroll.left;
+      wrapper.scrollTop = prevScroll.top;
+    }
   }
 
   refresh() { this._page = 1; this.render(); }

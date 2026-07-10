@@ -383,13 +383,20 @@ test('дата-фильтр после рефакторинга оболочки
   clearTimeout(dt._debounce); // #14: снять отложенный _renderBody от _setFilterSpec — тест не зовёт render()
 });
 
-// ── render(): сохранение позиции скролла контейнера (Задача 8) ─────────────
+// ── render(): восстановление позиции скролла контейнера (Задача 8) ─────────
 
-test('render() сохраняет позицию скролла контейнера', () => {
-  withFakeDom(({ created }) => {
+test('render() восстанавливает scrollLeft/scrollTop ПОСЛЕ наполнения тела', async () => {
+  // Патчим document.createElement вручную, а не через withFakeDom: тест
+  // асинхронный (await render()), а withFakeDom восстанавливает оригинал
+  // СИНХРОННО в своём finally, не дожидаясь async-колбэка — второй render()
+  // (после первого await) создавал бы элементы уже НЕ fake-версией.
+  const origCreate = document.createElement;
+  const created = [];
+  document.createElement = (tag) => { const el = makeFakeElement(tag); created.push(el); return el; };
+  try {
     const dt = makeTable();
 
-    dt.render();
+    await dt.render();
     // .dt-wrapper ищем по created, а не querySelector: honest-фейк не чистит
     // children при innerHTML='' (в отличие от настоящего DOM), поэтому после
     // второго render() querySelector('.dt-wrapper') нашёл бы ПЕРВЫЙ (старый)
@@ -399,10 +406,28 @@ test('render() сохраняет позицию скролла контейне
     wrapper1.scrollLeft = 120;
     wrapper1.scrollTop = 40;
 
-    dt.render();
+    // Перехват _renderBody фиксирует scrollTop НОВОГО wrapper'а в момент её
+    // вызова. Баг из ревью был именно в порядке: restore ДО наполнения тела —
+    // в реальном браузере tbody там ещё пуст, scrollHeight ≈ высоте шапки,
+    // запись scrollTop клэмпится к 0 и не переигрывается после наполнения.
+    // Если бы порядок остался старым, здесь уже стояло бы 40; корректный
+    // порядок — undefined (ещё не восстановлен на момент отрисовки тела).
+    const origRenderBody = dt._renderBody.bind(dt);
+    let scrollTopDuringRenderBody;
+    dt._renderBody = async function patched() {
+      scrollTopDuringRenderBody = this._wrapper.scrollTop;
+      return origRenderBody();
+    };
+
+    await dt.render();
+    assert.equal(scrollTopDuringRenderBody, undefined,
+      'restore должен происходить ПОСЛЕ _renderBody, а не до');
+
     const wrapper2 = created.filter((el) => el.className === 'dt-wrapper').pop();
     assert.ok(wrapper2 && wrapper2 !== wrapper1, 'второй render() должен создать новый .dt-wrapper');
     assert.equal(wrapper2.scrollLeft, 120, 'scrollLeft переносится на новый wrapper');
     assert.equal(wrapper2.scrollTop, 40, 'scrollTop переносится на новый wrapper');
-  });
+  } finally {
+    document.createElement = origCreate;
+  }
 });
