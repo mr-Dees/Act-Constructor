@@ -95,10 +95,43 @@ function makeTable() {
 }
 
 /**
+ * Минимальный CSS-селектор для querySelector(All) честного фейк-элемента:
+ * цепочка потомков через пробел, каждое звено — tag, tag.class или
+ * tag[attr=value] (ровно то, что используют column-visibility.js/
+ * column-resize.js: 'input[type=checkbox]', 'tr.dt-head-row th').
+ */
+function matchesSimpleSelector(node, part) {
+  const m = part.match(/^([a-z0-9]*)(?:\.([\w-]+))?(?:\[([\w-]+)=([\w-]+)\])?$/i);
+  if (!m) return false;
+  const [, tag, cls, attr, attrVal] = m;
+  if (tag && node._tag !== tag) return false;
+  if (cls && !node.classList.contains(cls)) return false;
+  if (attr && String(node[attr]) !== attrVal) return false;
+  return true;
+}
+
+function queryAllDescendants(root, selector) {
+  let level = [root];
+  for (const part of selector.trim().split(/\s+/)) {
+    const next = [];
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        if (matchesSimpleSelector(child, part)) next.push(child);
+        walk(child);
+      }
+    };
+    level.forEach(walk);
+    level = next;
+  }
+  return level;
+}
+
+/**
  * Честный фейковый DOM-элемент: в отличие от _browser-stub.mjs (querySelector
  * всегда null, appendChild — no-op), здесь addEventListener реально хранит
  * колбэки (dispatch их вызывает), appendChild реально складывает детей
- * (parentNode/contains работают), classList — поверх Set. Этого достаточно,
+ * (parentNode/contains работают), classList — поверх Set, querySelector(All)
+ * реально ищет по детям (см. queryAllDescendants выше). Этого достаточно,
  * чтобы прогнать попап-оболочку и её содержимое без jsdom.
  */
 function makeFakeElement(tag) {
@@ -148,8 +181,8 @@ function makeFakeElement(tag) {
       return false;
     },
     focus() {},
-    querySelector: () => null,
-    querySelectorAll: () => [],
+    querySelector(sel) { return queryAllDescendants(el, sel)[0] || null; },
+    querySelectorAll(sel) { return queryAllDescendants(el, sel); },
   };
   return el;
 }
@@ -168,6 +201,66 @@ function withFakeDom(fn) {
     document.body = origBody;
   }
 }
+
+// ── ColumnVisibility: onApi (Task 7) ────────────────────────────────────────
+
+function makeViewStateStub() {
+  const hidden = new Set();
+  return {
+    isVisible: (key) => !hidden.has(key),
+    setVisible: (key, on) => { if (on) hidden.delete(key); else hidden.add(key); },
+    setAllVisible: () => {},
+    resetToDefault: () => {},
+  };
+}
+
+test('ColumnVisibility.mount({onApi}) отдаёт api.sync, перерисовывающий чекбоксы из viewState', () => {
+  withFakeDom(({ created }) => {
+    const columns = [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }];
+    const viewState = makeViewStateStub();
+    let api = null;
+
+    ColumnVisibility.mount({
+      anchorEl: makeFakeElement('button'),
+      columns,
+      viewState,
+      onChange: () => {},
+      onApi: (a) => { api = a; },
+    });
+
+    assert.equal(typeof api.sync, 'function', 'onApi должен получить объект с sync()');
+
+    const checkboxes = created.filter((el) => el.type === 'checkbox');
+    assert.equal(checkboxes.length, 2);
+    assert.equal(checkboxes[0].checked, true, 'колонка a изначально видима');
+
+    // Программная смена видимости в обход UI (как делает _applyTbView) — панель узнаёт об этом только через sync().
+    viewState.setVisible('a', false);
+    assert.equal(checkboxes[0].checked, true, 'до sync() чекбокс ещё не перерисован');
+
+    api.sync();
+    assert.equal(checkboxes[0].checked, false, 'после sync() чекбокс колонки a снят');
+    assert.equal(checkboxes[1].checked, true, 'чекбокс колонки b не тронут');
+  });
+});
+
+test('ColumnVisibility.mount без onApi работает как раньше (регресс для ЦК КО)', () => {
+  withFakeDom(() => {
+    const columns = [{ key: 'a', label: 'A' }];
+    const viewState = makeViewStateStub();
+    let panel;
+    assert.doesNotThrow(() => {
+      panel = ColumnVisibility.mount({
+        anchorEl: makeFakeElement('button'),
+        columns,
+        viewState,
+        onChange: () => {},
+      });
+    });
+    assert.equal(panel.className, 'dt-colvis-panel');
+    assert.equal(panel.hidden, true);
+  });
+});
 
 test('filterPicker=checkbox: выбор двух значений строит {op:in}, пустой выбор снимает фильтр', () => {
   const dt = makeTable();

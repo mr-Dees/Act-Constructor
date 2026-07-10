@@ -227,3 +227,28 @@ test('total_mpl_amount: сразу после total_amount, видима по у
   assert.equal(col.type, 'number');
   assert.equal(col.width, 140);
 });
+
+// --- Task 7: tbFilterOptions(dicts) — опции чекбокс-фильтра ТБ из живого словаря ---
+
+test('tbFilterOptions(dicts): опции строятся из живого словаря terbanks (порядок как в словаре)', () => {
+  const dicts = { terbanks: [
+    { tb_id: 4, short_name: 'ВВБ', full_name: 'Волго-Вятский банк (живой)' },
+    { tb_id: 99, short_name: 'НБ', full_name: 'Новый банк' },
+  ] };
+  const opts = CkFinResConfig.tbFilterOptions(dicts);
+  assert.deepEqual(opts, [
+    { value: '4', label: 'ВВБ — Волго-Вятский банк (живой)', short: 'ВВБ' },
+    { value: '99', label: 'НБ — Новый банк', short: 'НБ' },
+  ]);
+});
+
+test('tbFilterOptions(dicts): без словаря (отсутствует/пуст) — фолбэк на статику TB_ABBR/TB_NAMES', () => {
+  for (const dicts of [undefined, {}, { terbanks: [] }]) {
+    const opts = CkFinResConfig.tbFilterOptions(dicts);
+    assert.equal(opts.length, 12);
+    assert.deepEqual(new Set(opts.map((o) => o.value)), new Set(Object.keys(CkFinResConfig.TB_ABBR)));
+    const vvb = opts.find((o) => o.value === '4');
+    assert.equal(vvb.short, 'ВВБ');
+    assert.match(vvb.label, /^ВВБ — .+/);
+  }
+});

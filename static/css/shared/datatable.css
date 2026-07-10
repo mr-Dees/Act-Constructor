@@ -388,6 +388,12 @@
     display: none;
 }
 
+.dt-colvis-group {
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
 .dt-colvis-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(130px, 1fr));

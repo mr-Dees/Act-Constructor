@@ -44,6 +44,10 @@ export class CkFinResPage {
         // Pivot-колонки (одна на ТБ словаря) добавляются к базовым — переключаются
         // видимостью вместе с чипами через вид развертки (_applyTbView).
         const columns = [...cfg.columns, ...cfg.tbPivotColumns(this._dictionaries)];
+        // Опции чекбокс-фильтра tb_breakdown из columns — статика (см. cfg.TB_NAMES);
+        // подменяем на живой словарь, как только он загружен.
+        const tbBreakdownCol = columns.find(c => c.key === 'tb_breakdown');
+        if (tbBreakdownCol) tbBreakdownCol.filterOptions = cfg.tbFilterOptions(this._dictionaries);
 
         // Состояние представления (видимость/ширины) с persist в localStorage
         this._viewState = new TableViewState({
@@ -90,6 +94,7 @@ export class CkFinResPage {
                 viewState: this._viewState,
                 onChange: () => this._dataTable.refresh(),
                 preContent: this._buildTbViewSection(columns),
+                onApi: (api) => { this._colvisApi = api; },
             });
         }
 
@@ -163,7 +168,7 @@ export class CkFinResPage {
     /** Секция «Развертка по ТБ» для панели видимости колонок. */
     static _buildTbViewSection(columns) {
         const box = document.createElement('div');
-        box.className = 'dt-colvis-tbview';
+        box.className = 'dt-colvis-tbview dt-colvis-group';
         box.innerHTML = `
             <div class="dt-colvis-tbview__title">Развертка по ТБ</div>
             <label><input type="radio" name="ckFrTbView" value="chips"> Чипы с суммами</label>
@@ -178,20 +183,19 @@ export class CkFinResPage {
         return box;
     }
 
-    /** Переключение вида: chips ↔ pivot (видимость управляется штатным view-state). */
+    /**
+     * Переключение вида: chips ↔ pivot — безусловно (перетирает ручной выбор
+     * пользователя по pivot-колонкам/tb_breakdown, но только в момент
+     * переключения радио; вне него галочки живут как обычно).
+     */
     static _applyTbView(view, columns) {
-        this._viewState.setExtra('tbView', view);
-        const pivKeys = columns.filter(c => String(c.key).startsWith('piv:')).map(c => c.key);
-        if (view === 'pivot') {
-            this._viewState.setVisible('tb_breakdown', false);
-            // Если все pivot-колонки скрыты (первое включение) — показать все
-            if (pivKeys.every(k => !this._viewState.isVisible(k))) {
-                pivKeys.forEach(k => this._viewState.setVisible(k, true));
-            }
-        } else {
-            pivKeys.forEach(k => this._viewState.setVisible(k, false));
-            this._viewState.setVisible('tb_breakdown', true);
+        const pivot = view === 'pivot';
+        for (const col of columns) {
+            if (String(col.key).startsWith('piv:')) this._viewState.setVisible(col.key, pivot);
         }
+        this._viewState.setVisible('tb_breakdown', !pivot);
+        this._viewState.setExtra('tbView', view);
+        if (this._colvisApi) this._colvisApi.sync();
         this._dataTable.refresh();
     }
 

@@ -48,10 +48,11 @@ export class CkFinResConfig {
     };
     /**
      * Полные названия ТБ — тот же фиксированный набор id, что TB_PALETTE/TB_ABBR.
-     * Источник filterOptions чекбокс-фильтра tb_breakdown (см. columns ниже):
-     * колонки строит геттер columns() без параметров (buildColumns собирает
-     * overrides синхронно, раньше, чем страница загружает dicts.terbanks), так
-     * что опции не могут дождаться асинхронного словаря и берутся отсюда.
+     * Источник filterOptions чекбокс-фильтра tb_breakdown (см. columns ниже) —
+     * но только исходное значение: `columns` — геттер без параметров, ему
+     * неоткуда принять dicts, поэтому изначально берётся статика отсюда.
+     * После загрузки словарей страница подставляет живой список через
+     * tbFilterOptions(dicts) (см. ниже).
      */
     static TB_NAMES = {
         '1': 'Байкальский банк', '4': 'Волго-Вятский банк', '5': 'Дальневосточный банк',
@@ -135,6 +136,29 @@ export class CkFinResConfig {
                     return span;
                 },
             };
+        });
+    }
+
+    /**
+     * Опции чекбокс-фильтра tb_breakdown из живого словаря dicts.terbanks —
+     * страница подставляет их взамен статических (см. TB_NAMES выше) после
+     * загрузки словарей. Порядок — как в словаре. При отсутствии/пустоте
+     * словаря — фолбэк на статику (TB_ABBR/TB_NAMES).
+     */
+    static tbFilterOptions(dicts) {
+        const terbanks = (dicts && dicts.terbanks) || [];
+        if (!terbanks.length) {
+            return Object.keys(this.TB_ABBR).map((id) => ({
+                value: id,
+                label: `${this.TB_ABBR[id]} — ${this.TB_NAMES[id]}`,
+                short: this.TB_ABBR[id],
+            }));
+        }
+        return terbanks.map((t) => {
+            const id = String(t.tb_id);
+            const short = t.short_name || this.tbAbbr(id, dicts);
+            const full = t.full_name || short;
+            return { value: id, label: `${short} — ${full}`, short };
         });
     }
 

@@ -1,7 +1,7 @@
 /** Панель ⚙: опциональная доменная секция (preContent) над сеткой + чекбоксы
  * видимости колонок + Выбрать/Снять все + Сброс. */
 export class ColumnVisibility {
-  static mount({ anchorEl, columns, viewState, onChange, preContent }) {
+  static mount({ anchorEl, columns, viewState, onChange, preContent, onApi }) {
     const panel = document.createElement('div');
     panel.className = 'dt-colvis-panel';
     panel.hidden = true;
@@ -62,6 +62,10 @@ export class ColumnVisibility {
     document.addEventListener('click', (e) => {
       if (!panel.hidden && !panel.contains(e.target) && e.target !== anchorEl) panel.hidden = true;
     }, true);
+
+    if (typeof onApi === 'function') {
+      onApi({ sync: () => ColumnVisibility._sync(grid, columns, viewState) });
+    }
 
     return panel;
   }
