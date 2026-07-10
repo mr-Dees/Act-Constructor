@@ -163,3 +163,12 @@ test('mpl_breakdown: автовыведенная колонка скрыта п
   assert.equal(col.noSort, true);
   assert.equal(col.noFilter, true);
 });
+
+test('mpl_breakdown: заглушка на случай принудительной видимости («Выбрать все» обходит default-hidden) — не «[object Object]»; label отличается от лейбла поля формы', () => {
+  const col = CkFinResConfig.columns.find((c) => c.key === 'mpl_breakdown');
+  assert.equal(typeof col.format, 'function');
+  const populated = [{ neg_finder_tb_id: '7', metric_amount_rubles: '120000.00' }];
+  assert.equal(col.format(populated), '—');
+  assert.equal(col.format([]), '—');
+  assert.notEqual(col.label, 'MPL 90+, руб.', 'лейбл служебной колонки не должен совпадать с лейблом поля формы / будущей колонки total_mpl_amount');
+});

@@ -191,7 +191,20 @@ export class CkFinResConfig {
                 // позже). Сырую развертку прячем служебно: ключа mpl_breakdown нет ни
                 // в ALLOWED_COLUMNS, ни в AGG_SORT_EXPR бэка — фильтр молча
                 // проигнорировался бы, а сортировка ушла бы в ValueError.
-                mpl_breakdown: { hidden: true, noSort: true, noFilter: true },
+                // hidden:true защищает только ДЕФОЛТ: «⚙ → Выбрать все» дёргает
+                // TableViewState.setAllVisible(true), который обнуляет весь _hidden
+                // безусловно, игнорируя _defaultHidden. Поэтому колонка обязана уметь
+                // отрендериться сама — format-заглушка вместо утечки String([...]) →
+                // "[object Object]" на 602-строках. Отдельный label — чтобы служебная
+                // колонка не путалась в панели с настоящей «MPL 90+, руб.»
+                // (total_mpl_amount из Task 6, там же будет видимой по умолчанию).
+                mpl_breakdown: {
+                    label: 'MPL 90+ — развёртка (служебная)',
+                    hidden: true,
+                    noSort: true,
+                    noFilter: true,
+                    format: () => '—',
+                },
                 real_loss: { label: 'Реальные потери' },
                 is_sent_to_top_brass: { label: 'На НС', description: 'На наблюдательный совет' },
                 dt_sz: { format: (v) => CkFinResConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
