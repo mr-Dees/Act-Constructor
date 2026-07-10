@@ -42,6 +42,7 @@ _NULLABLE_FIELDS = (
 _NUMERIC_DEFAULTS = {
     "metric_element_counts": 0,
     "metric_amount_rubles": 0,
+    "mpl_amount_rubles": 0,
     "is_sent_to_top_brass": False,
     "real_loss": False,
     "applied_into_ua": False,
@@ -72,6 +73,7 @@ _INSERT_FIELDS = (
     "metric_name",
     "metric_element_counts",
     "metric_amount_rubles",
+    "mpl_amount_rubles",
     "is_sent_to_top_brass",
     "km_id",
     "num_sz",
@@ -121,7 +123,7 @@ _GROUP_KEY_EXPR = {
 }
 
 # Per-ТБ поля (варьируются внутри группы) — их источник breakdown, не common.
-PER_TB_FIELDS = ("neg_finder_tb_id", "metric_amount_rubles", "metric_element_counts")
+PER_TB_FIELDS = ("neg_finder_tb_id", "metric_amount_rubles", "metric_element_counts", "mpl_amount_rubles")
 
 # Групповые бизнес-поля: синхронизируются на все строки группы при сохранении,
 # участвуют в детекте рассинхрона (divergent_fields).
@@ -138,6 +140,7 @@ AGG_FILTER_EXPR = {
     "total_amount": "SUM(metric_amount_rubles)",
     "metric_element_counts": "SUM(metric_element_counts)",
     "total_counts": "SUM(metric_element_counts)",
+    "total_mpl_amount": "SUM(mpl_amount_rubles)",
 }
 
 # Membership-фильтры: «группа попадает в выдачу, если содержит такую строку»
@@ -152,6 +155,7 @@ MEMBERSHIP_FILTER_COLS = {"neg_finder_tb_id": "neg_finder_tb_id", "tb_breakdown"
 AGG_SORT_EXPR = {
     "total_amount": "SUM(metric_amount_rubles)",
     "total_counts": "SUM(metric_element_counts)",
+    "total_mpl_amount": "SUM(mpl_amount_rubles)",
     "tb_count": "COUNT(*)",
     "updated_at": "MAX(updated_at)",
 }
@@ -429,6 +433,7 @@ class FRValidationRepository(BaseRepository):
         page_rows = await self.conn.fetch(
             f"SELECT {key_select}, "
             f"SUM(metric_amount_rubles) AS total_amount, "
+            f"SUM(mpl_amount_rubles) AS total_mpl_amount, "
             f"SUM(metric_element_counts) AS total_counts, "
             f"COUNT(*) AS tb_count, MAX(updated_at) AS max_updated_at "
             f"FROM {self.view}{where} GROUP BY {group_by}{having} "
@@ -489,11 +494,13 @@ class FRValidationRepository(BaseRepository):
                         "row_id": r["id"],
                         "neg_finder_tb_id": r.get("neg_finder_tb_id"),
                         "metric_amount_rubles": r.get("metric_amount_rubles"),
+                        "mpl_amount_rubles": r.get("mpl_amount_rubles"),
                         "metric_element_counts": r.get("metric_element_counts"),
                     }
                     for r in rows
                 ],
                 "total_amount": g["total_amount"],
+                "total_mpl_amount": g["total_mpl_amount"],
                 "total_counts": g["total_counts"],
                 "tb_count": g["tb_count"],
                 "updated_at": g["max_updated_at"],
@@ -530,6 +537,10 @@ class FRValidationRepository(BaseRepository):
                 return False
         if _norm_cmp("metric_amount_rubles", row.get("metric_amount_rubles")) != \
                 _norm_cmp("metric_amount_rubles", want.get("metric_amount_rubles")):
+            return False
+        if _norm_cmp("mpl_amount_rubles", row.get("mpl_amount_rubles")) != _norm_cmp(
+            "mpl_amount_rubles", want.get("mpl_amount_rubles")
+        ):
             return False
         if int(row.get("metric_element_counts") or 0) != int(want.get("metric_element_counts") or 0):
             return False

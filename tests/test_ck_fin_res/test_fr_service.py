@@ -152,6 +152,55 @@ class TestGroupSave:
             await service.group_save(req, "testuser")
         fr_repo.group_save.assert_not_called()
 
+    async def test_mpl_on_non_602_metric_rejected(self, service, fr_repo, dict_repo):
+        """MPL заполнен у метрики, отличной от 602 — FRValidationError, репозиторий не вызывается."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        req = FRGroupSaveRequest(
+            group_key=_group_key(),
+            expected_row_ids=[101, 102],
+            common={"metric_code": "2002"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "0",
+                        "mpl_amount_rubles": "10", "metric_element_counts": 8}],
+        )
+
+        with pytest.raises(FRValidationError) as exc:
+            await service.group_save(req, "testuser")
+        assert "602" in str(exc.value)
+        fr_repo.group_save.assert_not_awaited()
+
+    async def test_602_without_mpl_rejected(self, service, fr_repo, dict_repo):
+        """Метрика 602 без MPL (только суммы по ТБ) — FRValidationError, репозиторий не вызывается."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "602"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "602"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
+                        "metric_element_counts": 8}],
+        )
+
+        with pytest.raises(FRValidationError) as exc:
+            await service.group_save(req, "testuser")
+        assert "602" in str(exc.value)
+        fr_repo.group_save.assert_not_awaited()
+
+    async def test_602_with_mpl_passes(self, service, fr_repo, dict_repo):
+        """Метрика 602 с MPL хотя бы у одного ТБ — сохранение проходит в репозиторий."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "602"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "602"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
+                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+        )
+
+        result = await service.group_save(req, "testuser")
+
+        fr_repo.group_save.assert_awaited_once()
+        assert result == {"deactivated": 1, "inserted": 1, "skipped": 0}
+
 
 # -------------------------------------------------------------------------
 # group_delete

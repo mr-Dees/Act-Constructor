@@ -46,6 +46,10 @@ _STATIC_DICTS: dict[str, list[dict]] = {
     ],
 }
 
+# Метрики с показателем «MPL 90+». Синхронизировано вручную с MPL_METRIC_CODES
+# в static/js/portal/ck-fin-res/ck-fin-res-config.js.
+MPL_METRIC_CODES = frozenset({"602"})
+
 
 class FRValidationService:
     """Сервис бизнес-логики FR-валидации."""
@@ -111,6 +115,12 @@ class FRValidationService:
             raise FRValidationError(
                 f"Неизвестные ТБ в развертке: {', '.join(unknown)}",
             )
+        metric = str(req.group_key.metric_code or "").strip()
+        has_mpl = any(item.mpl_amount_rubles > 0 for item in req.breakdown)
+        if metric not in MPL_METRIC_CODES and has_mpl:
+            raise FRValidationError("Показатель «MPL 90+» заполняется только для метрики 602")
+        if metric in MPL_METRIC_CODES and not has_mpl:
+            raise FRValidationError("Для метрики 602 требуется распределение «MPL 90+» по ТБ")
         return await self.fr_repo.group_save(
             group_key=req.group_key.model_dump(),
             expected_row_ids=req.expected_row_ids,

@@ -38,6 +38,7 @@ def _row(rid, tb, amount, counts, item="5.1.1", metric="2002", **over):
         "act_item_number": item, "metric_code": metric,
         "neg_finder_tb_id": tb,
         "metric_amount_rubles": Decimal(amount),
+        "mpl_amount_rubles": Decimal("0"),
         "metric_element_counts": counts,
         "metric_name": "Некорректный расчет", "deviation_description": "Описание",
         "ck_comment": "", "tb_leader": "14", "application_status": "На рассмотрении",
@@ -56,6 +57,7 @@ async def test_search_groups_two_phases_and_assembly(mock_conn):
         "act_sub_number_id": 1, "km_id": "КМ-09-41726",
         "act_item_number": "5.1.1", "metric_code": "2002",
         "total_amount": Decimal("1195000.00"), "total_counts": 11,
+        "total_mpl_amount": Decimal("0.00"),
         "tb_count": 2, "max_updated_at": datetime(2026, 7, 1, 12, 0, 0),
     }]
     phase_b = [
@@ -178,3 +180,56 @@ async def test_tb_breakdown_membership_filter_empty_values(mock_conn):
     sql_a = mock_conn.fetch.call_args_list[0].args[0]
     assert "HAVING" in sql_a
     assert "1=0" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_phase_a_aggregates_mpl(mock_conn):
+    """Фаза A агрегирует MPL 90+ по группе наравне с суммой/количеством."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(filters=None, sort=None, limit=50, offset=0)
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "SUM(mpl_amount_rubles) AS total_mpl_amount" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_group_payload_contains_mpl(mock_conn):
+    """total_mpl_amount группы — из фазы A; каждый элемент tb_breakdown несёт mpl_amount_rubles."""
+    repo = FRValidationRepository(mock_conn)
+    phase_a = [{
+        "act_sub_number_id": 1, "km_id": "КМ-09-41726",
+        "act_item_number": "5.1.1", "metric_code": "602",
+        "total_amount": Decimal("980000.00"), "total_counts": 8,
+        "total_mpl_amount": Decimal("120000.00"),
+        "tb_count": 1, "max_updated_at": datetime(2026, 7, 1, 12, 0, 0),
+    }]
+    phase_b = [
+        _row(101, "7", "980000.00", 8, metric="602", mpl_amount_rubles=Decimal("120000.00")),
+    ]
+    mock_conn.fetch.side_effect = [phase_a, phase_b]
+    mock_conn.fetchval.return_value = 1
+
+    items, total = await repo.search_groups(filters=None, sort=None, limit=50, offset=0)
+
+    g = items[0]
+    assert g["total_mpl_amount"] == Decimal("120000.00")
+    assert g["tb_breakdown"][0]["mpl_amount_rubles"] == Decimal("120000.00")
+
+
+@pytest.mark.asyncio
+async def test_sort_and_filter_by_total_mpl(mock_conn):
+    """total_mpl_amount сортируется/фильтруется как агрегат (SUM), а не как колонка строки."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    mock_conn.fetchval.return_value = 0
+
+    await repo.search_groups(
+        filters={"total_mpl_amount": FilterSpec(op="range", from_="1", cast="numeric")},
+        sort=[("total_mpl_amount", "desc")], limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "ORDER BY SUM(mpl_amount_rubles) DESC" in sql_a
+    assert "HAVING" in sql_a
+    assert "SUM(mpl_amount_rubles) >= CAST($1 AS NUMERIC)" in sql_a
