@@ -35,7 +35,7 @@ function toNum(width, type) {
 
 function toColumn(field) {
   const type = field.type || 'text';
-  return {
+  const col = {
     key: field.key,
     label: field.label,
     type,
@@ -44,6 +44,10 @@ function toColumn(field) {
     longText: type === 'textarea',
     description: field.description, // полное описание для tooltip (undefined — нет)
   };
+  // Булевы читаемы по умолчанию: «Да»/«Нет», пусто для null — сырые true/false
+  // в ячейку не попадают. Явный format/render в extra/overrides перекрывает.
+  if (type === 'checkbox') col.format = (v) => (v == null ? '' : (v ? 'Да' : 'Нет'));
+  return col;
 }
 
 /**

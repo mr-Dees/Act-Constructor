@@ -60,6 +60,19 @@ test('specMatches range numeric — только нижняя граница', (
   assert.equal(specMatches(500, s), false);
 });
 
+test('contains_any: хотя бы одна фраза', () => {
+  assert.equal(specMatches('Есть риск просрочки', { op: 'contains_any', values: ['штраф', 'риск'] }), true);
+  assert.equal(specMatches('Всё хорошо', { op: 'contains_any', values: ['штраф', 'риск'] }), false);
+});
+test('contains_any: пустые значения не фильтруют', () => {
+  assert.equal(specMatches('что угодно', { op: 'contains_any', values: [] }), true);
+  assert.equal(specMatches('что угодно', { op: 'contains_any', values: ['', '  '] }), true);
+});
+test('contains_any: массивная семантика (filterValue)', () => {
+  assert.equal(specMatches(['ЦА', 'ББ'], { op: 'contains_any', values: ['цa'] }), false); // латинская a
+  assert.equal(specMatches(['ЦА', 'ББ'], { op: 'contains_any', values: ['ца'] }), true);
+});
+
 test('filterRows: словарь по сырому id (op in)', () => {
   assert.deepEqual(filterRows(rows, columns, { tb: { op: 'in', values: ['1'] } }).map(r => r.id), [1]);
 });

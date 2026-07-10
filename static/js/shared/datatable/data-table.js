@@ -5,18 +5,14 @@
  * возр. → убыв. → убрать; приоритет показан номером), подсветка колонки, ресайз,
  * обрезка+поповер, выделение строки, пагинация. Источник — DataSource (client/server).
  *
- * Фильтр — типизированный по колонке (FilterSpec, канон — СЫРЬЁ): текст/число →
- * contains, словарь → in (имя разрешается в id через col.filterResolve), дата →
- * range (от/до), checkbox → eq. Одна и та же семантика в client- и server-mode.
+ * Фильтр — типизированный по колонке (FilterSpec, канон — СЫРЬЁ): текст →
+ * чипы-фразы (contains/contains_any), число → диапазон (range), словарь → in
+ * (имя разрешается в id через col.filterResolve), дата → range (от/до),
+ * checkbox → eq. Одна и та же семантика в client- и server-mode.
  */
 import { filterRows, sortRowsMulti, paginate } from './datatable-logic.js';
 import { attachColumnResize } from './column-resize.js';
 import { showCellPopover, isTruncated } from './cell-popover.js';
-
-/** Нормализация числового ввода: убрать пробелы, запятую → точку. */
-function normNumeric(s) {
-  return String(s).replace(/\s+/g, '').replace(',', '.');
-}
 
 /** ISO 'YYYY-MM-DD' → 'DD.MM.YYYY' (без Date — без TZ-сюрпризов). */
 function fmtDate(iso) {
@@ -81,8 +77,16 @@ export class DataTable {
       const ids = (col.filterResolve(t, this._dicts) || []).map(String);
       return { op: 'in', values: ids }; // пустой массив → «совпадений нет»
     }
-    if (col.type === 'number') return { op: 'contains', value: normNumeric(t) };
     return { op: 'contains', value: t };
+  }
+
+  /** FilterSpec текстового фильтра с чипами: 0 чипов → contains по живому вводу
+   * (или null), ≥1 чипа → contains_any по чипам + живому вводу. */
+  _specFromTextChips(col, state) {
+    const chips = (state.chips || []).filter(c => String(c).trim() !== '');
+    if (!chips.length) return this._specFromText(col, state.text);
+    const live = String(state.text ?? '').trim();
+    return { op: 'contains_any', values: live ? [...chips, live] : [...chips] };
   }
 
   /** FilterSpec диапазона по датам (от/до). null → нет фильтра. */
@@ -230,7 +234,9 @@ export class DataTable {
     // Опт-ин попап-фильтры (не зависят от col.type — колонка без filterPicker
     // не задета, падает в ветки ниже как раньше).
     if (col.filterPicker === 'checkbox') return this._buildCheckboxFilter(col, box);
-    if (col.filterPicker === 'numrange') return this._buildNumRangeFilter(col, box);
+    // number без явного filterPicker тоже получает диапазон по умолчанию (id
+    // числовым не считается — остаётся текстовым фильтром).
+    if (col.filterPicker === 'numrange' || (!col.filterPicker && col.type === 'number')) return this._buildNumRangeFilter(col, box);
 
     if (col.type === 'date') {
       // Компактный триггер в одну строку (шапка не растягивается); клик открывает
@@ -302,22 +308,97 @@ export class DataTable {
       return box;
     }
 
-    // text / textarea / id / number / dictionary — один текст-инпут.
+    // Словарь с filterResolve — один текст-инпут, имя резолвится в id (как раньше).
+    if (col.type === 'dictionary' && typeof col.filterResolve === 'function') {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'dt-th-filter';
+      input.placeholder = col.label;
+      input.title = col.description || col.label;
+      input.value = typeof this._filterText[col.key] === 'string' ? this._filterText[col.key] : '';
+      input.setAttribute('aria-label', `Фильтр по колонке: ${col.label}`);
+      input.addEventListener('input', () => {
+        this._filterText[col.key] = input.value;
+        this._setFilterSpec(col.key, this._specFromText(col, input.value));
+        box.onChange();
+      });
+      box.control = input;
+      box.isFilled = () => !!(this._filterText[col.key] && String(this._filterText[col.key]).trim());
+      box.clearControl = () => { input.value = ''; this._filterText[col.key] = ''; };
+      return box;
+    }
+
+    // Текстовые колонки накапливают фразы-чипы (Enter добавляет, × и Backspace на
+    // пустом поле удаляют); фильтр — «содержит любую из фраз» (contains_any).
+    const wrap = document.createElement('div');
+    wrap.className = 'dt-th-chipswrap';
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'dt-th-filter';
     input.placeholder = col.label;
     input.title = col.description || col.label;
-    input.value = typeof this._filterText[col.key] === 'string' ? this._filterText[col.key] : '';
     input.setAttribute('aria-label', `Фильтр по колонке: ${col.label}`);
-    input.addEventListener('input', () => {
-      this._filterText[col.key] = input.value;
-      this._setFilterSpec(col.key, this._specFromText(col, input.value));
+    const chipsBox = document.createElement('div');
+    chipsBox.className = 'dt-th-chips';
+    // Состояние {text, chips}; строка из прежних версий мигрирует лениво.
+    const state = () => {
+      const st = this._filterText[col.key];
+      if (st && typeof st === 'object' && !Array.isArray(st)) return st;
+      const next = { text: typeof st === 'string' ? st : '', chips: [] };
+      this._filterText[col.key] = next;
+      return next;
+    };
+    const renderChips = () => {
+      chipsBox.innerHTML = '';
+      const st = state();
+      chipsBox.hidden = !st.chips.length;
+      st.chips.forEach((phrase, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'dt-th-chip';
+        const txt = document.createElement('span');
+        txt.className = 'dt-th-chip-text';
+        txt.textContent = phrase;
+        txt.title = phrase;
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'dt-th-chip-x';
+        x.textContent = '×';
+        x.setAttribute('aria-label', `Убрать фразу: ${phrase}`);
+        x.addEventListener('click', () => { st.chips.splice(i, 1); apply(); });
+        chip.appendChild(txt);
+        chip.appendChild(x);
+        chipsBox.appendChild(chip);
+      });
+    };
+    const apply = () => {
+      this._setFilterSpec(col.key, this._specFromTextChips(col, state()));
+      renderChips();
       box.onChange();
+    };
+    input.addEventListener('input', () => { state().text = input.value; apply(); });
+    input.addEventListener('keydown', (e) => {
+      const st = state();
+      if (e.key === 'Enter') {
+        const phrase = String(input.value || '').trim();
+        if (!phrase) return;
+        e.preventDefault();
+        if (!st.chips.some(c => c.toLowerCase() === phrase.toLowerCase())) st.chips.push(phrase);
+        st.text = '';
+        input.value = '';
+        apply();
+      } else if (e.key === 'Backspace' && !input.value && st.chips.length) {
+        st.chips.pop();
+        apply();
+      }
     });
-    box.control = input;
-    box.isFilled = () => !!(this._filterText[col.key] && String(this._filterText[col.key]).trim());
-    box.clearControl = () => { input.value = ''; this._filterText[col.key] = ''; };
+    const st0 = state();
+    input.value = st0.text;
+    renderChips();
+    wrap.appendChild(input);
+    wrap.appendChild(chipsBox);
+    box.control = wrap;
+    box.isFilled = () => { const st = state(); return !!(st.chips.length || String(st.text).trim()); };
+    box.clearControl = () => { const st = state(); st.chips = []; st.text = ''; input.value = ''; renderChips(); };
     return box;
   }
 

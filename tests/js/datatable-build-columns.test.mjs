@@ -86,3 +86,21 @@ test('#2 filterResolve пробрасывается на extra-колонке', 
   const cols = buildColumns(fields, { extra: [{ key: 'id', label: 'ID', type: 'id', filterResolve: resolve }] });
   assert.equal(typeof cols.find(c => c.key === 'id').filterResolve, 'function');
 });
+
+test('checkbox без override → дефолтный format «Да»/«Нет», пусто для null', () => {
+  const cols = buildColumns([{ key: 'flag', label: 'Флаг', type: 'checkbox' }]);
+  const c = cols.find(x => x.key === 'flag');
+  assert.equal(typeof c.format, 'function');
+  assert.equal(c.format(true), 'Да');
+  assert.equal(c.format(false), 'Нет');
+  assert.equal(c.format(null), '');
+});
+
+test('checkbox с явным format в overrides → используется явный', () => {
+  const fmt = () => 'кастом';
+  const cols = buildColumns(
+    [{ key: 'flag', label: 'Флаг', type: 'checkbox' }],
+    { overrides: { flag: { format: fmt } } },
+  );
+  assert.equal(cols.find(c => c.key === 'flag').format, fmt);
+});

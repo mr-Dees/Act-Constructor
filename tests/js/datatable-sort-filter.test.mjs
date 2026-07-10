@@ -97,13 +97,11 @@ test('setFilter строит contains-спек и сохраняет текст 
   assert.equal(dt._filters.name, undefined);
 });
 
-test('_specFromText: словарь → in через filterResolve, число → contains нормализованный', () => {
+test('_specFromText: словарь → in через filterResolve; пустой ввод → null', () => {
   const dt = makeTable();
   const dictCol = { key: 'tb', type: 'dictionary', filterResolve: (q) => (q === 'вв' ? ['1', '2'] : []) };
   assert.deepEqual(dt._specFromText(dictCol, 'вв'), { op: 'in', values: ['1', '2'] });
-  const numCol = { key: 'sum', type: 'number' };
-  assert.deepEqual(dt._specFromText(numCol, '1 234,50'), { op: 'contains', value: '1234.50' });
-  assert.equal(dt._specFromText(numCol, '   '), null);
+  assert.equal(dt._specFromText(dictCol, '   '), null);
 });
 
 test('_specFromRange: даты от/до → range cast date', () => {

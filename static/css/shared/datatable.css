@@ -276,6 +276,19 @@
     cursor: pointer;
 }
 
+/* Чипы накопленных фраз текстового фильтра (под инпутом в шапке) */
+.dt-th-chipswrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dt-th-chips { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.dt-th-chips[hidden] { display: none; }
+.dt-th-chip {
+    display: inline-flex; align-items: center; gap: 2px; max-width: 100%;
+    padding: 0 4px; border-radius: 8px; background: var(--bg-tertiary);
+    font-size: 11px; line-height: 16px;
+}
+.dt-th-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.dt-th-chip-x { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-secondary); font-size: 12px; line-height: 1; }
+.dt-th-chip-x:hover { color: var(--text-primary); }
+
 .dt-th-sort,
 .dt-th-clear {
     flex-shrink: 0;

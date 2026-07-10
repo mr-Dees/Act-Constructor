@@ -13,6 +13,7 @@
  *   {op:'eq',       value}                — точное равенство по сырому тексту
  *   {op:'in',       values:[...]}         — членство по сырым значениям (словари)
  *   {op:'range',    from?, to?, cast}     — диапазон (cast: 'date' | 'numeric')
+ *   {op:'contains_any', values:[...]}     — содержит любую из фраз
  *
  * Колонка может нести опциональный аксессор `filterValue(record) -> raw`,
  * которым в client-mode добывается сырое значение вместо `record[col.key]`
@@ -33,6 +34,9 @@ function norm(s) {
 function specActive(spec) {
   if (!spec || !spec.op) return false;
   if (spec.op === 'in') return Array.isArray(spec.values);
+  if (spec.op === 'contains_any') {
+    return Array.isArray(spec.values) && spec.values.some(v => v != null && String(v).trim() !== '');
+  }
   if (spec.op === 'range') {
     return (spec.from != null && spec.from !== '') || (spec.to != null && spec.to !== '');
   }
@@ -49,7 +53,7 @@ function specActive(spec) {
  */
 export function specMatches(raw, spec) {
   if (!spec || !spec.op) return true;
-  if (Array.isArray(raw) && (spec.op === 'contains' || spec.op === 'eq' || spec.op === 'in')) {
+  if (Array.isArray(raw) && (spec.op === 'contains' || spec.op === 'eq' || spec.op === 'in' || spec.op === 'contains_any')) {
     return raw.some(item => specMatches(item, spec));
   }
   switch (spec.op) {
@@ -57,6 +61,12 @@ export function specMatches(raw, spec) {
       const q = norm(spec.value ?? '');
       if (!q) return true;
       return norm(raw == null ? '' : String(raw)).includes(q);
+    }
+    case 'contains_any': {
+      const vals = (spec.values || []).map(v => norm(v ?? '')).filter(Boolean);
+      if (!vals.length) return true;
+      const hay = norm(raw == null ? '' : String(raw));
+      return vals.some(q => hay.includes(q));
     }
     case 'eq': {
       if (spec.value == null || spec.value === '') return true;
