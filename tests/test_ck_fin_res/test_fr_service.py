@@ -201,6 +201,41 @@ class TestGroupSave:
         fr_repo.group_save.assert_awaited_once()
         assert result == {"deactivated": 1, "inserted": 1, "skipped": 0}
 
+    async def test_mpl_rejected_when_renamed_away_from_602(self, service, fr_repo, dict_repo):
+        """group_key ещё хранит старый '602', но common (записываемое) переименовывает
+        метрику в '2001' — правило должно смотреть на common, а не на старый ключ."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "602"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "2001"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
+                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+        )
+
+        with pytest.raises(FRValidationError) as exc:
+            await service.group_save(req, "testuser")
+        assert "602" in str(exc.value)
+        fr_repo.group_save.assert_not_awaited()
+
+    async def test_mpl_passes_when_renamed_into_602(self, service, fr_repo, dict_repo):
+        """group_key хранит старый '2001', common переименовывает метрику в '602' —
+        MPL должен приниматься, т.к. записываемая метрика — 602."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "2001"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "602"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
+                        "mpl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+        )
+
+        result = await service.group_save(req, "testuser")
+
+        fr_repo.group_save.assert_awaited_once()
+        assert result == {"deactivated": 1, "inserted": 1, "skipped": 0}
+
 
 # -------------------------------------------------------------------------
 # group_delete

@@ -115,7 +115,10 @@ class FRValidationService:
             raise FRValidationError(
                 f"Неизвестные ТБ в развертке: {', '.join(unknown)}",
             )
-        metric = str(req.group_key.metric_code or "").strip()
+        # Метрика — из common (новое записываемое состояние), а не из group_key
+        # (старый ключ поиска группы): при переименовании метрики группы
+        # правило должно проверяться против того, что реально сохраняется.
+        metric = str(req.common.metric_code or "").strip()
         has_mpl = any(item.mpl_amount_rubles > 0 for item in req.breakdown)
         if metric not in MPL_METRIC_CODES and has_mpl:
             raise FRValidationError("Показатель «MPL 90+» заполняется только для метрики 602")
