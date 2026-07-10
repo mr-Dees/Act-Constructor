@@ -282,6 +282,11 @@
     height: 1rem;
 }
 
+/* display:flex выше перебивал бы стандартный display:none у [hidden] — возвращаем его явно. */
+.frb-group-flags[hidden] {
+    display: none;
+}
+
 /* --- Строки ТБ --- */
 .frb-rows {
     overflow-y: auto;
@@ -309,6 +314,15 @@
 
 .frb-rows.mode-sum .frb-row input[type="range"] {
     display: none;
+}
+
+/* showCounts:false — колонка «шт.» не рендерится, сетке нужно на одну колонку меньше. */
+.fr-breakdown-editor.frb--no-counts .frb-row {
+    grid-template-columns: 158px 1fr 140px 46px 90px;
+}
+
+.fr-breakdown-editor.frb--no-counts .frb-rows.mode-sum .frb-row {
+    grid-template-columns: 158px 140px 46px 90px;
 }
 
 .frb-row.zero .frb-name {
