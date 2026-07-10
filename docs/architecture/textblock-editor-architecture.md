@@ -78,6 +78,9 @@ DOCX читали его как «базу», в которую никто не 
 `TextBlockSchema` (`act_content.py`) больше не содержит поля `formatting`,
 а `model_validator` `_drop_legacy_formatting` молча отбрасывает его из
 данных старых актов на загрузке (обратная совместимость не требуется).
+На **уже развёрнутых** БД колонку `formatting` нужно снять вручную
+(`create_tables_if_not_exist` не делает ALTER) — сценарий в
+[`docs/migrations/2026-07-05-drop-textblock-formatting.md`](../migrations/2026-07-05-drop-textblock-formatting.md).
 
 **Базовый размер шрифта** — единый дефолт настроек (экранные **16px**),
 он не хранится per-block. Конвертация в DOCX — везде единая **×0.75**
