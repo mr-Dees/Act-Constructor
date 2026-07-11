@@ -84,8 +84,7 @@ export class CkForm {
                 }
                 // paired_extras не отправляются — они вычисляются на бэке через JOIN
             } else if (field.type === 'amount-breakdown') {
-                try { data[field.key] = JSON.parse(el.dataset.value || '[]'); }
-                catch { data[field.key] = []; }
+                data[field.key] = this.getBreakdownValue(field.key);
             } else if (field.type === 'readonly-text') {
                 // Пустое значение опускаем — пусть {...record, ...data} сохранит исходное
                 // (важно для Optional[int]-полей вроде reestr_metric_id: '' не парсится в int)
@@ -112,8 +111,7 @@ export class CkForm {
             if (field.type === 'process-picker') {
                 isEmpty = !el.dataset.value;
             } else if (field.type === 'amount-breakdown') {
-                try { isEmpty = !(JSON.parse(el.dataset.value || '[]').length); }
-                catch { isEmpty = true; }
+                isEmpty = !this.getBreakdownValue(field.key).length;
             } else if (field.type === 'readonly-text') {
                 isEmpty = !(el.dataset.value || '').trim();
             } else if (field.type === 'checkbox') {
@@ -550,6 +548,40 @@ export class CkForm {
         const el = document.getElementById(`ck-field-${fieldKey}`);
         if (!el) return [];
         try { return JSON.parse(el.dataset.value || '[]'); } catch { return []; }
+    }
+
+    /** DOM-id контрола поля — контракт для делегированных слушателей страницы. */
+    static fieldId(fieldKey) {
+        return `ck-field-${fieldKey}`;
+    }
+
+    /** Значение простого контрола поля (input/select). Нет поля → ''. */
+    static getFieldValue(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        return el ? String(el.value ?? '') : '';
+    }
+
+    /** Состояние чекбокс-поля. Нет поля → false. */
+    static getFieldChecked(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        return !!(el && el.checked);
+    }
+
+    static setFieldChecked(fieldKey, checked) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (el) el.checked = !!checked;
+    }
+
+    /**
+     * Приглушает поле (модификатор ck-form__field--disabled на обёртке):
+     * страницы управляют активностью полей через этот API, а не через
+     * прямые обращения к внутренним id/классам формы. Нет поля → no-op.
+     */
+    static setFieldDisabled(fieldKey, disabled) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return;
+        const wrap = el.closest('.ck-form__field') || el.parentElement;
+        if (wrap) wrap.classList.toggle('ck-form__field--disabled', !!disabled);
     }
 
     /**

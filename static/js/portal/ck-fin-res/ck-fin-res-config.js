@@ -35,14 +35,16 @@ export class CkFinResConfig {
 
     static formatDate(val) {
         if (!val) return '';
-        const d = new Date(val);
+        const s = String(val);
+        // ISO-строка разбирается по частям: new Date('YYYY-MM-DD') трактует
+        // дату-only как UTC-полночь и западнее Гринвича показывала бы
+        // вчерашний день; у timestamp'ов бэка (без зоны) дата-часть строки
+        // и есть местный день.
+        const m = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(s);
+        if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+        const d = new Date(s);
         if (isNaN(d)) return '';
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    }
-
-    static formatNumber(val) {
-        if (val == null || val === '') return '';
-        return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     static formatTerbank(val, dicts) {
@@ -138,6 +140,20 @@ export class CkFinResConfig {
         return wrap;
     }
 
+    /** Кеш индексов развертки по массиву-развертке (WeakMap — не мутирует
+     * записи: лишний ключ в record попал бы в common при сохранении). */
+    static _breakdownIndex = new WeakMap();
+
+    /** Строка развертки по tb_id — O(1) после первой ячейки строки. */
+    static _breakdownItem(list, id) {
+        let byId = this._breakdownIndex.get(list);
+        if (!byId) {
+            byId = new Map(list.map(x => [String(x.neg_finder_tb_id), x]));
+            this._breakdownIndex.set(list, byId);
+        }
+        return byId.get(id);
+    }
+
     /** Pivot-колонки по ТБ словаря: для суммы (piv:) и NPL (pivnpl:) — одна фабрика. */
     static tbPivotColumns(dicts, { keyPrefix = 'piv', breakdownField = 'tb_breakdown', labelSuffix = '' } = {}) {
         return ((dicts && dicts.terbanks) || []).map(t => {
@@ -149,7 +165,9 @@ export class CkFinResConfig {
                 description: `${t.full_name || t.short_name || ''}${labelSuffix ? ' — NPL 90+' : ''}`,
                 render: (raw, record) => {
                     const span = document.createElement('span');
-                    const b = (record[breakdownField] || []).find(x => String(x.neg_finder_tb_id) === id);
+                    const b = record[breakdownField]
+                        ? this._breakdownItem(record[breakdownField], id)
+                        : undefined;
                     span.textContent = b ? this.fmtMoney(b.metric_amount_rubles) : '—';
                     if (!b) span.className = 'frb-cell-zero';
                     return span;
@@ -200,7 +218,10 @@ export class CkFinResConfig {
                 // Служебные колонки скрыты по умолчанию (hidden) — включаются из панели видимости.
                 // group — вручную (не выведена из fields, т.к. это extra-колонки): без него
                 // они выпадали бы между секционными группами и рвали бы заголовки в панели ⚙.
-                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true, group: 'Системное' },
+                // id группы — синтетическая строка «suba|КМ|пункт|метрика»: числовая
+                // сортировка/фильтр по ней не осмыслены и в client/server-режимах
+                // вели себя по-разному — обе возможности сняты.
+                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true, noSort: true, noFilter: true, group: 'Системное' },
                 { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
                 { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
                 { key: 'metric_name', label: 'Метрика', type: 'text', group: 'Метрика' },
@@ -251,15 +272,11 @@ export class CkFinResConfig {
                     width: 320,
                     noSort: true,
                     filterPicker: 'checkbox',
-                    // Опции попапа — фиксированный список тех же 12 ТБ, что TB_PALETTE/
-                    // TB_ABBR (полное название — TB_NAMES, см. комментарий там же).
+                    // Опции попапа — статический фолбэк tbFilterOptions() (без словарей);
+                    // после загрузки словарей страница подставляет живой список.
                     // Спек op=in уходит на бэк под ключом tb_breakdown — membership-алиас
                     // «группа содержит такой ТБ» (HAVING, итоги группы не искажаются).
-                    filterOptions: Object.keys(CkFinResConfig.TB_ABBR).map((id) => ({
-                        value: id,
-                        label: `${CkFinResConfig.TB_ABBR[id]} — ${CkFinResConfig.TB_NAMES[id]}`,
-                        short: CkFinResConfig.TB_ABBR[id],
-                    })),
+                    filterOptions: CkFinResConfig.tbFilterOptions(),
                     // Сырое значение для client-mode фильтрации (маленькие наборы, включая
                     // демо): record.tb_breakdown — массив ОБЪЕКТОВ, specMatches сравнил бы
                     // его как строку и никогда не совпал бы. filterValue отдаёт массив
@@ -276,11 +293,7 @@ export class CkFinResConfig {
                     width: 260,
                     noSort: true,
                     filterPicker: 'checkbox',
-                    filterOptions: Object.keys(CkFinResConfig.TB_ABBR).map((id) => ({
-                        value: id,
-                        label: `${CkFinResConfig.TB_ABBR[id]} — ${CkFinResConfig.TB_NAMES[id]}`,
-                        short: CkFinResConfig.TB_ABBR[id],
-                    })),
+                    filterOptions: CkFinResConfig.tbFilterOptions(),
                     // extractNplBreakdown уже отдаёт только строки с NPL>0.
                     filterValue: (record) => (record.npl_breakdown || []).map(b => String(b.neg_finder_tb_id)),
                     render: (raw, record, dicts) => CkFinResConfig.renderBreakdownChips(record.npl_breakdown || [], dicts),

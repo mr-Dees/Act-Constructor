@@ -126,12 +126,12 @@
     margin-top: 2px;
 }
 
-/* Поле «NPL 90+» (ЦКФР) вне метрики 602: видно, но неактивно. */
-.ck-form__field--npl-disabled .ck-form__breakdown {
+/* Неактивное поле формы (CkForm.setFieldDisabled) — например, NPL вне NPL-метрики. */
+.ck-form__field--disabled .ck-form__breakdown {
     opacity: .55;
 }
 
-.ck-form__field--npl-disabled .ck-form__picker-trigger {
+.ck-form__field--disabled .ck-form__picker-trigger {
     pointer-events: none;
     opacity: .55;
 }

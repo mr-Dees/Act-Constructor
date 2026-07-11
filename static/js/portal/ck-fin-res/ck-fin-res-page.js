@@ -15,6 +15,10 @@ import { Notifications } from '../../shared/notifications.js';
 import { FRBreakdownEditor } from './fr-breakdown-editor.js';
 import { extractNplBreakdown, mergeTbBreakdowns } from './fr-breakdown-logic.js';
 
+/** Ключ pivot-колонки пары ТБ (piv: сумма, pivnpl: NPL) — единственное место
+ * знания о схеме префиксов. */
+const isPivotKey = (k) => String(k).startsWith('piv:') || String(k).startsWith('pivnpl:');
+
 export class CkFinResPage {
     static _dictionaries = {};
 
@@ -95,7 +99,6 @@ export class CkFinResPage {
         // Панель видимости колонок (кнопка ⚙ в тулбаре) + секция «Развертка по ТБ»
         const colvisBtn = document.getElementById('ckColvisBtn');
         if (colvisBtn) {
-            const isPivotKey = (k) => String(k).startsWith('piv:') || String(k).startsWith('pivnpl:');
             ColumnVisibility.mount({
                 anchorEl: colvisBtn,
                 // Пивоты управляются секцией «Развертка по ТБ», в общем списке (и под
@@ -127,7 +130,7 @@ export class CkFinResPage {
         // первого рендера, поэтому вешаем делегированный change на стабильный
         // контейнер формы.
         this._formContainerEl.addEventListener('change', (e) => {
-            if (e.target && e.target.id === 'ck-field-metric_code') {
+            if (e.target && e.target.id === CkForm.fieldId('metric_code')) {
                 this._syncNplField({ notifyOnClear: true });
             }
         });
@@ -192,26 +195,22 @@ export class CkFinResPage {
         box.appendChild(radios);
 
         // Одна галочка на ТБ — управляет ПАРОЙ колонок piv:/pivnpl: (спека §0).
+        // Строка-чекбокс — тулкитовый билдер панели (разметка не расходится).
         const tbGrid = document.createElement('div');
         tbGrid.className = 'dt-colvis-tbgrid';
         this._tbChecks = new Map();
         for (const t of (this._dictionaries.terbanks || [])) {
             const id = String(t.tb_id);
-            const label = document.createElement('label');
-            label.className = 'dt-colvis-item';
-            label.title = t.full_name || t.short_name || '';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.checked = this._viewState.isVisible(`piv:${id}`);
-            cb.addEventListener('change', () => {
-                this._viewState.setVisible(`piv:${id}`, cb.checked);
-                this._viewState.setVisible(`pivnpl:${id}`, cb.checked);
-                this._dataTable.refresh();
+            const { el: label, checkbox: cb } = ColumnVisibility.buildCheckboxRow({
+                label: CkFinResConfig.tbAbbr(id, this._dictionaries),
+                title: t.full_name || t.short_name || '',
+                checked: this._viewState.isVisible(`piv:${id}`),
+                onChange: (checked) => {
+                    this._viewState.setVisible(`piv:${id}`, checked);
+                    this._viewState.setVisible(`pivnpl:${id}`, checked);
+                    this._dataTable.refresh();
+                },
             });
-            const span = document.createElement('span');
-            span.textContent = CkFinResConfig.tbAbbr(id, this._dictionaries);
-            label.appendChild(cb);
-            label.appendChild(span);
             tbGrid.appendChild(label);
             this._tbChecks.set(id, cb);
         }
@@ -221,15 +220,21 @@ export class CkFinResPage {
         // Битое персист-значение (не chips/pivot) не должно ронять страницу — фолбэк на чипы.
         const el = box.querySelector(`input[value="${current}"]`) || box.querySelector('input[value="chips"]');
         el.checked = true;
-        box.querySelectorAll('input[name=ckFrTbView]').forEach(r => {
+        this._tbViewRadios = [...box.querySelectorAll('input[name=ckFrTbView]')];
+        this._tbViewRadios.forEach(r => {
             r.addEventListener('change', () => this._applyTbView(r.value, columns));
         });
         this._syncTbChecks(current);
         return box;
     }
 
-    /** Галочки ТБ активны только в режиме «Колонки»; состояние — из viewState. */
+    /** Галочки ТБ активны только в режиме «Колонки»; радио и состояние — из viewState. */
     static _syncTbChecks(view) {
+        // Радио отражают view — важно после «Сбросить к умолчанию», который
+        // возвращает extra-флаг tbView к дефолту в обход самих радио.
+        if (this._tbViewRadios) {
+            for (const r of this._tbViewRadios) r.checked = (r.value === view);
+        }
         if (!this._tbChecks) return;
         const pivot = view === 'pivot';
         for (const [id, cb] of this._tbChecks) {
@@ -238,16 +243,20 @@ export class CkFinResPage {
         }
     }
 
-    /** «Выбрать/Снять все» и Сброс трогают весь viewState (включая пивоты, которых
-     * нет в списке панели) — возвращаем видимость пивотов под контроль радио/галочек. */
+    /** «Сбросить к умолчанию» (и любые сторонние изменения видимости) не должны
+     * ломать инвариант вида: в режиме чипов пивоты скрыты, в режиме колонок
+     * скрыты чипы. Возвращаем видимость под контроль радио/галочек. */
     static _reassertTbView(columns) {
         const view = this._viewState.getExtra('tbView', 'chips');
         if (view !== 'pivot') {
             for (const col of columns) {
-                if (String(col.key).startsWith('piv:') || String(col.key).startsWith('pivnpl:')) {
-                    this._viewState.setVisible(col.key, false);
-                }
+                if (isPivotKey(col.key)) this._viewState.setVisible(col.key, false);
             }
+        } else {
+            // Зеркальный гард: «Выбрать все» в режиме колонок не должен
+            // показать заодно и чипы — вид либо чипы, либо pivot.
+            this._viewState.setVisible('tb_breakdown', false);
+            this._viewState.setVisible('npl_breakdown', false);
         }
         this._syncTbChecks(view);
     }
@@ -256,15 +265,25 @@ export class CkFinResPage {
      * Переключение вида: chips ↔ pivot — безусловно (перетирает ручной выбор
      * пользователя по pivot-колонкам/tb_breakdown, но только в момент
      * переключения радио; вне него галочки живут как обычно).
+     * Сначала показываем колонки НОВОГО вида, потом прячем старые — иначе
+     * гард «нельзя скрыть последнюю видимую» оставил бы колонку старого вида
+     * торчать с рассинхронизированной галочкой.
      */
     static _applyTbView(view, columns) {
         const pivot = view === 'pivot';
-        for (const col of columns) {
-            const key = String(col.key);
-            if (key.startsWith('piv:') || key.startsWith('pivnpl:')) this._viewState.setVisible(key, pivot);
+        if (pivot) {
+            for (const col of columns) {
+                if (isPivotKey(col.key)) this._viewState.setVisible(col.key, true);
+            }
+            this._viewState.setVisible('tb_breakdown', false);
+            this._viewState.setVisible('npl_breakdown', false);
+        } else {
+            this._viewState.setVisible('tb_breakdown', true);
+            this._viewState.setVisible('npl_breakdown', true);
+            for (const col of columns) {
+                if (isPivotKey(col.key)) this._viewState.setVisible(col.key, false);
+            }
         }
-        this._viewState.setVisible('tb_breakdown', !pivot);
-        this._viewState.setVisible('npl_breakdown', !pivot);
         this._viewState.setExtra('tbView', view);
         this._syncTbChecks(view);
         if (this._colvisApi) this._colvisApi.sync();
@@ -351,9 +370,11 @@ export class CkFinResPage {
             this._updateSubheader(null);
         } catch (error) {
             Notifications.error('Ошибка сохранения: ' + error.message);
-            // 409: группу параллельно изменили/удалили — подтягиваем актуальное
-            // состояние, чтобы expected_row_ids на следующей попытке не разъехались снова.
-            if (String(error.message).includes('обновите данные')) await this._loadData();
+            // 409: группу параллельно изменили/удалили/создали дубль — подтягиваем
+            // актуальное состояние, чтобы expected_row_ids на следующей попытке
+            // не разъехались снова. Распознаём по коду ответа, не по тексту
+            // сообщения (текст на бэке может меняться).
+            if (error.status === 409) await this._loadData();
         }
     }
 
@@ -379,8 +400,8 @@ export class CkFinResPage {
             this._updateSubheader(null);
         } catch (error) {
             Notifications.error('Ошибка удаления: ' + error.message);
-            // 409: та же гонка, что и в _onSave — обновляем список.
-            if (String(error.message).includes('обновите данные')) await this._loadData();
+            // 409: та же гонка, что и в _onSave — обновляем список (по коду ответа).
+            if (error.status === 409) await this._loadData();
         }
     }
 
@@ -400,8 +421,6 @@ export class CkFinResPage {
             return;
         }
         const current = CkForm.getBreakdownValue(field.key);
-        const lossEl = document.getElementById('ck-field-real_loss');
-        const nsEl = document.getElementById('ck-field-is_sent_to_top_brass');
         const rec = CkForm.getCurrentRecord();
         FRBreakdownEditor.show({
             subtitle: isNpl
@@ -412,20 +431,22 @@ export class CkFinResPage {
             terbanks: this._dictionaries.terbanks || [],
             colorOf: (id) => cfg.tbColor(id),
             breakdown: current,
-            flags: { loss: !!(lossEl && lossEl.checked), ns: !!(nsEl && nsEl.checked) },
+            flags: {
+                loss: CkForm.getFieldChecked('real_loss'),
+                ns: CkForm.getFieldChecked('is_sent_to_top_brass'),
+            },
             showCounts: !isNpl,
             showFlags: !isNpl,
             onApply: ({ breakdown, flags }) => {
                 CkForm.setBreakdownValue(field.key, breakdown);
-                if (lossEl) lossEl.checked = !!flags.loss;
-                if (nsEl) nsEl.checked = !!flags.ns;
+                CkForm.setFieldChecked('real_loss', !!flags.loss);
+                CkForm.setFieldChecked('is_sent_to_top_brass', !!flags.ns);
             },
         });
     }
 
     static _currentMetricCode() {
-        const el = document.getElementById('ck-field-metric_code');
-        return el ? String(el.value || '').trim() : '';
+        return CkForm.getFieldValue('metric_code').trim();
     }
 
     static _isNplMetric() {
@@ -434,11 +455,8 @@ export class CkFinResPage {
 
     /** Активность поля NPL: вне NPL-метрики поле приглушено, значение очищается. */
     static _syncNplField({ notifyOnClear = false } = {}) {
-        const input = document.getElementById('ck-field-npl_breakdown');
-        if (!input) return;
-        const wrap = input.closest('.ck-form__field') || input.parentElement;
         const enabled = this._isNplMetric();
-        wrap.classList.toggle('ck-form__field--npl-disabled', !enabled);
+        CkForm.setFieldDisabled('npl_breakdown', !enabled);
         if (!enabled && (CkForm.getBreakdownValue('npl_breakdown') || []).length) {
             CkForm.setBreakdownValue('npl_breakdown', []);
             if (notifyOnClear) {

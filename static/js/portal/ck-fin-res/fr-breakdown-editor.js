@@ -4,7 +4,10 @@
  * сохранение группы выполняет страница кнопкой «Сохранить».
  */
 import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { SafeHTML } from '../../shared/sanitize.js';
 import { fmtKop, parseKop, largestRemainder, niceStep, sumKop, headroomKop } from './fr-breakdown-logic.js';
+
+const esc = SafeHTML.escapeHtml;
 
 export class FRBreakdownEditor extends DialogBase {
     /**
@@ -30,7 +33,10 @@ export class FRBreakdownEditor extends DialogBase {
             flags: { loss: !!(opts.flags && opts.flags.loss), ns: !!(opts.flags && opts.flags.ns) },
             confirmOpen: false, amongOpen: false,
         };
-        const terbanks = opts.terbanks || [];
+        // ТБ развертки, выпавшие из актуального справочника, дополняются
+        // синтетическими строками: их суммы участвуют в итоге и не должны
+        // молча теряться при «Применить» (см. _withUnknownTbs).
+        const terbanks = this._withUnknownTbs(opts.terbanks || [], opts.breakdown || []);
         for (const tb of terbanks) st.rows[String(tb.tb_id)] = { a: 0, n: 0 };
         for (const b of (opts.breakdown || [])) {
             const id = String(b.neg_finder_tb_id);
@@ -63,6 +69,28 @@ export class FRBreakdownEditor extends DialogBase {
         this._hideDialog(overlay);
     }
 
+    /**
+     * Дополняет справочник ТБ синтетическими записями для ТБ из развертки,
+     * которых нет в актуальном словаре (дрейф справочника). Без них строка
+     * не отображалась бы вовсе, но её сумма сидела бы в итоге — после
+     * «Применить» и сохранения значение молча пропадало бы.
+     */
+    static _withUnknownTbs(terbanks, breakdown) {
+        const known = new Set(terbanks.map(t => String(t.tb_id)));
+        const extra = [];
+        for (const b of breakdown) {
+            const id = String(b.neg_finder_tb_id);
+            if (known.has(id)) continue;
+            known.add(id);
+            extra.push({
+                tb_id: id,
+                short_name: `ТБ ${id}`,
+                full_name: `ТБ ${id} — вне текущего справочника`,
+            });
+        }
+        return extra.length ? [...terbanks, ...extra] : terbanks;
+    }
+
     /** Статическая разметка диалога (шапка/верх/футер/слои). Строки ТБ строит _buildRows. */
     static _template(opts, terbanks) {
         const showFlags = opts.showFlags !== false;
@@ -70,7 +98,7 @@ export class FRBreakdownEditor extends DialogBase {
             <div class="frb-head">
                 <div>
                     <h3 class="frb-title">Развертка по ТБ</h3>
-                    <div class="frb-sub">${this._esc(opts.subtitle || '')}</div>
+                    <div class="frb-sub">${esc(opts.subtitle || '')}</div>
                 </div>
                 <button type="button" class="frb-close" id="frbClose" aria-label="Закрыть">✕</button>
             </div>
@@ -158,10 +186,10 @@ export class FRBreakdownEditor extends DialogBase {
             row.className = 'frb-row';
             row.dataset.tb = id;
             row.innerHTML = `
-                <span class="frb-name"><span class="frb-dot" style="background:${opts.colorOf(tb.tb_id)}"></span><span class="frb-nm" title="${this._esc(tb.full_name)}">${this._esc(tb.short_name)}</span></span>
-                <input type="range" min="0" value="0" aria-label="${this._esc(tb.short_name)}: доля суммы">
-                <input class="frb-amount" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="${this._esc(tb.short_name)}: сумма, рубли">
-                ${showCounts ? `<input class="frb-count" inputmode="numeric" autocomplete="off" placeholder="шт." title="Количество элементов (операций)" aria-label="${this._esc(tb.short_name)}: количество элементов">` : ''}
+                <span class="frb-name"><span class="frb-dot" style="background:${opts.colorOf(tb.tb_id)}"></span><span class="frb-nm" title="${esc(tb.full_name)}">${esc(tb.short_name)}</span></span>
+                <input type="range" min="0" value="0" aria-label="${esc(tb.short_name)}: доля суммы">
+                <input class="frb-amount" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="${esc(tb.short_name)}: сумма, рубли">
+                ${showCounts ? `<input class="frb-count" inputmode="numeric" autocomplete="off" placeholder="шт." title="Количество элементов (операций)" aria-label="${esc(tb.short_name)}: количество элементов">` : ''}
                 <span class="frb-pct">—</span>
                 <button type="button" class="frb-give" title="Отдать весь остаток этому ТБ">+ остаток</button>`;
 
@@ -177,8 +205,10 @@ export class FRBreakdownEditor extends DialogBase {
                 const clamped = kop !== raw;
                 if (clamped) range.value = Math.round(kop / 100); // ползунок «упирается», не убегает
                 st.rows[id].a = kop;
-                this._syncAll(dialog, st, terbanks, opts);
-                if (clamped) this._signalLimit(dialog); // после syncAll — иначе вспышку сотрёт перерисовка
+                // Тик ползунка даёт десятки событий в секунду — синхронизацию
+                // UI коалессируем в один кадр (rAF), состояние st уже обновлено.
+                this._scheduleSync(dialog, st, terbanks, opts);
+                if (clamped) this._signalLimit(dialog);
             });
             amount.addEventListener('change', () => {
                 const raw = parseKop(amount.value);
@@ -317,7 +347,7 @@ export class FRBreakdownEditor extends DialogBase {
             const r = st.rows[id] || { a: 0, n: 0 };
             const label = document.createElement('label');
             if (r.a > 0) label.className = 'has-sum';
-            label.innerHTML = `<input type="checkbox"><span class="frb-dot" style="background:${opts.colorOf(tb.tb_id)}"></span>${this._esc(tb.short_name)}`
+            label.innerHTML = `<input type="checkbox"><span class="frb-dot" style="background:${opts.colorOf(tb.tb_id)}"></span>${esc(tb.short_name)}`
                 + (r.a > 0 ? `<span class="cur">сейчас ${this._fmtR(r.a)}</span>` : '');
             label.querySelector('input').addEventListener('change', (e) => {
                 if (e.target.checked) amongSel.add(id); else amongSel.delete(id);
@@ -342,7 +372,7 @@ export class FRBreakdownEditor extends DialogBase {
             if (!r || !r.a) continue;
             const row = document.createElement('div');
             const countSuffix = r.n ? ` · ${r.n} шт.` : '';
-            row.innerHTML = `<span>${this._esc(tb.short_name)}${countSuffix}</span><span class="frb-num">${this._fmtR(r.a)}</span>`;
+            row.innerHTML = `<span>${esc(tb.short_name)}${countSuffix}</span><span class="frb-num">${this._fmtR(r.a)}</span>`;
             list.appendChild(row);
         }
         const total = document.createElement('div');
@@ -370,34 +400,74 @@ export class FRBreakdownEditor extends DialogBase {
         this._close(overlay);
     }
 
+    /** Кеш ссылок на элементы диалога: _syncAll дёргается на каждый тик
+     * ползунка, без кеша это ~80 DOM-запросов на тик (заметно на VDI). */
+    static _collectRefs(dialog) {
+        const q = (sel) => dialog.querySelector(sel);
+        const rows = new Map();
+        dialog.querySelectorAll('.frb-row').forEach((row) => {
+            rows.set(row.dataset.tb, {
+                row,
+                range: row.querySelector('input[type="range"]'),
+                amount: row.querySelector('.frb-amount'),
+                count: row.querySelector('.frb-count'),
+                pct: row.querySelector('.frb-pct'),
+                give: row.querySelector('.frb-give'),
+            });
+        });
+        return {
+            rows,
+            totalInput: q('#frbTotalInput'), modeTotal: q('#frbModeTotal'), modeSum: q('#frbModeSum'),
+            totalLabel: q('#frbTotalLabel'), autoBadge: q('#frbAutoBadge'), rowsWrap: q('#frbRows'),
+            loss: q('#frbLoss'), ns: q('#frbNS'), bar: q('#frbBar'), segs: q('#frbBarSegments'),
+            allocSum: q('#frbAllocSum'), allocTotal: q('#frbAllocTotal'), pill: q('#frbRestPill'),
+            rowsNote: q('#frbRowsNote'), reason: q('#frbReason'), apply: q('#frbApply'),
+            btnEqual: q('#frbBtnEqual'), btnEqualAmong: q('#frbBtnEqualAmong'),
+        };
+    }
+
+    /** Коалессирует _syncAll в один кадр (rAF) — для высокочастотных событий
+     * вроде тика ползунка; состояние st к моменту кадра уже актуально. */
+    static _scheduleSync(dialog, st, terbanks, opts) {
+        if (dialog._frbSyncPending) return;
+        dialog._frbSyncPending = true;
+        const raf = typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame
+            : (fn) => setTimeout(fn, 16);
+        raf(() => {
+            dialog._frbSyncPending = false;
+            this._syncAll(dialog, st, terbanks, opts);
+        });
+    }
+
     /** Синхронизация всего UI с состоянием st (режим/бар/строки/гейт кнопки «Применить»). */
     static _syncAll(dialog, st, terbanks, opts) {
+        const ui = dialog._frbUi || (dialog._frbUi = this._collectRefs(dialog));
         const sum = sumKop(st.rows);
         const total = st.mode === 'total' ? st.target : sum;
         const rest = total - sum;
-        const totalInput = dialog.querySelector('#frbTotalInput');
+        const totalInput = ui.totalInput;
 
         // Режим
-        dialog.querySelector('#frbModeTotal').setAttribute('aria-pressed', st.mode === 'total');
-        dialog.querySelector('#frbModeSum').setAttribute('aria-pressed', st.mode === 'sum');
-        dialog.querySelector('#frbTotalLabel').textContent = st.mode === 'total'
+        ui.modeTotal.setAttribute('aria-pressed', st.mode === 'total');
+        ui.modeSum.setAttribute('aria-pressed', st.mode === 'sum');
+        ui.totalLabel.textContent = st.mode === 'total'
             ? 'Общая сумма — цель распределения'
             : 'Итоговая сумма';
-        dialog.querySelector('#frbAutoBadge').hidden = st.mode !== 'sum';
+        ui.autoBadge.hidden = st.mode !== 'sum';
         totalInput.readOnly = st.mode === 'sum';
         if (document.activeElement !== totalInput || st.mode === 'sum') {
             totalInput.value = total ? fmtKop(total) : '';
         }
-        dialog.querySelector('#frbRows').classList.toggle('mode-sum', st.mode === 'sum');
+        ui.rowsWrap.classList.toggle('mode-sum', st.mode === 'sum');
 
         // Поля пункта
-        dialog.querySelector('#frbLoss').checked = st.flags.loss;
-        dialog.querySelector('#frbNS').checked = st.flags.ns;
+        ui.loss.checked = st.flags.loss;
+        ui.ns.checked = st.flags.ns;
 
-        // Бар
-        const bar = dialog.querySelector('#frbBar');
-        bar.classList.toggle('overflow', st.mode === 'total' && sum > st.target);
-        const segs = dialog.querySelector('#frbBarSegments');
+        // Бар (сегменты немногочисленны — пересборка дешевле точечного диффа)
+        ui.bar.classList.toggle('overflow', st.mode === 'total' && sum > st.target);
+        const segs = ui.segs;
         segs.innerHTML = '';
         const denom = Math.max(total, sum, 1);
         for (const tb of terbanks) {
@@ -412,9 +482,9 @@ export class FRBreakdownEditor extends DialogBase {
             s.title = `${tb.short_name} — ${this._fmtR(v)} (${pct}%)`;
             segs.appendChild(s);
         }
-        dialog.querySelector('#frbAllocSum').textContent = this._fmtR(sum);
-        dialog.querySelector('#frbAllocTotal').textContent = this._fmtR(total);
-        const pill = dialog.querySelector('#frbRestPill');
+        ui.allocSum.textContent = this._fmtR(sum);
+        ui.allocTotal.textContent = this._fmtR(total);
+        const pill = ui.pill;
         if (st.mode === 'sum') {
             pill.className = 'frb-rest-pill ok';
             pill.textContent = 'Итог = сумма по ТБ';
@@ -432,38 +502,33 @@ export class FRBreakdownEditor extends DialogBase {
             pill.textContent = 'Остаток 0,00 ₽';
         }
 
-        // Строки
+        // Строки — по кешу ссылок, без повторных querySelector'ов
         const stepR = niceStep(Math.max(total, 1));
         const fullSpent = st.mode === 'total' && st.target > 0 && rest <= 0;
-        dialog.querySelectorAll('.frb-row').forEach((row) => {
-            const id = row.dataset.tb;
+        for (const [id, refs] of ui.rows) {
             const r = st.rows[id] || { a: 0, n: 0 };
-            const range = row.querySelector('input[type="range"]');
-            const amount = row.querySelector('.frb-amount');
-            const count = row.querySelector('.frb-count');
+            const { row, range, amount, count, pct, give } = refs;
             row.classList.toggle('zero', !r.a);
             range.disabled = fullSpent && !r.a;   // лимит исчерпан → пустые ТБ заблокированы
             amount.disabled = fullSpent && !r.a;
             if (count) count.disabled = !r.a;     // количество — только при сумме (хотя бы 1 копейка)
             // «+ остаток» доступна только в режиме цели при ненулевом остатке (disabled → visibility:hidden)
-            row.querySelector('.frb-give').disabled = !(st.mode === 'total' && st.target > 0 && rest > 0);
+            give.disabled = !(st.mode === 'total' && st.target > 0 && rest > 0);
             if (count) count.title = !r.a ? 'Сначала укажите сумму — хотя бы 1 копейку' : 'Количество элементов (операций)';
             range.max = Math.max(Math.round(total / 100), 1);
             range.step = stepR;
             if (document.activeElement !== range) range.value = Math.round(r.a / 100);
             if (document.activeElement !== amount) amount.value = r.a ? fmtKop(r.a) : '';
             if (count && document.activeElement !== count) count.value = r.n ? String(r.n) : '';
-            row.querySelector('.frb-pct').textContent = sum > 0 && r.a
+            pct.textContent = sum > 0 && r.a
                 ? (r.a / sum * 100).toFixed(1).replace('.', ',') + '%'
                 : '—';
-        });
-        dialog.querySelector('#frbRowsNote').textContent = st.mode === 'sum'
+        }
+        ui.rowsNote.textContent = st.mode === 'sum'
             ? 'Вводите суммы по каждому ТБ — итог считается автоматически.'
             : 'Ползунок — грубая настройка, точное значение вводится в поле.';
 
         // Гейт кнопки «Применить»
-        const reason = dialog.querySelector('#frbReason');
-        const apply = dialog.querySelector('#frbApply');
         let ok = false;
         let msg = '';
         if (st.mode === 'total') {
@@ -475,11 +540,11 @@ export class FRBreakdownEditor extends DialogBase {
             if (sum <= 0) msg = 'Введите сумму хотя бы по одному ТБ';
             else ok = true;
         }
-        apply.disabled = !ok;
-        reason.textContent = msg;
-        reason.className = 'frb-reason' + (rest < 0 ? ' err' : '');
-        dialog.querySelector('#frbBtnEqual').disabled = st.mode === 'total' ? st.target <= 0 : false;
-        dialog.querySelector('#frbBtnEqualAmong').disabled = !(st.mode === 'total' && st.target > 0 && rest > 0);
+        ui.apply.disabled = !ok;
+        ui.reason.textContent = msg;
+        ui.reason.className = 'frb-reason' + (rest < 0 ? ' err' : '');
+        ui.btnEqual.disabled = st.mode === 'total' ? st.target <= 0 : false;
+        ui.btnEqualAmong.disabled = !(st.mode === 'total' && st.target > 0 && rest > 0);
     }
 
     /** Сигнал «лимит исчерпан»: красное мигание бара и фразы «Распределено» (стиль перерасхода). */
@@ -497,13 +562,6 @@ export class FRBreakdownEditor extends DialogBase {
 
     static _fmtR(kop) {
         return fmtKop(kop) + ' ₽';
-    }
-
-    /** Экранирует HTML-спецсимволы и кавычки (текстовый и атрибутный контекст). */
-    static _esc(text) {
-        const div = document.createElement('div');
-        div.textContent = text || '';
-        return div.innerHTML.replace(/"/g, '&quot;');
     }
 }
 
