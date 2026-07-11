@@ -9,12 +9,13 @@
 import logging
 from datetime import date, datetime
 from decimal import Decimal
+from typing import get_args
 
 import asyncpg
 
 from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
-from app.domains.ck_fin_res.exceptions import FRGroupConflictError
+from app.domains.ck_fin_res.exceptions import FRGroupConflictError, FRValidationError
 from app.domains.ck_fin_res.schemas.fr_validation import FRValidationView
 from app.domains.ck_fin_res.schemas.requests import FilterSpec
 from app.domains.ck_fin_res.settings import CkFinResSettings
@@ -26,10 +27,43 @@ logger = logging.getLogger("audit_workstation.domains.ck_fin_res.repository")
 # FRValidationView; whitelist защищает от инъекций в имена колонок/ORDER BY.
 ALLOWED_COLUMNS: set[str] = set(FRValidationView.model_fields.keys())
 
+# Булевы колонки представления (по аннотациям FRValidationView): MIN/MAX для
+# boolean в PG/GP не определены — сортировка оборачивает их в CASE.
+_BOOL_COLUMNS: set[str] = {
+    name
+    for name, f in FRValidationView.model_fields.items()
+    if f.annotation is bool or bool in get_args(f.annotation)
+}
+
 # Разрешённые приведения типов для range-фильтра. Значение cast приходит от
 # клиента, поэтому подставляется в SQL ТОЛЬКО через этот allowlist (никакой
 # интерполяции сырого cast). PG 9.4 / GP 6.x понимают DATE/NUMERIC.
 _CAST_SQL: dict[str, str] = {"date": "DATE", "numeric": "NUMERIC"}
+
+
+def _escape_like(value: str) -> str:
+    """Экранирует спецсимволы шаблона LIKE/ILIKE (\\, %, _).
+
+    Иначе пользовательская фраза «100%» матчила бы и «1000 рублей»
+    (дефолтный escape-символ LIKE — обратный слэш)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _coerce_range_bound(cast: str | None, value):
+    """Готовит границу range-фильтра к бинду.
+
+    Для cast=date нужен объект date: temporal-кодеки asyncpg бинарные, строка
+    в DATE-параметре роняет запрос DataError (numeric-кодек, напротив, сам
+    приводит str → Decimal — числа не трогаем). Пустое или некорректное
+    значение → None (граница пропускается, как и прочий мусор в фильтрах)."""
+    if value is None or str(value).strip() == "":
+        return None
+    if cast == "date":
+        try:
+            return date.fromisoformat(str(value).strip()[:10])
+        except ValueError:
+            return None
+    return value
 
 # Поля для INSERT (без системных полей id, created_at, updated_at и т.д.)
 _DATE_FIELDS = {"dt_sz"}
@@ -134,13 +168,25 @@ GROUP_FIELDS = tuple(
     )
 )
 
-# Фильтры по суммам/количествам применяются к ИТОГУ группы (HAVING по SUM).
-AGG_FILTER_EXPR = {
-    "metric_amount_rubles": "SUM(metric_amount_rubles)",
+# Выражения виртуальных агрегатных колонок — ЕДИНЫЙ источник для фильтра
+# (HAVING) и сортировки: раздельные словари уже начинали дрейфовать, а
+# «забытый» ключ ведёт себя по-разному (фильтр молча пропущен vs 500 в сорт).
+_AGG_EXPR = {
     "total_amount": "SUM(metric_amount_rubles)",
-    "metric_element_counts": "SUM(metric_element_counts)",
     "total_counts": "SUM(metric_element_counts)",
     "total_npl_amount": "SUM(npl_amount_rubles)",
+    "tb_count": "COUNT(*)",
+    "updated_at": "MAX(updated_at)",
+}
+
+# Фильтры по суммам/количествам применяются к ИТОГУ группы (HAVING по SUM);
+# физические имена колонок сумм — алиасы соответствующих агрегатов.
+AGG_FILTER_EXPR = {
+    "metric_amount_rubles": _AGG_EXPR["total_amount"],
+    "total_amount": _AGG_EXPR["total_amount"],
+    "metric_element_counts": _AGG_EXPR["total_counts"],
+    "total_counts": _AGG_EXPR["total_counts"],
+    "total_npl_amount": _AGG_EXPR["total_npl_amount"],
 }
 
 # Membership-фильтры: «группа попадает в выдачу, если содержит такую строку»
@@ -155,13 +201,7 @@ MEMBERSHIP_FILTER_COLS = {
 }
 
 # Сортировка по виртуальным агрегатным колонкам.
-AGG_SORT_EXPR = {
-    "total_amount": "SUM(metric_amount_rubles)",
-    "total_counts": "SUM(metric_element_counts)",
-    "total_npl_amount": "SUM(npl_amount_rubles)",
-    "tb_count": "COUNT(*)",
-    "updated_at": "MAX(updated_at)",
-}
+AGG_SORT_EXPR = _AGG_EXPR
 
 
 def _norm_key_value(col: str, value):
@@ -171,13 +211,28 @@ def _norm_key_value(col: str, value):
     return "" if value is None else value
 
 
+# Денежные per-ТБ поля: сравниваются с точностью до копейки независимо от
+# входного типа (Decimal из БД vs str/float из запроса).
+_MONEY_FIELDS = {"metric_amount_rubles", "npl_amount_rubles"}
+
+
 def _norm_cmp(field: str, value):
-    """Значение поля в каноничном виде для сравнения «изменилась ли строка»."""
+    """Значение поля в каноничном виде для сравнения «изменилась ли строка».
+
+    Timestamp-поля сравниваются с точностью до ДНЯ: форма редактирует их
+    полями «только дата», и время из ETL (например 15:30) не должно делать
+    строку «изменённой» — иначе любое сохранение перевыпускало бы всю
+    группу, усекая время и стирая ETL-происхождение (etl_loading_id,
+    row_hash)."""
     v = _coerce(field, value)
+    if field in _MONEY_FIELDS:
+        return Decimal(str(v)).quantize(Decimal("0.01"))
+    if field == "metric_element_counts":
+        return int(v or 0)
+    if field in _TIMESTAMP_FIELDS and isinstance(v, datetime):
+        return v.date()
     if isinstance(v, Decimal):
         return v.quantize(Decimal("0.01"))
-    if field == "metric_amount_rubles" and v is not None:
-        return Decimal(str(v)).quantize(Decimal("0.01"))
     return v
 
 
@@ -202,14 +257,17 @@ class FRValidationRepository(BaseRepository):
         Для каждой пары ``(колонка, spec)``:
         - колонка не из ALLOWED_COLUMNS — пропускается (защита от инъекции);
         - ``contains`` — ``CAST(col AS TEXT) ILIKE ${i}`` с param ``%value%``
-          (пустой/``""`` value → пропуск);
+          (спецсимволы LIKE экранируются; пустой/``""`` value → пропуск);
         - ``eq`` — ``CAST(col AS TEXT) = ${i}`` с param value (пустой value →
           пропуск);
-        - ``in`` — ``col IN (...)`` по сырым values; пустой список values →
-          условие ``1=0`` («совпадений нет»);
+        - ``in`` — ``CAST(col AS TEXT) IN (...)`` по values (текстовое
+          равенство, как множественный ``eq``: сырой ``col IN`` ронял бы
+          бинарные кодеки asyncpg на нетекстовых колонках); пустой список
+          values → условие ``1=0`` («совпадений нет»);
         - ``range`` — ``CAST(col AS <T>) >= ${i}`` и/или ``<= ${j}``, где T —
-          из cast-allowlist ({date→DATE, numeric→NUMERIC}); без корректного cast
-          или без границ — пропуск;
+          из cast-allowlist ({date→DATE, numeric→NUMERIC}); границы cast=date
+          приводятся к date-объектам (_coerce_range_bound); без корректного
+          cast или без границ — пропуск;
         - ``contains_any`` — ``(CAST(col AS TEXT) ILIKE ${i} OR ...)`` по каждой
           непустой фразе из values; пустой/пробельный список → пропуск (в
           отличие от ``in``, не ``1=0``).
@@ -230,7 +288,7 @@ class FRValidationRepository(BaseRepository):
                 if value is None or str(value).strip() == "":
                     continue
                 conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-                params.append(f"%{value}%")
+                params.append(f"%{_escape_like(str(value))}%")
                 idx += 1
             elif op == "eq":
                 value = spec.value
@@ -247,20 +305,20 @@ class FRValidationRepository(BaseRepository):
                 placeholders = ", ".join(
                     f"${idx + i}" for i in range(len(values))
                 )
-                conditions.append(f"{column} IN ({placeholders})")
+                conditions.append(f"CAST({column} AS TEXT) IN ({placeholders})")
                 params.extend(values)
                 idx += len(values)
             elif op == "range":
                 cast_sql = _CAST_SQL.get(spec.cast or "")
                 if cast_sql is None:
                     continue
-                frm = spec.from_
-                to = spec.to
-                if frm is not None and str(frm).strip() != "":
+                frm = _coerce_range_bound(spec.cast, spec.from_)
+                to = _coerce_range_bound(spec.cast, spec.to)
+                if frm is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) >= ${idx}")
                     params.append(frm)
                     idx += 1
-                if to is not None and str(to).strip() != "":
+                if to is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
                     params.append(to)
                     idx += 1
@@ -271,7 +329,7 @@ class FRValidationRepository(BaseRepository):
                 ors = []
                 for v in values:
                     ors.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-                    params.append(f"%{v}%")
+                    params.append(f"%{_escape_like(str(v))}%")
                     idx += 1
                 conditions.append("(" + " OR ".join(ors) + ")")
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -313,9 +371,10 @@ class FRValidationRepository(BaseRepository):
         ELSE 0 END) > 0 — группа проходит, если ХОТЯ БЫ ОДНА её строка
         удовлетворяет условию; итоги группы при этом считаются по ВСЕМ
         строкам (в отличие от row-level WHERE, которое отфильтровало бы
-        строки до GROUP BY и исказило SUM/COUNT). ``contains_any`` сознательно
-        не поддерживается — чекбокс-фильтр (единственный источник membership
-        с фронта) шлёт только ``in``."""
+        строки до GROUP BY и исказило SUM/COUNT). ``range``/``contains_any``
+        для membership-колонок не имеют смысла (фронт шлёт только ``in``) —
+        отклоняются явно, а не игнорируются молча: молчаливый пропуск
+        возвращал бы ВСЕ группы, как будто фильтра не было."""
         conditions: list[str] = []
         params: list = []
         idx = start_idx
@@ -344,8 +403,12 @@ class FRValidationRepository(BaseRepository):
                 if value is None or str(value).strip() == "":
                     continue
                 conditions.append(f"SUM(CASE WHEN CAST({col} AS TEXT) ILIKE ${idx}{suffix} THEN 1 ELSE 0 END) > 0")
-                params.append(f"%{value}%")
+                params.append(f"%{_escape_like(str(value))}%")
                 idx += 1
+            else:
+                raise FRValidationError(
+                    f"Операция фильтра «{op}» не поддерживается для колонки {column}",
+                )
         return conditions, params, idx
 
     @classmethod
@@ -357,9 +420,9 @@ class FRValidationRepository(BaseRepository):
     ) -> tuple[str, list, int]:
         """HAVING по агрегатам группы (SUM-фильтры) и по членству (группа
         содержит значение, например ТБ) — обе категории делят одну сквозную
-        нумерацию параметров. Семантика op агрегатной части — как в
-        _build_filter_where (включая contains_any), но выражение — SUM(...)
-        вместо колонки."""
+        нумерацию параметров. Семантика op агрегатной части — полный паритет
+        с _build_filter_where (contains/eq/in/range/contains_any), но
+        выражение — SUM(...) вместо колонки."""
         conditions: list[str] = []
         params: list = []
         idx = start_idx
@@ -371,7 +434,7 @@ class FRValidationRepository(BaseRepository):
                 if value is None or str(value).strip() == "":
                     continue
                 conditions.append(f"CAST({expr} AS TEXT) ILIKE ${idx}")
-                params.append(f"%{value}%")
+                params.append(f"%{_escape_like(str(value))}%")
                 idx += 1
             elif op == "eq":
                 value = spec.value
@@ -380,7 +443,19 @@ class FRValidationRepository(BaseRepository):
                 conditions.append(f"CAST({expr} AS TEXT) = ${idx}")
                 params.append(value)
                 idx += 1
+            elif op == "in":
+                values = spec.values or []
+                if not values:
+                    conditions.append("1=0")
+                    continue
+                placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
+                conditions.append(f"CAST({expr} AS TEXT) IN ({placeholders})")
+                params.extend(values)
+                idx += len(values)
             elif op == "range":
+                # Агрегатные колонки числовые по построению (SUM/COUNT),
+                # поэтому cast клиента сознательно игнорируется — всегда
+                # NUMERIC (CAST границы, а не выражения: агрегат уже numeric).
                 frm, to = spec.from_, spec.to
                 if frm is not None and str(frm).strip() != "":
                     conditions.append(f"{expr} >= CAST(${idx} AS NUMERIC)")
@@ -397,7 +472,7 @@ class FRValidationRepository(BaseRepository):
                 ors = []
                 for v in values:
                     ors.append(f"CAST({expr} AS TEXT) ILIKE ${idx}")
-                    params.append(f"%{v}%")
+                    params.append(f"%{_escape_like(str(v))}%")
                     idx += 1
                 conditions.append("(" + " OR ".join(ors) + ")")
         member_conditions, member_params, idx = cls._build_membership_having(membership_filters, idx)
@@ -420,7 +495,8 @@ class FRValidationRepository(BaseRepository):
         A) страница групп: GROUP BY ключ + SUM/COUNT, HAVING для фильтров по
            итогам и по членству (например, «содержит такой ТБ» — не режет
            строки группы, см. _split_filters), ORDER BY по агрегатам/MIN(col);
-           total — COUNT по подзапросу;
+           total — COUNT(*) OVER () в том же запросе (агрегация не считается
+           дважды); пустая страница при offset > 0 — фолбэк-COUNT подзапросом;
         B) добор физических строк групп страницы одним row-value IN; сборка
            групп в Python: common — из строки с max(updated_at, id),
            tb_breakdown — по возрастанию ТБ, divergent_fields — групповые поля,
@@ -445,33 +521,45 @@ class FRValidationRepository(BaseRepository):
                 order_parts.append(f"{_GROUP_KEY_EXPR[column]} {dir_sql}")
             elif column in ALLOWED_COLUMNS:
                 # Групповые поля равны внутри группы; MIN даёт детерминизм
-                # и при ETL-рассинхроне.
-                order_parts.append(f"MIN({column}) {dir_sql}")
+                # и при ETL-рассинхроне. Для boolean MIN в PG/GP не определён —
+                # оборачиваем в CASE (порядок false < true, как у нативного bool).
+                if column in _BOOL_COLUMNS:
+                    order_parts.append(
+                        f"MIN(CASE WHEN {column} THEN 1 ELSE 0 END) {dir_sql}"
+                    )
+                else:
+                    order_parts.append(f"MIN({column}) {dir_sql}")
             else:
                 raise ValueError(f"Недопустимая колонка сортировки: {column}")
         # Стабильный хвост — ключ группировки (детерминированная пагинация).
         order_parts.extend(f"{_GROUP_KEY_EXPR[c]} ASC" for c in GROUP_KEY_COLS)
         order_by = "ORDER BY " + ", ".join(order_parts)
 
-        total = await self.conn.fetchval(
-            f"SELECT COUNT(*) FROM ("
-            f"SELECT 1 FROM {self.view}{where} GROUP BY {group_by}{having}"
-            f") AS grouped_total",
-            *params,
-        )
-
         page_rows = await self.conn.fetch(
             f"SELECT {key_select}, "
             f"SUM(metric_amount_rubles) AS total_amount, "
             f"SUM(npl_amount_rubles) AS total_npl_amount, "
             f"SUM(metric_element_counts) AS total_counts, "
-            f"COUNT(*) AS tb_count, MAX(updated_at) AS max_updated_at "
+            f"COUNT(*) AS tb_count, MAX(updated_at) AS max_updated_at, "
+            f"COUNT(*) OVER () AS grand_total "
             f"FROM {self.view}{where} GROUP BY {group_by}{having} "
             f"{order_by} LIMIT ${idx} OFFSET ${idx + 1}",
             *params, limit, offset,
         )
+        if page_rows:
+            total = int(page_rows[0]["grand_total"] or 0)
+        elif offset:
+            # Страница за пределами выборки: окно пустое, итог — отдельным COUNT.
+            total = int(await self.conn.fetchval(
+                f"SELECT COUNT(*) FROM ("
+                f"SELECT 1 FROM {self.view}{where} GROUP BY {group_by}{having}"
+                f") AS grouped_total",
+                *params,
+            ) or 0)
+        else:
+            total = 0
         if not page_rows:
-            return [], int(total or 0)
+            return [], total
 
         # Фаза B: добор строк групп страницы (ключи уже нормализованы фазой A).
         key_tuple_sql = "(" + ", ".join(_GROUP_KEY_EXPR[c] for c in GROUP_KEY_COLS) + ")"
@@ -536,7 +624,7 @@ class FRValidationRepository(BaseRepository):
                 "updated_at": g["max_updated_at"],
                 "divergent_fields": divergent,
             })
-        return items, int(total or 0)
+        return items, total
 
     # ------------------------------------------------------------------
     # ГРУППОВОЕ СОХРАНЕНИЕ (дифференциальное) И УДАЛЕНИЕ
@@ -561,19 +649,17 @@ class FRValidationRepository(BaseRepository):
 
     @staticmethod
     def _row_unchanged(row: dict, common: dict, want: dict) -> bool:
-        """Строка не требует новой версии: групповые поля и per-ТБ значения совпали."""
+        """Строка не требует новой версии: групповые поля и per-ТБ значения совпали.
+
+        Per-ТБ поля сверяются циклом по PER_TB_FIELDS — новое поле, добавленное
+        в кортеж, автоматически попадает и во вставку, и в сравнение (ручные
+        if-блоки молча теряли бы правки нового поля)."""
         for f in GROUP_FIELDS:
             if _norm_cmp(f, row.get(f)) != _norm_cmp(f, common.get(f)):
                 return False
-        if _norm_cmp("metric_amount_rubles", row.get("metric_amount_rubles")) != \
-                _norm_cmp("metric_amount_rubles", want.get("metric_amount_rubles")):
-            return False
-        if _norm_cmp("npl_amount_rubles", row.get("npl_amount_rubles")) != _norm_cmp(
-            "npl_amount_rubles", want.get("npl_amount_rubles")
-        ):
-            return False
-        if int(row.get("metric_element_counts") or 0) != int(want.get("metric_element_counts") or 0):
-            return False
+        for f in PER_TB_FIELDS:
+            if _norm_cmp(f, row.get(f)) != _norm_cmp(f, want.get(f)):
+                return False
         return True
 
     def _build_version_values(
@@ -620,6 +706,8 @@ class FRValidationRepository(BaseRepository):
         строки; удалённые из развертки ТБ деактивируются; новые — вставляются.
         Несовпадение набора актуальных строк с ожидаемым — FRGroupConflictError
         (409): группу изменили параллельно, фронт должен перечитать данные.
+        Смена ключевых полей на занятый ключ — тоже 409 (иначе две группы
+        молча слились бы в одну с задвоенными суммами и ТБ).
         """
         async with self.conn.transaction():
             current_rows = await self._load_group_rows(group_key)
@@ -637,10 +725,42 @@ class FRValidationRepository(BaseRepository):
                     "Запись изменена другим пользователем — обновите данные",
                 )
 
-            by_tb = {r["neg_finder_tb_id"]: r for r in current_rows}
+            # Ключевые поля могли быть изменены в редактировании: новые версии
+            # строк вставляются со значениями из common, т.е. под НОВЫМ ключом.
+            # Если он занят другой активной группой — сохранение слило бы обе
+            # группы в одну; проверяем занятость явно.
+            new_key = {c: common.get(c) for c in GROUP_KEY_COLS}
+            key_changed = (
+                tuple(_norm_key_value(c, new_key[c]) for c in GROUP_KEY_COLS)
+                != tuple(_norm_key_value(c, group_key.get(c)) for c in GROUP_KEY_COLS)
+            )
+            if key_changed and await self._load_group_rows(new_key):
+                raise FRGroupConflictError(
+                    "Запись с таким пунктом и метрикой уже существует — "
+                    "изменение ключевых полей отменено",
+                )
+
+            # ETL мог оставить в группе несколько активных строк одного ТБ
+            # (UNIQUE на уровне БД невозможен: GP требует DISTRIBUTED BY ⊆
+            # UNIQUE). Актуальной считаем новейшую (updated_at/created_at, id),
+            # осиротевшие дубли деактивируем этим же сохранением — иначе они
+            # навсегда оставались бы в группе с устаревшими значениями.
+            by_tb: dict = {}
+            stale_dup_ids: list[int] = []
+            for row in sorted(
+                current_rows,
+                key=lambda r: (
+                    r.get("updated_at") or r.get("created_at") or datetime.min,
+                    r.get("id") or 0,
+                ),
+            ):
+                prev = by_tb.get(row["neg_finder_tb_id"])
+                if prev is not None:
+                    stale_dup_ids.append(prev["id"])
+                by_tb[row["neg_finder_tb_id"]] = row
             desired = {b["neg_finder_tb_id"]: b for b in breakdown}
 
-            to_deactivate: list[int] = []
+            to_deactivate: list[int] = list(stale_dup_ids)
             to_insert: list[list] = []
             skipped = 0
 
@@ -679,6 +799,16 @@ class FRValidationRepository(BaseRepository):
                     to_insert,
                 )
 
+        # Пост-проверка гонки создания: предварительная проверка занятости
+        # ключа и INSERT — разные шаги без блокировки (advisory-locks в GP
+        # нет, UNIQUE несовместим с DISTRIBUTED BY), поэтому параллельные
+        # сохранения могли закоммитить дубли (ключ, ТБ). Проверяем ПОСЛЕ
+        # коммита — внутри транзакции чужие незакоммиченные строки не видны.
+        if to_insert:
+            await self._resolve_duplicate_tb_rows(
+                new_key if key_changed else group_key, username,
+            )
+
         logger.info(
             "Групповое сохранение ЦКФР %s: деактивировано=%s, вставлено=%s, "
             "нетронуто=%s, пользователь %s",
@@ -689,6 +819,43 @@ class FRValidationRepository(BaseRepository):
             "inserted": len(to_insert),
             "skipped": skipped,
         }
+
+    async def _resolve_duplicate_tb_rows(self, group_key: dict, username: str) -> None:
+        """Детерминированно разрешает дубли активных строк (ключ, ТБ) после
+        коммита: выживает строка с минимальным id (первая вставленная),
+        остальные деактивируются, вызвавший получает 409. Оба участника гонки
+        приходят к одному итогу — по одной активной строке на ТБ; в худшем
+        переплетении 409 получат оба, но данные останутся согласованными."""
+        where, params = self._key_where(group_key)
+        dup_rows = await self.conn.fetch(
+            f"SELECT neg_finder_tb_id, MIN(id) AS keep_id FROM {self.table} "
+            f"WHERE {where} AND is_actual = true "
+            f"GROUP BY neg_finder_tb_id HAVING COUNT(*) > 1",
+            *params,
+        )
+        if not dup_rows:
+            return
+        user_idx = len(params) + 1
+        clauses: list[str] = []
+        extra: list = [username]
+        for i, dup in enumerate(dup_rows):
+            base = user_idx + 1 + i * 2
+            clauses.append(f"(neg_finder_tb_id = ${base} AND id <> ${base + 1})")
+            extra.extend([dup["neg_finder_tb_id"], dup["keep_id"]])
+        await self.conn.execute(
+            f"UPDATE {self.table} "
+            f"SET updated_at = now(), is_actual = false, updated_by = ${user_idx} "
+            f"WHERE {where} AND is_actual = true AND ({' OR '.join(clauses)})",
+            *params, *extra,
+        )
+        logger.warning(
+            "Групповое сохранение ЦКФР %s: обнаружены параллельные дубли по ТБ %s, "
+            "оставлены первые вставленные строки",
+            group_key, [dup["neg_finder_tb_id"] for dup in dup_rows],
+        )
+        raise FRGroupConflictError(
+            "Запись создана параллельно другим пользователем — обновите данные",
+        )
 
     async def group_delete(
         self, *, group_key: dict, expected_row_ids: list[int], username: str,

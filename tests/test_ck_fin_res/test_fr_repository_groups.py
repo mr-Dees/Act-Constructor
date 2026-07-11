@@ -1,12 +1,13 @@
 """Тесты группового поиска ЦКФР (SQL строится на мок-соединении)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.core import settings_registry
+from app.domains.ck_fin_res.exceptions import FRValidationError
 from app.domains.ck_fin_res.repositories.fr_validation_repository import (
     FRValidationRepository,
 )
@@ -59,6 +60,7 @@ async def test_search_groups_two_phases_and_assembly(mock_conn):
         "total_amount": Decimal("1195000.00"), "total_counts": 11,
         "total_npl_amount": Decimal("0.00"),
         "tb_count": 2, "max_updated_at": datetime(2026, 7, 1, 12, 0, 0),
+        "grand_total": 1,
     }]
     phase_b = [
         _row(101, "7", "980000.00", 8),
@@ -204,6 +206,7 @@ async def test_group_payload_contains_npl(mock_conn):
         "total_amount": Decimal("980000.00"), "total_counts": 8,
         "total_npl_amount": Decimal("120000.00"),
         "tb_count": 1, "max_updated_at": datetime(2026, 7, 1, 12, 0, 0),
+        "grand_total": 1,
     }]
     phase_b = [
         _row(101, "7", "980000.00", 8, metric="602", npl_amount_rubles=Decimal("120000.00")),
@@ -233,3 +236,118 @@ async def test_sort_and_filter_by_total_npl(mock_conn):
     assert "ORDER BY SUM(npl_amount_rubles) DESC" in sql_a
     assert "HAVING" in sql_a
     assert "SUM(npl_amount_rubles) >= CAST($1 AS NUMERIC)" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_sort_by_boolean_column_wraps_in_case(mock_conn):
+    """MIN(boolean) в PG/GP не определён — булевы колонки сортируются через CASE."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(filters=None, sort=[("real_loss", "desc")], limit=10, offset=0)
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "MIN(CASE WHEN real_loss THEN 1 ELSE 0 END) DESC" in sql_a
+    assert "MIN(real_loss)" not in sql_a
+
+
+@pytest.mark.asyncio
+async def test_date_range_bounds_bound_as_date_objects(mock_conn):
+    """Границы range cast=date коэрсятся в date-объекты: строка в DATE-параметре
+    роняет бинарный temporal-кодек asyncpg (DataError → 500)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(
+        filters={"rev_start_dt": FilterSpec(op="range", from_="2026-01-01", to="2026-02-15", cast="date")},
+        sort=None, limit=50, offset=0,
+    )
+    args = mock_conn.fetch.call_args_list[0].args
+    assert date(2026, 1, 1) in args and date(2026, 2, 15) in args
+
+
+@pytest.mark.asyncio
+async def test_date_range_invalid_bound_skipped(mock_conn):
+    """Некорректная date-граница пропускается (как прочий мусор в фильтрах), а не 500."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(
+        filters={"rev_start_dt": FilterSpec(op="range", from_="мусор", to="2026-02-15", cast="date")},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert ">=" not in sql_a
+    assert "CAST(rev_start_dt AS DATE) <= $1" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_in_filter_casts_column_to_text(mock_conn):
+    """op=in кастит колонку в TEXT: сырой col IN ронял бы бинарные кодеки
+    asyncpg на нетекстовых колонках (id, даты, булевы)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(
+        filters={"id": FilterSpec(op="in", values=["36", "37"])},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "CAST(id AS TEXT) IN ($1, $2)" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_having_in_filter_on_aggregate(mock_conn):
+    """op=in для агрегатной колонки — паритет операторов (раньше молча игнорировался)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(
+        filters={"total_npl_amount": FilterSpec(op="in", values=["120000.00"])},
+        sort=None, limit=50, offset=0,
+    )
+    sql_a = mock_conn.fetch.call_args_list[0].args[0]
+    assert "HAVING" in sql_a
+    assert "CAST(SUM(npl_amount_rubles) AS TEXT) IN ($1)" in sql_a
+
+
+@pytest.mark.asyncio
+async def test_membership_unsupported_op_rejected(mock_conn):
+    """range для membership-колонки бессмыслен — отклоняется явно, а не
+    игнорируется молча (молчание возвращало бы ВСЕ группы без фильтра)."""
+    repo = FRValidationRepository(mock_conn)
+    with pytest.raises(FRValidationError):
+        await repo.search_groups(
+            filters={"tb_breakdown": FilterSpec(op="range", from_="1", cast="numeric")},
+            sort=None, limit=50, offset=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_contains_escapes_like_metachars(mock_conn):
+    """% и _ в поисковой фразе — литералы, а не джокеры LIKE."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], []]
+    await repo.search_groups(
+        filters={"ck_comment": FilterSpec(op="contains", value="100%_")},
+        sort=None, limit=50, offset=0,
+    )
+    args = mock_conn.fetch.call_args_list[0].args
+    assert "%100\\%\\_%" in args
+
+
+@pytest.mark.asyncio
+async def test_total_from_window_with_offset_fallback(mock_conn):
+    """total — COUNT(*) OVER () из page-запроса; пустая страница при offset>0 —
+    фолбэк отдельным COUNT (страница за пределами выборки)."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[]]
+    mock_conn.fetchval.return_value = 7
+    items, total = await repo.search_groups(filters=None, sort=None, limit=50, offset=100)
+    assert items == [] and total == 7
+    assert "COUNT(*) OVER () AS grand_total" in mock_conn.fetch.call_args_list[0].args[0]
+    assert mock_conn.fetchval.called
+
+
+@pytest.mark.asyncio
+async def test_empty_result_at_offset_zero_skips_count_query(mock_conn):
+    """Пустая первая страница: total=0 без дополнительного COUNT-запроса."""
+    repo = FRValidationRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[]]
+    items, total = await repo.search_groups(filters=None, sort=None, limit=50, offset=0)
+    assert items == [] and total == 0
+    mock_conn.fetchval.assert_not_called()

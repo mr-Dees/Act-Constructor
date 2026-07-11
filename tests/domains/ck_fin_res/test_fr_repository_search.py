@@ -6,6 +6,8 @@ whitelist-guard колонок. Сортировка — забота ``search_g
 в test_fr_repository_groups.py.
 """
 
+from datetime import date
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -115,12 +117,14 @@ class TestBuildFilterWhere:
         )
         assert where == ""
 
-    def test_in_builds_in_clause_by_raw_values(self, repo):
-        """op=in: col IN ($1, $2) по сырым values (без CAST в TEXT)."""
+    def test_in_builds_text_membership(self, repo):
+        """op=in: CAST(col AS TEXT) IN ($1, $2) — текстовое равенство, как
+        множественный eq (сырой col IN ронял бы бинарные кодеки asyncpg
+        на нетекстовых колонках)."""
         where, params, idx = repo._build_filter_where(
             {"neg_finder_tb_id": FilterSpec(op="in", values=["1", "14"])}
         )
-        assert "neg_finder_tb_id IN ($1, $2)" in where
+        assert "CAST(neg_finder_tb_id AS TEXT) IN ($1, $2)" in where
         assert params == ["1", "14"]
 
     def test_in_empty_values_yields_no_match(self, repo):
@@ -132,7 +136,9 @@ class TestBuildFilterWhere:
         assert params == []
 
     def test_range_date_cast_both_bounds(self, repo):
-        """op=range cast=date: CAST(col AS DATE) >= .. AND <= .. по границам from/to."""
+        """op=range cast=date: CAST(col AS DATE) >= .. AND <= ..; границы
+        биндятся date-объектами (temporal-кодеки asyncpg бинарные, строка
+        роняла бы запрос DataError)."""
         where, params, idx = repo._build_filter_where({
             "dt_sz": FilterSpec(
                 op="range", cast="date",
@@ -141,7 +147,7 @@ class TestBuildFilterWhere:
         })
         assert "CAST(dt_sz AS DATE) >= $1" in where
         assert "CAST(dt_sz AS DATE) <= $2" in where
-        assert params == ["2025-01-01", "2025-06-30"]
+        assert params == [date(2025, 1, 1), date(2025, 6, 30)]
 
     def test_range_numeric_cast(self, repo):
         """op=range cast=numeric: колонка кастуется в NUMERIC."""
@@ -160,7 +166,7 @@ class TestBuildFilterWhere:
         )
         assert "CAST(dt_sz AS DATE) >= $1" in where
         assert ">= $1" in where and "<= " not in where
-        assert params == ["2025-01-01"]
+        assert params == [date(2025, 1, 1)]
 
     def test_range_without_cast_skipped(self, repo):
         """op=range без cast → фильтр пропускается (нет allowlist-типа)."""

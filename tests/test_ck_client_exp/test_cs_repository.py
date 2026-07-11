@@ -1,5 +1,7 @@
 """Тесты для CSValidationRepository."""
 
+from datetime import date
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +9,7 @@ from app.core import settings_registry
 from app.domains.ck_client_exp.repositories.cs_validation_repository import (
     CSValidationRepository,
 )
+from app.domains.ck_client_exp.schemas.requests import FilterSpec
 from app.domains.ck_client_exp.settings import CkClientExpSettings
 
 
@@ -124,6 +127,57 @@ class TestSoftDelete:
         result = await repo.soft_delete(record_id=999, username="testuser")
 
         assert result is False
+
+
+# -------------------------------------------------------------------------
+# _build_filter_where (типизированные фильтры)
+# -------------------------------------------------------------------------
+
+
+class TestBuildFilterWhere:
+
+    def test_contains_escapes_like_metachars(self, repo):
+        """% и _ в поисковой фразе — литералы, а не джокеры LIKE."""
+        where, params, _ = repo._build_filter_where(
+            {"metric_name": FilterSpec(op="contains", value="100%_")}
+        )
+        assert "CAST(metric_name AS TEXT) ILIKE $1" in where
+        assert params == ["%100\\%\\_%"]
+
+    def test_in_casts_column_to_text(self, repo):
+        """op=in кастит колонку в TEXT: сырой col IN ронял бы бинарные кодеки
+        asyncpg на нетекстовых колонках (id, даты, булевы)."""
+        where, params, _ = repo._build_filter_where(
+            {"id": FilterSpec(op="in", values=["36", "37"])}
+        )
+        assert "CAST(id AS TEXT) IN ($1, $2)" in where
+        assert params == ["36", "37"]
+
+    def test_date_range_bounds_coerced_to_date_objects(self, repo):
+        """Границы range cast=date коэрсятся в date-объекты: строка в
+        DATE-параметре роняет бинарный temporal-кодек asyncpg (DataError)."""
+        where, params, _ = repo._build_filter_where(
+            {"dt_sz": FilterSpec(op="range", from_="2026-01-01", to="2026-02-15", cast="date")}
+        )
+        assert "CAST(dt_sz AS DATE) >= $1" in where
+        assert "CAST(dt_sz AS DATE) <= $2" in where
+        assert params == [date(2026, 1, 1), date(2026, 2, 15)]
+
+    def test_date_range_invalid_bound_skipped(self, repo):
+        """Некорректная date-граница пропускается (как прочий мусор), а не 500."""
+        where, params, _ = repo._build_filter_where(
+            {"dt_sz": FilterSpec(op="range", from_="мусор", to="2026-02-15", cast="date")}
+        )
+        assert ">=" not in where
+        assert params == [date(2026, 2, 15)]
+
+    def test_numeric_range_bounds_stay_raw(self, repo):
+        """numeric-границы не трогаем: numeric-кодек asyncpg сам приводит str → Decimal."""
+        where, params, _ = repo._build_filter_where(
+            {"metric_amount_rubles": FilterSpec(op="range", from_="1000", cast="numeric")}
+        )
+        assert "CAST(metric_amount_rubles AS NUMERIC) >= $1" in where
+        assert params == ["1000"]
 
 
 # -------------------------------------------------------------------------

@@ -27,6 +27,31 @@ ALLOWED_COLUMNS: set[str] = set(CSValidationView.model_fields.keys())
 # allowlist — сырое значение cast НЕ интерполируется в SQL напрямую.
 _CAST_SQL = {"date": "DATE", "numeric": "NUMERIC"}
 
+
+def _escape_like(value: str) -> str:
+    """Экранирует спецсимволы шаблона LIKE/ILIKE (\\, %, _).
+
+    Иначе пользовательская фраза «100%» матчила бы и «1000 рублей»
+    (дефолтный escape-символ LIKE — обратный слэш)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _coerce_range_bound(cast: str | None, value):
+    """Готовит границу range-фильтра к бинду.
+
+    Для cast=date нужен объект date: temporal-кодеки asyncpg бинарные, строка
+    в DATE-параметре роняет запрос DataError (numeric-кодек, напротив, сам
+    приводит str → Decimal — числа не трогаем). Пустое или некорректное
+    значение → None (граница пропускается, как и прочий мусор в фильтрах)."""
+    if value is None or str(value).strip() == "":
+        return None
+    if cast == "date":
+        try:
+            return date.fromisoformat(str(value).strip()[:10])
+        except ValueError:
+            return None
+    return value
+
 _DATE_FIELDS = {"dt_sz"}
 _NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id", "reestr_metric_id"}
 _NUMERIC_DEFAULTS = {
@@ -97,15 +122,19 @@ class CSValidationRepository(BaseRepository):
         bind-параметрами, ``cast`` валидируется по allowlist (никакой
         интерполяции сырого cast). Семантика по ``op`` — канон СЫРОЕ значение:
 
-        - ``contains``: ``CAST(col AS TEXT) ILIKE $i`` c параметром ``%value%``;
-          пустой ``value`` → фильтр пропускается;
+        - ``contains``: ``CAST(col AS TEXT) ILIKE $i`` c параметром ``%value%``
+          (спецсимволы LIKE экранируются); пустой ``value`` → фильтр
+          пропускается;
         - ``eq``: ``CAST(col AS TEXT) = $i`` c параметром ``value``; пустой
           ``value`` → фильтр пропускается;
-        - ``in``: ``col IN ($i, ...)`` по сырым ``values``; пустой список →
+        - ``in``: ``CAST(col AS TEXT) IN ($i, ...)`` по ``values`` (текстовое
+          равенство, как множественный ``eq``: сырой ``col IN`` ронял бы
+          бинарные кодеки asyncpg на нетекстовых колонках); пустой список →
           ``1=0`` («совпадений нет»);
         - ``range``: ``cast`` обязателен (date→DATE, numeric→NUMERIC), иначе
           фильтр пропускается; условия собираются по наличию границ
-          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``;
+          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``; границы
+          cast=date приводятся к date-объектам (_coerce_range_bound);
         - ``contains_any``: ``(CAST(col AS TEXT) ILIKE $i OR ...)`` по каждой
           непустой фразе из values; пустой/пробельный список → пропуск (в
           отличие от ``in``, не ``1=0``).
@@ -126,7 +155,7 @@ class CSValidationRepository(BaseRepository):
                 if value is None or str(value).strip() == "":
                     continue
                 conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-                params.append(f"%{value}%")
+                params.append(f"%{_escape_like(str(value))}%")
                 idx += 1
             elif op == "eq":
                 value = spec.value
@@ -141,19 +170,20 @@ class CSValidationRepository(BaseRepository):
                     conditions.append("1=0")
                     continue
                 placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
-                conditions.append(f"{column} IN ({placeholders})")
+                conditions.append(f"CAST({column} AS TEXT) IN ({placeholders})")
                 params.extend(values)
                 idx += len(values)
             elif op == "range":
                 cast_sql = _CAST_SQL.get(spec.cast) if spec.cast else None
                 if cast_sql is None:
                     continue
-                lo, hi = spec.from_, spec.to
-                if lo is not None and str(lo).strip() != "":
+                lo = _coerce_range_bound(spec.cast, spec.from_)
+                hi = _coerce_range_bound(spec.cast, spec.to)
+                if lo is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) >= ${idx}")
                     params.append(lo)
                     idx += 1
-                if hi is not None and str(hi).strip() != "":
+                if hi is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
                     params.append(hi)
                     idx += 1
@@ -164,7 +194,7 @@ class CSValidationRepository(BaseRepository):
                 ors = []
                 for v in values:
                     ors.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-                    params.append(f"%{v}%")
+                    params.append(f"%{_escape_like(str(v))}%")
                     idx += 1
                 conditions.append("(" + " OR ".join(ors) + ")")
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
