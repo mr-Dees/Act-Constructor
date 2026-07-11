@@ -72,13 +72,33 @@
     hyphens: auto;
 }
 
-/* B-22: line-height текстблока в превью — тот же токен, что и в редакторе
-   (--textblock-line-height), чтобы редактор и предпросмотр не разъезжались. */
-.preview-textblock-content {
-    line-height: var(--textblock-line-height, 1.75);
+/* Print-precise (Task C) — СУПЕРСЕДИТ B-22. Было: line-height текстблока в
+   превью = тот же токен, что у редактора (--textblock-line-height), ради
+   визуального паритета с поверхностью правки. Стало: превью — это лист,
+   который печатается, поэтому интервал мирит DOCX (Word «одинарный»,
+   app/domains/acts/formatters/docx/styles.py::Spacing.line_single), а не
+   редактор. Редактор (.textblock-editor, textblock-content.css) НЕ тронут —
+   там по-прежнему --textblock-line-height (1.75).
+   margin-bottom: 3pt — Normal-спейсинг DOCX (Spacing.after_pt=3) после
+   текстблока целиком; в _render_textblock он сохраняется только на
+   ПОСЛЕДНЕМ сегменте (см. правило ниже про обнуление между сегментами). */
+.preview-sheet .preview-textblock-content {
+    line-height: var(--preview-print-line-height, 1.15);
+    margin-bottom: 3pt;
     /* TB-1: дефолт выравнивания блока без явного text-align — «по ширине»
        (как в редакторе и теле акта); per-line text-align в content переопределяет. */
     text-align: justify;
+}
+
+/* Границы сегментов текстблока (бывшие Enter/<br>, formatter.py::
+   _render_textblock: paragraphs[:-1] обнуляет space_after) — БЕЗ зазора
+   между собой; 3pt достаётся только всему блоку целиком (margin-bottom
+   выше). Сброс margin у ЛЮБОГО прямого ребёнка (не только :last-child)
+   гасит и UA-отступ <p> — ALLOWED_TAGS допускает и div, и p
+   (static/js/shared/sanitize.js). */
+.preview-sheet .preview-textblock-content > * {
+    margin-top: 0;
+    margin-bottom: 0;
 }
 
 /* Первый абзац после заголовка */
