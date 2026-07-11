@@ -103,7 +103,15 @@ export class TableViewState {
     this._save();
   }
 
-  resetToDefault() { this._hidden = new Set(this._defaultHidden); this._widths = {}; this._save(); }
+  /** Полный сброс к дефолту: видимость, ширины И доменные extra-флаги —
+   * иначе сброшенный вид после перезагрузки молча возвращался бы к
+   * сохранённому extra-состоянию (например, режиму развертки ТБ). */
+  resetToDefault() {
+    this._hidden = new Set(this._defaultHidden);
+    this._widths = {};
+    this._extra = {};
+    this._save();
+  }
 }
 
 if (typeof window !== 'undefined') window.TableViewState = TableViewState;

@@ -30,6 +30,28 @@ function norm(s) {
   return String(s).toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Календарный ДЕНЬ значения в местном времени (мс локальной полуночи).
+ * Дата-only строка разбирается вручную: Date.parse('YYYY-MM-DD') трактует её
+ * как UTC, а 'YYYY-MM-DDTHH:MM' — как местное время; смешение ронял бы строки
+ * ровно на границе диапазона. Зеркало серверного CAST(col AS DATE) —
+ * сравнение диапазона дат идёт по дням, время внутри дня не участвует.
+ * @returns {number} мс местной полуночи дня или NaN
+ */
+function dayLocal(v) {
+  const s = String(v).trim();
+  if (DATE_ONLY_RE.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d).getTime();
+  }
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return NaN;
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 /** Активен ли спек (может ли реально отфильтровать). Пустой in → активен (совпадений нет). */
 function specActive(spec) {
   if (!spec || !spec.op) return false;
@@ -77,8 +99,11 @@ export function specMatches(raw, spec) {
       return vals.includes(String(raw ?? ''));
     }
     case 'range': {
+      // Даты сравниваются по КАЛЕНДАРНОМУ ДНЮ в местном времени (dayLocal):
+      // и граница «по», и timestamp-значение строки попадают в день целиком —
+      // как в серверном CAST(col AS DATE) >= / <=.
       const parse = spec.cast === 'date'
-        ? (v) => (v == null || v === '' ? null : Date.parse(v))
+        ? (v) => (v == null || v === '' ? null : dayLocal(v))
         : (v) => (v == null || v === '' ? null : Number(v));
       const r = parse(raw);
       const f = parse(spec.from);
@@ -134,6 +159,12 @@ export function compareBy(a, b, column, dir) {
   if (NUMERIC_TYPES.has(column.type)) {
     const na = va == null || va === '' ? -Infinity : Number(va);
     const nb = vb == null || vb === '' ? -Infinity : Number(vb);
+    // Нечисловое содержимое в числовой колонке (например, синтетический
+    // групповой id «36|КМ-…») — фолбэк на строковое сравнение: NaN в
+    // компараторе превращал бы сортировку в no-op.
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      return String(va ?? '').localeCompare(String(vb ?? ''), 'ru') * sign;
+    }
     return (na - nb) * sign;
   }
   if (column.type === 'date') {

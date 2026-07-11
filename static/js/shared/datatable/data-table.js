@@ -370,12 +370,15 @@ export class DataTable {
         chipsBox.appendChild(chip);
       });
     };
-    const apply = () => {
+    // rerenderChips: false — набор текста не меняет сами чипы, пересобирать их
+    // (со всеми обработчиками «×») на каждый символ незачем; перерисовка нужна
+    // только на Enter/Backspace/клик по крестику.
+    const apply = ({ rerenderChips = true } = {}) => {
       this._setFilterSpec(col.key, this._specFromTextChips(col, state()));
-      renderChips();
+      if (rerenderChips) renderChips();
       box.onChange();
     };
-    input.addEventListener('input', () => { state().text = input.value; apply(); });
+    input.addEventListener('input', () => { state().text = input.value; apply({ rerenderChips: false }); });
     input.addEventListener('keydown', (e) => {
       const st = state();
       if (e.key === 'Enter') {
@@ -403,30 +406,50 @@ export class DataTable {
   }
 
   /**
+   * Строка «метка + инпут» попап-фильтра — единый каркас для полей даты и
+   * числа (копии уже успевали разъехаться между попапами).
+   */
+  _popRow(pop, labelText, type, value) {
+    const row = document.createElement('div');
+    row.className = 'dt-date-row';
+    const lab = document.createElement('label');
+    lab.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = type;
+    if (type === 'number') inp.step = '0.01';
+    inp.className = 'dt-date-input';
+    inp.value = value != null ? value : '';
+    row.appendChild(lab);
+    row.appendChild(inp);
+    pop.appendChild(row);
+    return inp;
+  }
+
+  /** Блок действий попап-фильтра: единая кнопка «Очистить» (во всех попапах
+   * одно и то же слово — раньше чекбокс-попап называл её «Сбросить»). */
+  _popClearAction(pop, onClear) {
+    const actions = document.createElement('div');
+    actions.className = 'dt-date-actions';
+    const clr = document.createElement('button');
+    clr.type = 'button';
+    clr.className = 'dt-date-clear';
+    clr.textContent = 'Очистить';
+    clr.addEventListener('click', onClear);
+    actions.appendChild(clr);
+    pop.appendChild(actions);
+  }
+
+  /**
    * Открывает попап фильтра даты под триггером через общую оболочку (_openPopover).
    * single → одно поле «Дата» (eq), иначе «С»/«По» (range). Применение — по вводу.
    */
   _openDateFilter(col, anchor, box, updateTrigger, single) {
     this._openPopover(anchor, 'dt-date-popover', (pop) => {
       const st = this._filterText[col.key];
-      const mkRow = (labelText, value) => {
-        const row = document.createElement('div');
-        row.className = 'dt-date-row';
-        const lab = document.createElement('label');
-        lab.textContent = labelText;
-        const inp = document.createElement('input');
-        inp.type = 'date';
-        inp.className = 'dt-date-input';
-        inp.value = value || '';
-        row.appendChild(lab);
-        row.appendChild(inp);
-        pop.appendChild(row);
-        return inp;
-      };
 
       let firstInput;
       if (single) {
-        const inp = mkRow('Дата', typeof st === 'string' ? st : '');
+        const inp = this._popRow(pop, 'Дата', 'date', typeof st === 'string' ? st : '');
         firstInput = inp;
         const apply = () => {
           this._filterText[col.key] = inp.value;
@@ -438,8 +461,8 @@ export class DataTable {
         inp.addEventListener('change', apply);
       } else {
         const s = st || {};
-        const fromInp = mkRow('С', s.from);
-        const toInp = mkRow('По', s.to);
+        const fromInp = this._popRow(pop, 'С', 'date', s.from);
+        const toInp = this._popRow(pop, 'По', 'date', s.to);
         firstInput = fromInp;
         const apply = () => {
           this._filterText[col.key] = { from: fromInp.value, to: toInp.value };
@@ -453,21 +476,13 @@ export class DataTable {
         }
       }
 
-      const actions = document.createElement('div');
-      actions.className = 'dt-date-actions';
-      const clr = document.createElement('button');
-      clr.type = 'button';
-      clr.className = 'dt-date-clear';
-      clr.textContent = 'Очистить';
-      clr.addEventListener('click', () => {
+      this._popClearAction(pop, () => {
         this._filterText[col.key] = single ? '' : { from: '', to: '' };
         this._setFilterSpec(col.key, null);
         updateTrigger();
         box.onChange();
         this._closePopover();
       });
-      actions.appendChild(clr);
-      pop.appendChild(actions);
 
       return firstInput;
     });
@@ -537,21 +552,13 @@ export class DataTable {
           if (!first) first = cb;
         }
 
-        const actions = document.createElement('div');
-        actions.className = 'dt-date-actions';
-        const clr = document.createElement('button');
-        clr.type = 'button';
-        clr.className = 'dt-date-clear';
-        clr.textContent = 'Сбросить';
-        clr.addEventListener('click', () => {
+        this._popClearAction(pop, () => {
           for (const cb of checkboxes) cb.checked = false;
           this._setFilterSpec(col.key, null);
           updateTrigger();
           box.onChange();
           this._closePopover();
         });
-        actions.appendChild(clr);
-        pop.appendChild(actions);
 
         return first;
       });
@@ -596,23 +603,8 @@ export class DataTable {
       e.stopPropagation();
       this._openPopover(btn, 'dt-num-popover', (pop) => {
         const spec = this._filters[col.key];
-        const mkRow = (labelText, value) => {
-          const row = document.createElement('div');
-          row.className = 'dt-date-row';
-          const lab = document.createElement('label');
-          lab.textContent = labelText;
-          const inp = document.createElement('input');
-          inp.type = 'number';
-          inp.step = '0.01';
-          inp.className = 'dt-date-input';
-          inp.value = value != null ? value : '';
-          row.appendChild(lab);
-          row.appendChild(inp);
-          pop.appendChild(row);
-          return inp;
-        };
-        const fromEl = mkRow('от', spec && spec.op === 'range' ? spec.from : '');
-        const toEl = mkRow('до', spec && spec.op === 'range' ? spec.to : '');
+        const fromEl = this._popRow(pop, 'от', 'number', spec && spec.op === 'range' ? spec.from : '');
+        const toEl = this._popRow(pop, 'до', 'number', spec && spec.op === 'range' ? spec.to : '');
         const apply = () => {
           const f = String(fromEl.value ?? '').trim();
           const t = String(toEl.value ?? '').trim();
@@ -624,13 +616,7 @@ export class DataTable {
         fromEl.addEventListener('input', apply);
         toEl.addEventListener('input', apply);
 
-        const actions = document.createElement('div');
-        actions.className = 'dt-date-actions';
-        const clr = document.createElement('button');
-        clr.type = 'button';
-        clr.className = 'dt-date-clear';
-        clr.textContent = 'Очистить';
-        clr.addEventListener('click', () => {
+        this._popClearAction(pop, () => {
           fromEl.value = '';
           toEl.value = '';
           this._setFilterSpec(col.key, null);
@@ -638,8 +624,6 @@ export class DataTable {
           box.onChange();
           this._closePopover();
         });
-        actions.appendChild(clr);
-        pop.appendChild(actions);
 
         return fromEl;
       });
@@ -799,7 +783,19 @@ export class DataTable {
     let total;
     let totalPages;
 
+    // Источник ещё не инициализирован (init() не завершился): не стреляем
+    // серверным запросом впустую — содержательный рендер придёт после init.
+    if (this._ds.mode == null) {
+      this._paintRows([], cols);
+      this._renderFooter(0, 1);
+      return;
+    }
+
     if (this._ds.mode === 'client') {
+      // Клиентский рендер тоже двигает счётчик запросов: висящий серверный
+      // ответ (например, выстреливший до init) устаревает и не перерисует
+      // уже отфильтрованное клиентски содержимое.
+      this._reqSeq++;
       let data = filterRows(this._ds.getAllRows(), cols, this._filters, this._dicts);
       if (this._sort.length) {
         const specs = this._sort

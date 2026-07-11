@@ -51,34 +51,38 @@ function toColumn(field) {
 }
 
 /**
+ * Единый обходчик конфига полей: секции (в т.ч. вложенные), row-группы, поля.
+ * `visit(field, sectionName)` вызывается для каждого листового поля с именем
+ * ближайшей объемлющей секции. Одна точка знания о форме конфига —
+ * flattenFields и sectionByKey построены на нём и разойтись не могут
+ * (раздельные обходчики уже успели разъехаться на вложенных секциях).
+ */
+function walkFields(fields, visit, section = null) {
+  for (const item of fields || []) {
+    if (!item) continue;
+    if (Array.isArray(item.fields)) walkFields(item.fields, visit, item.section ?? section);
+    else if (Array.isArray(item.row)) walkFields(item.row, visit, section);
+    else if (item.key) visit(item, section);
+  }
+}
+
+/**
  * Раскрывает конфиг полей в плоский список (учитывает секции и row-группы).
  * Элемент может быть секцией `{section, fields:[...]}`, строкой `{row:[...]}`
- * или самим полем `{key,...}`. Секции — только верхний уровень (без вложения).
+ * или самим полем `{key,...}`.
  */
 export function flattenFields(fields) {
   const flat = [];
-  const collect = (item) => {
-    if (!item) return;
-    if (Array.isArray(item.fields)) item.fields.forEach(collect); // секция
-    else if (Array.isArray(item.row)) flat.push(...item.row);
-    else if (item.key) flat.push(item);
-  };
-  for (const item of fields) collect(item);
+  walkFields(fields, (f) => flat.push(f));
   return flat;
 }
 
 /** Карта key→section: имя секции формы становится группой панели видимости. */
 function sectionByKey(fields) {
   const map = {};
-  for (const item of fields || []) {
-    if (!item || !Array.isArray(item.fields)) continue;
-    const collect = (f) => {
-      if (!f) return;
-      if (Array.isArray(f.row)) f.row.forEach(collect);
-      else if (f.key) map[f.key] = item.section;
-    };
-    item.fields.forEach(collect);
-  }
+  walkFields(fields, (f, section) => {
+    if (section) map[f.key] = section;
+  });
   return map;
 }
 

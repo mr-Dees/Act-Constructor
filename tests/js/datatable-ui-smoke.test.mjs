@@ -346,6 +346,33 @@ test('ColumnVisibility._sync (карта по ключу) снимает все 
   });
 });
 
+test('«Выбрать/Снять все» скоуплены к переданным в панель колонкам: чужие ключи не трогаются', () => {
+  withFakeDom(({ created }) => {
+    const columns = [{ key: 'a', label: 'A' }, { key: 'b', label: 'B', hidden: true }];
+    // piv:7 — ключ ВНЕ панели (управляется доменной секцией «Развертка по ТБ»)
+    const hidden = new Set(['b', 'piv:7']);
+    const viewState = {
+      isVisible: (key) => !hidden.has(key),
+      setVisible: (key, on) => { if (on) hidden.delete(key); else hidden.add(key); },
+      resetToDefault: () => {},
+    };
+    ColumnVisibility.mount({ anchorEl: makeFakeElement('button'), columns, viewState, onChange: () => {} });
+
+    const selectAll = created.find((el) => el._tag === 'button' && el.textContent === 'Выбрать все');
+    assert.ok(selectAll, 'кнопка «Выбрать все» должна быть создана');
+    selectAll.dispatch('click');
+    assert.ok(!hidden.has('a') && !hidden.has('b'), 'колонки панели показаны');
+    assert.ok(hidden.has('piv:7'), '«Выбрать все» не трогает ключ вне панели');
+
+    hidden.delete('piv:7'); // режим «Колонки по ТБ»: пивот видим
+    const hideAll = created.find((el) => el._tag === 'button' && el.textContent === 'Снять все');
+    hideAll.dispatch('click');
+    assert.ok(!hidden.has('piv:7'), '«Снять все» не трогает ключ вне панели');
+    assert.ok(!hidden.has('a'), '«Снять все» оставляет первую default-visible колонку панели');
+    assert.ok(hidden.has('b'), 'остальные колонки панели скрыты');
+  });
+});
+
 test('filterPicker=checkbox: выбор двух значений строит {op:in}, пустой выбор снимает фильтр', () => {
   const dt = makeTable();
   const col = {
@@ -380,15 +407,16 @@ test('filterPicker=checkbox: выбор двух значений строит {
     assert.equal(dt._filters.tb, undefined, 'пустой выбор снимает фильтр (не {op:in,values:[]})');
     assert.equal(box.control.textContent, '—');
 
-    // Кнопка «Сбросить» внизу попапа: снимает все чекбоксы и закрывает попап.
+    // Кнопка «Очистить» внизу попапа (единая метка всех попап-фильтров,
+    // раньше здесь была «Сбросить»): снимает все чекбоксы и закрывает попап.
     checkboxes[1].checked = true; checkboxes[1].dispatch('change'); // value '5'
     assert.deepEqual(dt._filters.tb, { op: 'in', values: ['5'] });
-    const resetBtn = created.find((el) => el._tag === 'button' && el.textContent === 'Сбросить');
-    assert.ok(resetBtn, 'кнопка «Сбросить» должна быть создана');
+    const resetBtn = created.find((el) => el._tag === 'button' && el.textContent === 'Очистить');
+    assert.ok(resetBtn, 'кнопка «Очистить» должна быть создана');
     resetBtn.dispatch('click');
     assert.equal(dt._filters.tb, undefined);
-    assert.equal(checkboxes[1].checked, false, 'кнопка «Сбросить» снимает чекбоксы');
-    assert.equal(dt._popover, null, 'кнопка «Сбросить» закрывает попап');
+    assert.equal(checkboxes[1].checked, false, 'кнопка «Очистить» снимает чекбоксы');
+    assert.equal(dt._popover, null, 'кнопка «Очистить» закрывает попап');
   });
   clearTimeout(dt._debounce); // #14: снять отложенный _renderBody от _setFilterSpec — тест не зовёт render()
 });

@@ -54,6 +54,16 @@ test('specMatches range date — включительно от/до', () => {
   assert.equal(specMatches('2025-06-01', { op: 'range', cast: 'date', to: '2025-06-01' }), true);
 });
 
+test('specMatches range date — сравнение по календарному ДНЮ: timestamp-значение и date-only границы не теряют граничные строки', () => {
+  // Раньше Date.parse смешивал зоны: 'YYYY-MM-DD' — UTC, 'YYYY-MM-DDTHH:MM' — местное,
+  // и строки ровно на границе выпадали. Теперь всё приводится к местной полуночи дня.
+  const s = { op: 'range', cast: 'date', from: '2025-06-01', to: '2025-06-01' };
+  assert.equal(specMatches('2025-06-01T00:30:00', s), true);  // раннее утро граничного дня
+  assert.equal(specMatches('2025-06-01T23:30:00', s), true);  // поздний вечер: «по» включает день целиком
+  assert.equal(specMatches('2025-05-31T23:59:00', s), false);
+  assert.equal(specMatches('2025-06-02T00:10:00', s), false);
+});
+
 test('specMatches range numeric — только нижняя граница', () => {
   const s = { op: 'range', cast: 'numeric', from: '1000' };
   assert.equal(specMatches(1234.5, s), true);
@@ -121,6 +131,15 @@ test('compareBy: id сортируется ЧИСЛЕННО (не 1,10,2)', () =
   const col = { key: 'id', type: 'id' };
   const out = data.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
   assert.deepEqual(out, [1, 2, 10]);
+});
+
+test('compareBy: нечисловое содержимое числовой колонки — строковый фолбэк, а не no-op (NaN)', () => {
+  // Синтетический групповой id вида «36|КМ-…» в колонке типа id: Number() даёт NaN,
+  // раньше компаратор возвращал NaN и сортировка не делала ничего.
+  const data = [{ id: '7|КМ-2' }, { id: '36|КМ-1' }, { id: '14|КМ-3' }];
+  const col = { key: 'id', type: 'id' };
+  const out = data.slice().sort((a, b) => compareBy(a, b, col, 'asc')).map(r => r.id);
+  assert.deepEqual(out, ['14|КМ-3', '36|КМ-1', '7|КМ-2']); // localeCompare-порядок, стабильный
 });
 
 test('compareBy: дата — хронологически', () => {
