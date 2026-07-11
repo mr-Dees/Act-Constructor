@@ -6,6 +6,7 @@ import { TextBlockManager } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML, SAFE_HTML_PROFILES, renderActContent } from '../../shared/sanitize.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -687,16 +688,45 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Строит DocumentFragment из вставленного HTML, выбирая режим по метке
-     * происхождения data-aw-clip: свой буфер → реконструкция капсул + инлайн-
-     * формат; внешний HTML → строгая политика «только ссылки».
+     * Строит DocumentFragment из вставленного HTML, выбирая режим по источнику:
+     *  - свой буфер (data-aw-clip) → реконструкция капсул + полный инлайн-формат;
+     *  - Word (mso-сигнатуры) → формат ПОДМНОЖЕСТВОМ тулбара (b/i/u/s + размер),
+     *    ссылки-капсулы; цвет/фон/выравнивание/списки отбрасываются;
+     *  - прочий внешний HTML → строгая политика «только ссылки».
+     * Порядок веток: свой → Word → внешний (Word проверяем ДО внешнего, иначе
+     * его разметка ушла бы в «только ссылки» и формат бы потерялся).
      * @private
      */
     _buildPasteFragment(html) {
         if (this._isOwnClipboardHtml(html)) {
             return this._buildOwnPasteFragment(html);
         }
+        if (this._isWordHtml(html)) {
+            window.EditorTelemetry?.track?.('word_paste');
+            return this._buildWordPasteFragment(html);
+        }
         return this._buildExternalPasteFragment(html);
+    },
+
+    /**
+     * @private Похож ли СЫРОЙ HTML буфера на экспорт Microsoft Word? Проверяем
+     * до санитизации — DOMPurify выпилит mso-разметку, и после неё сигнатур не
+     * останется. Любой из признаков достаточен (регистронезависимо): класс
+     * `MsoNormal`/атрибут `class=Mso*`, CSS-префикс `mso-`, мета-генератор
+     * «Microsoft Word», office-namespace (`xmlns:o=`/`urn:schemas-microsoft-com:
+     * office`), пустой абзац `<o:p>` или условный комментарий `<!--[if ...mso...`.
+     */
+    _isWordHtml(rawHtml) {
+        if (typeof rawHtml !== 'string' || !rawHtml) return false;
+        return (
+            /class=["']?[^"'>]*Mso/i.test(rawHtml)
+            || /mso-/i.test(rawHtml)
+            || /<meta[^>]+name=["']?Generator["']?[^>]+Microsoft\s+Word/i.test(rawHtml)
+            || /xmlns:o=/i.test(rawHtml)
+            || /urn:schemas-microsoft-com:office/i.test(rawHtml)
+            || /<o:p/i.test(rawHtml)
+            || /<!--\[if[\s\S]*?mso/i.test(rawHtml)
+        );
     },
 
     /**
@@ -782,6 +812,178 @@ Object.assign(TextBlockManager.prototype, {
             // Невалидная/пустая капсула → её видимый текст.
             if (!replacement) replacement = document.createTextNode(text);
             el.parentNode.replaceChild(replacement, el);
+        });
+    },
+
+    /**
+     * Вставка из Microsoft Word: сохраняем РОВНО тот формат, что умеет выставить
+     * тулбар редактора — bold/italic/underline/strikethrough + font-size (инлайн),
+     * плюс ссылки-капсулы. Цвет, фон, выравнивание, списки и всё прочее сознательно
+     * отбрасываются (симметрия «вставка ⊆ возможности UI»). Блоки (p/div/li)
+     * расплющиваются в инлайн + <br> — структура абзацев из Word в v1 не
+     * переносится (известное ограничение).
+     * @private
+     */
+    _buildWordPasteFragment(html) {
+        const pre = this._wordPreClean(html);
+        // Санитизация тем же контрактом словаря форматирования, что превью/PUT:
+        // теги — подмножество инлайн-формата + блоки под расплющивание; style
+        // фильтруется CSS-allowlist'ом (хук afterSanitizeAttributes читает
+        // __cssAllowlist), из которого выкинуты color/фон/выравнивание. Схему href
+        // допускаем как во внешнем пути; финальный гейт — validateLinkUrl ниже.
+        const clean = SafeHTML.sanitize(pre, {
+            USE_PROFILES: false,
+            ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'],
+            ALLOWED_ATTR: ['style', 'href'],
+            ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+            __cssAllowlist: this._wordCssAllowlist(),
+        });
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
+        // Word пишет размер в pt (и как «11.0pt»); фронтовый CSS-хук единицы не
+        // валидирует, а бэк на save срезает не-px → без нормализации был бы шов
+        // превью↔сохранённое. Приводим к целым px в допустимом диапазоне.
+        this._normalizeWordFontSizes(tmp);
+        // <a href> → капсулы ссылок со свежими id (невалидная схема → разворот в
+        // инлайн-детей, чтобы окружающий формат не потерялся).
+        this._reconstructWordLinks(tmp);
+        // Расплющиваем блоки в инлайн + <br>, сохраняя вложенный формат.
+        const fragment = document.createDocumentFragment();
+        this._flattenWordBlocks(tmp, fragment);
+        // Хвостовой перенос после последнего абзаца не нужен.
+        while (fragment.lastChild
+            && fragment.lastChild.nodeType === Node.ELEMENT_NODE
+            && fragment.lastChild.tagName === 'BR') {
+            fragment.removeChild(fragment.lastChild);
+        }
+        return fragment;
+    },
+
+    /**
+     * @private Тонкая regex-пред-очистка Word-разметки, которую allowlist
+     * DOMPurify не убирает начисто: условные комментарии `<!--[if]...<![endif]-->`
+     * (несут mso-CSS и <xml>), блоки-острова `<xml>…</xml>` (office-метаданные,
+     * не видимый текст) и пустые абзацы `<o:p>`. Теги `<w:*>` (content-control'ы
+     * `w:sdt`/`w:smartTag`) РАЗворачиваются, а не удаляются с содержимым — иначе
+     * терялся бы видимый текст рана внутри них. mso-* CSS-свойства чистить не
+     * нужно — их срежет CSS-allowlist. Работает по строке ДО парсинга.
+     */
+    _wordPreClean(html) {
+        return String(html)
+            .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, '')
+            .replace(/<xml\b[^>]*>[\s\S]*?<\/xml>/gi, '')
+            .replace(/<o:p\b[^>]*>[\s\S]*?<\/o:p>/gi, '')
+            .replace(/<o:p\b[^>]*\/?>/gi, '')
+            .replace(/<\/?w:[^>]*>/gi, '');
+    },
+
+    /**
+     * @private CSS-allowlist для Word-вставки: набор профиля 'acts' МИНУС
+     * color/background-color/text-align. Оставляет ровно то, что умеет тулбар
+     * (font-size + жирный/курсив/подчёркивание/зачёркивание через *-weight/
+     * -style/-decoration), не давая просочиться цвету/фону/выравниванию. Дериват
+     * из активного профиля — остаётся синхронным с бэком (applyActsAllowlist).
+     */
+    _wordCssAllowlist() {
+        const base = SAFE_HTML_PROFILES.acts.__cssAllowlist || [];
+        const drop = ['color', 'background-color', 'text-align'];
+        return base.filter(p => !drop.includes(p));
+    },
+
+    /**
+     * @private Приводит inline font-size у всех элементов поддерева к целым px в
+     * диапазоне [fontSizeMin,fontSizeMax]: pt→px = round(v*4/3), px оставляем,
+     * em/rem/%/прочее — declaration отбрасываем (не-px единиц не оставляем).
+     * Переписываем даже px-в-диапазоне, чтобы после нормализации не осталось ни
+     * одной не-px величины.
+     * @param {HTMLElement} root
+     */
+    _normalizeWordFontSizes(root) {
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        const { fontSizeMin, fontSizeMax } = getStructureLimits();
+        root.querySelectorAll('*').forEach((el) => {
+            if (!el || !el.style) return;
+            const raw = el.style.fontSize;
+            if (!raw) return;
+            const px = this._wordFontSizeToPx(raw, fontSizeMin, fontSizeMax);
+            // null → единица не-px: убираем только font-size, прочие allowed-свойства
+            // (font-weight/…) не трогаем.
+            el.style.fontSize = px == null ? '' : `${px}px`;
+        });
+    },
+
+    /**
+     * @private Чистая конвертация значения font-size из Word в целые px внутри
+     * [min,max]. pt→round(v*4/3), px→round(v), em/rem/%/без единицы/прочее → null
+     * (отбросить). Возвращает число px или null.
+     */
+    _wordFontSizeToPx(raw, min, max) {
+        const m = String(raw).trim().match(/^([0-9]*\.?[0-9]+)\s*(pt|px|em|rem|%)?$/i);
+        if (!m) return null;
+        const val = parseFloat(m[1]);
+        if (!Number.isFinite(val)) return null;
+        const unit = m[2] ? m[2].toLowerCase() : '';
+        let px;
+        if (unit === 'pt') px = Math.round(val * 4 / 3);
+        else if (unit === 'px') px = Math.round(val);
+        else return null;
+        return Math.max(min, Math.min(max, px));
+    },
+
+    /**
+     * @private <a href> из Word → капсулы ссылок (createLinkMarker, свежие id),
+     * схема прогоняется через validateLinkUrl. Невалидная/пустая ссылка не
+     * выкидывается, а разворачивается в свои инлайн-дети — окружающий и вложенный
+     * формат сохраняется. validateLinkUrl лежит в window (как в остальных путях).
+     * @param {HTMLElement} root
+     */
+    _reconstructWordLinks(root) {
+        root.querySelectorAll('a').forEach((a) => {
+            if (!a.parentNode) return;
+            const href = (a.getAttribute('href') || '').trim();
+            const text = (a.textContent || '').replace(/\s+/g, ' ').trim();
+            const verdict = href && window.validateLinkUrl
+                ? window.validateLinkUrl(href) : { ok: false };
+            if (text && verdict.ok) {
+                a.parentNode.replaceChild(this.createLinkMarker(text, verdict.url), a);
+            } else {
+                // Разворот в инлайн-детей (сохраняем формат), а не удаление.
+                while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+                a.parentNode.removeChild(a);
+            }
+        });
+    },
+
+    /**
+     * @private Расплющивает блочные элементы (p/div/li) поддерева в инлайн-поток +
+     * <br>-разделители, ПЕРЕНОСЯ инлайн-детей целиком (в отличие от external-пути,
+     * который берёт только textContent — тут формат сохраняем). Соседство блоков
+     * считаем по снапшоту детей (узлы переезжают во фрагмент по ходу обхода).
+     * @param {HTMLElement} root
+     * @param {DocumentFragment} fragment
+     */
+    _flattenWordBlocks(root, fragment) {
+        const BLOCK = new Set(['P', 'DIV', 'LI']);
+        const isBlockNode = (n) => n && n.nodeType === Node.ELEMENT_NODE && BLOCK.has(n.tagName);
+        const nodes = Array.from(root.childNodes);
+        nodes.forEach((node, i) => {
+            if (isBlockNode(node)) {
+                this._flattenWordBlocks(node, fragment);
+                this._appendPasteBreak(fragment);
+            } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+                this._appendPasteBreak(fragment);
+            } else if (node.nodeType === Node.TEXT_NODE) {
+                // Чисто-пробельный whitespace МЕЖДУ блоками (перевод строки между
+                // </p> и <p>) пропускаем — иначе лишний пробел; внутри-абзацные
+                // пробелы сохраняем.
+                const blank = !node.textContent.trim();
+                if (blank && (isBlockNode(nodes[i - 1]) || isBlockNode(nodes[i + 1]))) return;
+                if (node.textContent) fragment.appendChild(node);
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                // Инлайн-элемент (b/i/u/s/span-формат или капсула) — целиком,
+                // сохраняя вложенное форматирование.
+                fragment.appendChild(node);
+            }
         });
     },
 
