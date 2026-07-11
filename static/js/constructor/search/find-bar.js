@@ -1,0 +1,535 @@
+/**
+ * Панель поиска/замены по текстблокам акта (B2). Немодальная фиксированная
+ * панель в правом-верхнем углу пановки редактирования (Step 2). Потребляет
+ * движок B1 (ActSearchEngine) и слой подсветки (ActSearchHighlight); UI и
+ * проводку replace/replace-all держит здесь.
+ *
+ * Ключевые инварианты:
+ *  - Подсветка — через CSS Custom Highlight API (никаких <mark>-обёрток вокруг
+ *    текста → капсулы/сноски целы). Прокрутка к текущему — scrollIntoView.
+ *  - mousedown/pointerdown→preventDefault на КНОПКАХ панели: клик по ним не
+ *    ворует фокус у активного поля ввода и не схлопывает выделение редактора
+ *    (по образцу #globalTextBlockToolbar). На ТЕКСТОВЫЕ поля не вешаем — им
+ *    нужен нативный фокус/каретка (та же причина, что у font-size-select в
+ *    тулбаре).
+ *  - Поиск НЕ зовёт editor.focus() — не двигает каретку в редакторе (подсветка
+ *    и прокрутка не зависят от выделения).
+ *  - Esc — через EscapeStack (LIFO): закрывает панель и снимает подсветку.
+ *  - Read-only акт: строка замены скрыта, поиск доступен.
+ *  - После ЛЮБОЙ замены совпадения пересобираются заново (buildAllMatches):
+ *    смещения B1 сдвигаются; в replace-all внутри одной цели правки идут
+ *    С КОНЦА (back-to-front), чтобы более ранние Range оставались валидны.
+ *  - Программная замена НЕ покрывается нативным Ctrl+Z → одношаговый custom-undo
+ *    «Отменить замену» через снимок content'а блоков.
+ */
+import { ActSearchEngine } from './act-search-engine.js';
+import { ActSearchHighlight } from './act-search-highlight.js';
+import {
+    pluralRu,
+    buildReplaceAllConfirmMessage,
+    formatMatchCounter,
+    wrapIndex,
+    groupMatchesByTarget,
+    snapshotTextBlockContents,
+    applySnapshotRestore,
+} from './act-search-replace.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AppState } from '../state/state-core.js';
+import { App } from '../app.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { textBlockManager } from '../textblock/textblock-core.js';
+
+/** Задержка дебаунса поиска по вводу (мс). */
+const SEARCH_DEBOUNCE_MS = 150;
+
+export const FindBar = {
+    /** @private @type {boolean} */
+    _hotkeyInstalled: false,
+    /** @private @type {HTMLElement|null} Корень панели. */
+    _bar: null,
+    /** @private @type {Object} Ссылки на элементы управления. */
+    _els: {},
+    /** @private @type {boolean} Открыта ли панель. */
+    _open: false,
+    /** @private @type {Array} Текущий плоский список совпадений (buildAllMatches). */
+    _matches: [],
+    /** @private @type {boolean} Достигнут ли лимит совпадений. */
+    _capped: false,
+    /** @private @type {number} Индекс текущего совпадения. */
+    _currentIdx: -1,
+    /** @private @type {{caseSensitive:boolean, wholeWord:boolean, regex:boolean}} */
+    _opts: { caseSensitive: false, wholeWord: false, regex: false },
+    /** @private @type {number} Хэндл дебаунса. */
+    _debounceTimer: 0,
+    /** @private @type {(()=>void)|null} Unsubscribe из EscapeStack. */
+    _escUnsub: null,
+    /**
+     * @private
+     * @type {Map<string,{before:string,after:string}>|null}
+     * Снимок content'а затронутых блоков для одношагового undo: `before` — до
+     * пакета, `after` — сразу после (divergence-guard в `_undoReplaceAll`).
+     */
+    _lastUndo: null,
+
+    /**
+     * Устанавливает горячую клавишу Ctrl+F / Cmd+F (capture-фаза): перехватывает
+     * браузерный поиск, при необходимости переключает на Step 2 и открывает
+     * панель, префилля запрос текущим выделением.
+     */
+    installHotkey() {
+        if (this._hotkeyInstalled) return;
+        this._hotkeyInstalled = true;
+
+        document.addEventListener('keydown', (e) => {
+            const isFind = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
+                && (e.key === 'f' || e.key === 'F' || e.code === 'KeyF');
+            if (!isFind) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Step 1 (превью) → редакторы не «живы» для подсветки: переключаемся.
+            if (AppState.currentStep !== 2 && typeof App.goToStep === 'function') {
+                App.goToStep(2);
+            }
+
+            // Префилл из выделения (снимаем ДО фокуса на поле поиска).
+            let prefill = '';
+            const sel = (typeof window.getSelection === 'function') ? window.getSelection() : null;
+            if (sel && !sel.isCollapsed) {
+                const t = sel.toString();
+                // Однострочное выделение — разумный запрос; многострочное игнорируем.
+                if (t && !t.includes('\n')) prefill = t;
+            }
+            this.open(prefill);
+        }, true);
+    },
+
+    /**
+     * Открывает панель. Строит DOM при первом вызове, показывает, фокусирует
+     * поле поиска и (при наличии запроса) запускает поиск.
+     * @param {string} [prefill] Начальный запрос.
+     */
+    open(prefill) {
+        if (!this._bar) this._build();
+        this._applyReadOnly();
+        // Открытие панели — новый контекст: прежний снимок undo протух
+        // (акт мог правиться между close и повторным open).
+        this._clearUndo();
+        this._bar.classList.remove('hidden');
+        this._open = true;
+
+        if (!this._escUnsub) {
+            this._escUnsub = EscapeStack.push(() => this.close());
+        }
+
+        if (typeof prefill === 'string' && prefill !== '') {
+            this._els.findInput.value = prefill;
+        }
+        // Фокус/выделение в поле поиска — редактор при этом теряет фокус, это ок
+        // (подсветка от выделения не зависит).
+        this._els.findInput.focus();
+        this._els.findInput.select();
+
+        if (this._els.findInput.value) {
+            this._runSearch();
+        } else {
+            this._matches = [];
+            this._capped = false;
+            this._currentIdx = -1;
+            this._render();
+        }
+    },
+
+    /** Закрывает панель: снимает подсветку и Esc-обработчик. */
+    close() {
+        if (this._debounceTimer) {
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = 0;
+        }
+        ActSearchHighlight.clear();
+        // Снимок undo живёт только пока панель открыта: после закрытия акт
+        // могут править вне поиска, а старый снимок затёр бы эти правки.
+        this._clearUndo();
+        if (this._bar) this._bar.classList.add('hidden');
+        this._open = false;
+        if (this._escUnsub) {
+            this._escUnsub();
+            this._escUnsub = null;
+        }
+    },
+
+    // ── Построение DOM ──────────────────────────────────────────────────────
+
+    /** @private Создаёт панель и навешивает обработчики. */
+    _build() {
+        const bar = document.createElement('div');
+        bar.id = 'actFindBar';
+        bar.className = 'act-find-bar hidden';
+        bar.setAttribute('role', 'search');
+        bar.setAttribute('aria-label', 'Поиск и замена по тексту акта');
+        bar.innerHTML = `
+            <div class="act-find-row act-find-row-search">
+                <input type="text" class="act-find-input" data-role="find"
+                       placeholder="Найти" aria-label="Найти" spellcheck="false" />
+                <div class="act-find-toggles" role="group" aria-label="Параметры поиска">
+                    <button type="button" class="act-find-toggle" data-toggle="caseSensitive"
+                            aria-pressed="false" title="Учитывать регистр">Aa</button>
+                    <button type="button" class="act-find-toggle" data-toggle="wholeWord"
+                            aria-pressed="false" title="Слово целиком">Слово</button>
+                    <button type="button" class="act-find-toggle" data-toggle="regex"
+                            aria-pressed="false" title="Регулярное выражение">.*</button>
+                </div>
+                <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
+                <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
+                    <button type="button" class="act-find-btn" data-role="prev"
+                            title="Предыдущее совпадение" aria-label="Предыдущее совпадение">‹</button>
+                    <button type="button" class="act-find-btn" data-role="next"
+                            title="Следующее совпадение" aria-label="Следующее совпадение">›</button>
+                </div>
+                <button type="button" class="act-find-btn act-find-close" data-role="close"
+                        title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
+            </div>
+            <div class="act-find-row act-find-row-replace" data-role="replaceRow">
+                <input type="text" class="act-find-input" data-role="replace"
+                       placeholder="Заменить на" aria-label="Заменить на" spellcheck="false" />
+                <button type="button" class="act-find-action" data-role="replaceOne">Заменить</button>
+                <button type="button" class="act-find-action" data-role="replaceAll">Заменить всё</button>
+                <button type="button" class="act-find-action act-find-undo hidden" data-role="undo"
+                        title="Отменить последнюю замену">Отменить замену</button>
+            </div>
+        `;
+        document.body.appendChild(bar);
+
+        this._bar = bar;
+        this._els = {
+            findInput: bar.querySelector('[data-role="find"]'),
+            replaceInput: bar.querySelector('[data-role="replace"]'),
+            counter: bar.querySelector('[data-role="counter"]'),
+            replaceRow: bar.querySelector('[data-role="replaceRow"]'),
+            undoBtn: bar.querySelector('[data-role="undo"]'),
+            toggles: bar.querySelectorAll('[data-toggle]'),
+        };
+
+        this._bindEvents();
+    },
+
+    /** @private Навешивает обработчики ввода/кнопок. */
+    _bindEvents() {
+        const bar = this._bar;
+
+        // Кнопки (toggle/nav/close/action) — mousedown→preventDefault, чтобы клик
+        // не уводил фокус из поля поиска. На текстовые input'ы НЕ вешаем.
+        bar.querySelectorAll('button').forEach((btn) => {
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('pointerdown', (e) => e.preventDefault());
+        });
+
+        // Поиск по вводу — дебаунс.
+        this._els.findInput.addEventListener('input', () => this._scheduleSearch());
+        // Enter — следующее (Shift+Enter — предыдущее); Esc снимет EscapeStack.
+        this._els.findInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this._go(e.shiftKey ? -1 : 1);
+            }
+        });
+
+        // Тумблеры параметров.
+        this._els.toggles.forEach((btn) => {
+            btn.addEventListener('click', () => this._toggleOpt(btn.dataset.toggle, btn));
+        });
+
+        // Навигация / закрытие.
+        bar.querySelector('[data-role="prev"]').addEventListener('click', () => this._go(-1));
+        bar.querySelector('[data-role="next"]').addEventListener('click', () => this._go(1));
+        bar.querySelector('[data-role="close"]').addEventListener('click', () => this.close());
+
+        // Замена.
+        bar.querySelector('[data-role="replaceOne"]').addEventListener('click', () => this._replaceCurrent());
+        bar.querySelector('[data-role="replaceAll"]').addEventListener('click', () => this._replaceAll());
+        this._els.undoBtn.addEventListener('click', () => this._undoReplaceAll());
+        // Enter в поле замены → заменить текущее.
+        this._els.replaceInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this._replaceCurrent();
+            }
+        });
+    },
+
+    /** @private Скрывает строку замены в read-only акте. */
+    _applyReadOnly() {
+        const ro = !!(AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly);
+        if (this._els.replaceRow) {
+            this._els.replaceRow.classList.toggle('hidden', ro);
+        }
+    },
+
+    // ── Поиск ───────────────────────────────────────────────────────────────
+
+    /** @private Планирует дебаунс-поиск по вводу. */
+    _scheduleSearch() {
+        if (this._debounceTimer) clearTimeout(this._debounceTimer);
+        this._debounceTimer = setTimeout(() => {
+            this._debounceTimer = 0;
+            this._runSearch();
+        }, SEARCH_DEBOUNCE_MS);
+    },
+
+    /**
+     * @private Немедленно исполняет отложенный дебаунс-поиск, если таймер висит.
+     * Навигация/замена должны работать по СВЕЖИМ совпадениям текущего запроса,
+     * а не по устаревшим (150-мс дебаунс мог ещё не сработать). Опции — те же,
+     * что у отложенного вызова (`_runSearch()` без keepIdx).
+     */
+    _flushSearch() {
+        if (!this._debounceTimer) return;
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = 0;
+        this._runSearch();
+    },
+
+    /**
+     * @private Запускает поиск немедленно и перерисовывает результат.
+     * @param {{keepIdx?:boolean}} [o] keepIdx — сохранить текущий индекс (после
+     *   замены: пересобранный список сдвинулся, тот же индекс = «следующее»).
+     */
+    _runSearch(o = {}) {
+        const query = this._els.findInput.value;
+        if (!query) {
+            this._clearError();
+            this._matches = [];
+            this._capped = false;
+            this._currentIdx = -1;
+            this._render();
+            return;
+        }
+        const res = ActSearchEngine.buildAllMatches(query, this._opts);
+        if (res.error) {
+            // Невалидный regex — inline-ошибка, без совпадений, без падения.
+            this._showError(res.error);
+            this._matches = [];
+            this._capped = false;
+            this._currentIdx = -1;
+            this._render();
+            return;
+        }
+        this._clearError();
+        this._matches = res.matches;
+        this._capped = res.capped;
+        if (this._matches.length === 0) {
+            this._currentIdx = -1;
+        } else if (!o.keepIdx || this._currentIdx < 0) {
+            this._currentIdx = 0;
+        } else {
+            this._currentIdx = wrapIndex(this._currentIdx, this._matches.length);
+        }
+        this._render(true);
+    },
+
+    /**
+     * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку.
+     * @param {boolean} [scroll] Прокрутить к текущему совпадению.
+     */
+    _render(scroll) {
+        ActSearchHighlight.render(this._matches, this._currentIdx);
+        if (this._els.counter) {
+            this._els.counter.textContent = formatMatchCounter(
+                this._currentIdx, this._matches.length, this._capped, ActSearchEngine.MAX_MATCHES);
+        }
+        if (scroll && this._currentIdx >= 0 && this._matches[this._currentIdx]) {
+            ActSearchHighlight.scrollToCurrent(this._matches[this._currentIdx].range);
+        }
+    },
+
+    /**
+     * @private Переход к предыдущему/следующему совпадению с заворачиванием.
+     * @param {number} delta +1 (next) или −1 (prev).
+     */
+    _go(delta) {
+        // Свежие совпадения до навигации (Enter/prev/next могли опередить дебаунс).
+        this._flushSearch();
+        if (this._matches.length === 0) return;
+        this._currentIdx = wrapIndex(this._currentIdx + delta, this._matches.length);
+        this._render(true);
+    },
+
+    /**
+     * @private Переключает параметр поиска и перезапускает поиск.
+     * @param {string} name caseSensitive|wholeWord|regex
+     * @param {HTMLElement} btn Кнопка-тумблер (для aria-pressed/класса).
+     */
+    _toggleOpt(name, btn) {
+        this._opts[name] = !this._opts[name];
+        btn.setAttribute('aria-pressed', String(this._opts[name]));
+        btn.classList.toggle('active', this._opts[name]);
+        this._runSearch();
+    },
+
+    /** @private Показывает inline-ошибку на поле поиска. */
+    _showError(msg) {
+        this._els.findInput.classList.add('act-find-input-error');
+        this._els.findInput.title = `Ошибка регулярного выражения: ${msg}`;
+    },
+
+    /** @private Снимает inline-ошибку. */
+    _clearError() {
+        this._els.findInput.classList.remove('act-find-input-error');
+        this._els.findInput.title = '';
+    },
+
+    // ── Замена ──────────────────────────────────────────────────────────────
+
+    /** @private Карта targetId → TextBlockSearchTarget (свежие цели). */
+    _targetsById() {
+        const map = new Map();
+        for (const t of ActSearchEngine.buildTargets()) map.set(t.id, t);
+        return map;
+    },
+
+    /** @private Заменяет текущее совпадение и переходит к следующему. */
+    _replaceCurrent() {
+        if (AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly) return;
+        // Свежие совпадения до замены (дебаунс мог ещё не сработать).
+        this._flushSearch();
+        const cur = this._matches[this._currentIdx];
+        if (!cur) return;
+        const replacement = this._els.replaceInput.value;
+
+        const target = this._targetsById().get(cur.targetId);
+        if (!target) return;
+
+        try {
+            ActSearchEngine.replaceRange(cur.range, replacement);
+        } catch (err) {
+            // Диапазон пересёк капсулу (движок не должен такое порождать) —
+            // не падаем, сообщаем и пересобираем.
+            console.error('[FindBar] replaceRange:', err);
+            Notifications.error('Замену нельзя применить: совпадение затрагивает ссылку/сноску');
+            this._runSearch();
+            return;
+        }
+        target.persist();
+        // Контент изменён другим путём — снимок «Заменить всё» протух.
+        this._clearUndo();
+
+        // Смещения B1 сдвинулись — пересобираем; keepIdx оставляет курсор на
+        // позиции (пересобранный список = «следующее» совпадение).
+        this._runSearch({ keepIdx: true });
+    },
+
+    /** @private Заменяет ВСЕ совпадения (с подтверждением) + custom-undo. */
+    async _replaceAll() {
+        if (AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly) return;
+        if (this._matches.length === 0) return;
+        // Новый пакет вытесняет прежний одношаговый undo.
+        this._clearUndo();
+        const replacement = this._els.replaceInput.value;
+
+        const groups = groupMatchesByTarget(this._matches);
+        const confirmed = await DialogManager.show({
+            title: 'Замена',
+            message: buildReplaceAllConfirmMessage(this._matches.length, groups.size),
+            confirmText: 'Заменить всё',
+            cancelText: 'Отмена',
+            type: 'warning',
+        });
+        if (!confirmed) return;
+
+        // Снимок ДО пакета — «before» для одношагового undo.
+        const before = snapshotTextBlockContents(groups.keys(), AppState.textBlocks);
+
+        const targets = this._targetsById();
+        let replaced = 0;
+        let failed = 0;
+        for (const [targetId, group] of groups) {
+            const target = targets.get(targetId);
+            if (!target) continue;
+            // Внутри цели — С КОНЦА: более ранние Range остаются валидны, т.к.
+            // правка позже по тексту не сдвигает предшествующие смещения.
+            for (let i = group.length - 1; i >= 0; i--) {
+                try {
+                    ActSearchEngine.replaceRange(group[i].range, replacement);
+                    replaced++;
+                } catch (err) {
+                    console.error('[FindBar] replaceAll replaceRange:', err);
+                    failed++;
+                }
+            }
+            target.persist();
+        }
+
+        // Единый глобальный проход по сноскам после всего пакета.
+        if (typeof textBlockManager.renumberAllFootnotes === 'function') {
+            textBlockManager.renumberAllFootnotes();
+        }
+
+        // Снимок ПОСЛЕ пакета — «after» для divergence-guard: undo вернёт блок
+        // только если его content не менялся с момента замены (иначе «отмена»
+        // затёрла бы более поздние правки юзера). Сноски нумеруются рантайм-
+        // атрибутом, не в content, поэтому renumber выше «after» не смещает.
+        const after = snapshotTextBlockContents(before.keys(), AppState.textBlocks);
+        this._lastUndo = new Map();
+        for (const [id, beforeContent] of before) {
+            this._lastUndo.set(id, { before: beforeContent, after: after.get(id) });
+        }
+        if (this._lastUndo.size > 0 && this._els.undoBtn) {
+            this._els.undoBtn.classList.remove('hidden');
+        }
+
+        if (failed > 0) {
+            const matchWord = pluralRu(failed, ['совпадение', 'совпадения', 'совпадений']);
+            const verbWord = pluralRu(failed, ['затрагивало', 'затрагивали', 'затрагивало']);
+            Notifications.warning(
+                `Заменено ${replaced}, пропущено ${failed} (${matchWord} ${verbWord} ссылку/сноску)`);
+        } else {
+            Notifications.success(`Заменено ${replaced}`);
+        }
+        this._runSearch();
+    },
+
+    /**
+     * @private Одношаговая отмена последней «Заменить всё» с divergence-guard:
+     * блок возвращается к снимку «before» ТОЛЬКО если его текущий content всё
+     * ещё равен снимку «after» (т.е. блок не редактировался с момента замены).
+     * Изменённые/исчезнувшие блоки пропускаются, чтобы не затереть правки.
+     */
+    _undoReplaceAll() {
+        if (!this._lastUndo) return;
+        const toRestore = new Map();
+        let skipped = 0;
+        for (const [id, snap] of this._lastUndo) {
+            const tb = AppState.textBlocks ? AppState.textBlocks[id] : null;
+            if (!tb || tb.content !== snap.after) {
+                skipped++;   // изменён или удалён с момента замены — не трогаем
+                continue;
+            }
+            toRestore.set(id, snap.before);
+        }
+        const reverted = applySnapshotRestore(toRestore, AppState.textBlocks, (id) => {
+            ItemsRenderer.updateTextBlock(id);
+        });
+        this._clearUndo();
+
+        const blockWord = pluralRu(reverted, ['блок', 'блока', 'блоков']);
+        if (skipped > 0) {
+            Notifications.warning(
+                `Возвращено ${reverted} ${blockWord}; ${skipped} пропущено (изменены после замены)`);
+        } else {
+            Notifications.success(`Возвращено ${reverted} ${blockWord}`);
+        }
+        this._runSearch();
+    },
+
+    /** @private Инвалидирует снимок одношагового undo и прячет его кнопку. */
+    _clearUndo() {
+        this._lastUndo = null;
+        if (this._els.undoBtn) this._els.undoBtn.classList.add('hidden');
+    },
+};
+
+// Window-global для совместимости с inline-скриптами в шаблонах.
+window.FindBar = FindBar;

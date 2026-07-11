@@ -1,0 +1,174 @@
+/*
+ * Панель поиска/замены по тексту акта (B2).
+ * Немодальная фиксированная панель в правом-верхнем углу пановки редактирования
+ * (Step 2) + правила подсветки совпадений через CSS Custom Highlight API.
+ */
+
+.act-find-bar {
+    position: fixed;
+    top: calc(max(var(--header-height), var(--header-min-height)) + var(--toolbar-top-offset));
+    right: var(--spacing-lg);
+    z-index: var(--z-sticky-elevated);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing);
+    box-shadow: var(--shadow-lg);
+    transition: var(--transition-all);
+}
+
+.act-find-bar.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(-1 * var(--translate-lg)));
+}
+
+/* Ряды панели: поиск и замена. */
+.act-find-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.act-find-row.hidden {
+    display: none;
+}
+
+/* Текстовые поля «Найти» / «Заменить на». */
+.act-find-input {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    color: var(--input-text);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    min-width: var(--find-bar-input-width, 14rem);
+    transition: var(--transition-all);
+}
+
+.act-find-input:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+/* Невалидный regex — красная рамка. */
+.act-find-input.act-find-input-error {
+    border-color: var(--input-error-border);
+    background: var(--input-error-bg);
+    box-shadow: var(--input-error-shadow);
+}
+
+/* Группы тумблеров / навигации. */
+.act-find-toggles,
+.act-find-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--textblock-mark-padding);
+    flex-shrink: 0;
+}
+
+/* Кнопки-тумблеры Aa / Слово / .* */
+.act-find-toggle {
+    background: transparent;
+    border: var(--border-width-thin) solid transparent;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-secondary);
+    transition: var(--transition-all);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.act-find-toggle:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.act-find-toggle.active {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* Кнопки навигации/закрытия ‹ › ✕ */
+.act-find-btn {
+    background: transparent;
+    border: var(--border-width-thin) solid transparent;
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-base);
+    line-height: 1;
+    color: var(--text-primary);
+    transition: var(--transition-all);
+    user-select: none;
+}
+
+.act-find-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.act-find-close {
+    color: var(--text-secondary);
+}
+
+/* Счётчик «k / N». */
+.act-find-counter {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    min-width: var(--find-bar-counter-width, 3.5rem);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* Кнопки-действия «Заменить» / «Заменить всё» / «Отменить замену». */
+.act-find-action {
+    background: var(--button-secondary-bg);
+    border: var(--border-width-thin) solid var(--button-secondary-border);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--button-secondary-text);
+    transition: var(--transition-all);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.act-find-action:hover {
+    background: var(--button-secondary-bg-hover);
+    border-color: var(--border-medium);
+}
+
+.act-find-undo {
+    color: var(--warning);
+    border-color: var(--warning);
+}
+
+.act-find-undo.hidden {
+    display: none;
+}
+
+/*
+ * Подсветка совпадений (CSS Custom Highlight API). Без DOM-обёрток вокруг текста
+ * — не ломает капсулы/сноски. Регистрирует диапазоны ActSearchHighlight.
+ */
+::highlight(act-find) {
+    background-color: rgba(255, 213, 0, .45);
+}
+
+::highlight(act-find-current) {
+    background-color: #ff9632;
+    color: #000;
+}
