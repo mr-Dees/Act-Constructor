@@ -240,6 +240,22 @@ test('NPL_METRIC_CODES содержит 602', () => {
   assert.ok(CkFinResConfig.NPL_METRIC_CODES.has('602'));
 });
 
+test('nplCodesFromMetrics: набор из словаря с флагом has_npl переопределяет статику', () => {
+  const s = CkFinResConfig.nplCodesFromMetrics([
+    { code: '602', has_npl: false },
+    { code: '777', has_npl: true },
+  ]);
+  assert.ok(s instanceof Set);
+  assert.ok(s.has('777'));
+  assert.ok(!s.has('602'));
+});
+
+test('nplCodesFromMetrics: словарь без ключа has_npl → null (остаётся фолбэк)', () => {
+  assert.equal(CkFinResConfig.nplCodesFromMetrics([{ code: '602' }]), null);
+  assert.equal(CkFinResConfig.nplCodesFromMetrics([]), null);
+  assert.equal(CkFinResConfig.nplCodesFromMetrics(undefined), null);
+});
+
 test('в полях формы есть npl_breakdown типа amount-breakdown с подсказкой про 602, сразу после tb_breakdown', () => {
   const flat = flattenFields(CkFinResConfig.fields);
   const f = flat.find((x) => x.key === 'npl_breakdown');

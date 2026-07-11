@@ -14,8 +14,24 @@ export class CkFinResConfig {
     static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
 
-    /** Метрики с показателем «NPL 90+». Синхронизировано вручную с NPL_METRIC_CODES в fr_validation_service.py. */
+    /**
+     * Метрики с показателем «NPL 90+» — статический фолбэк до загрузки словаря.
+     * Источник истины — словарь метрик (флаг has_npl): страница после загрузки
+     * словарей подставляет живой набор через nplCodesFromMetrics; тот же флаг
+     * читает бэкенд (fr_validation_service), ручная синхронизация не нужна.
+     */
     static NPL_METRIC_CODES = new Set(['602']);
+
+    /**
+     * Набор NPL-метрик из строк словаря метрик (флаг has_npl).
+     * null — словарь ещё не отдаёт флаг (БД без колонки has_npl):
+     * остаётся статический фолбэк NPL_METRIC_CODES.
+     */
+    static nplCodesFromMetrics(metrics) {
+        const rows = Array.isArray(metrics) ? metrics.filter(Boolean) : [];
+        if (!rows.some(m => 'has_npl' in m)) return null;
+        return new Set(rows.filter(m => m.has_npl).map(m => String(m.code)));
+    }
 
     static formatDate(val) {
         if (!val) return '';

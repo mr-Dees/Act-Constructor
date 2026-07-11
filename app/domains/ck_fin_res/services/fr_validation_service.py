@@ -46,9 +46,11 @@ _STATIC_DICTS: dict[str, list[dict]] = {
     ],
 }
 
-# Метрики с показателем «NPL 90+». Синхронизировано вручную с NPL_METRIC_CODES
-# в static/js/portal/ck-fin-res/ck-fin-res-config.js.
-NPL_METRIC_CODES = frozenset({"602"})
+# Фолбэк набора метрик «NPL 90+» для БД, где словарь метрик ещё без колонки
+# has_npl (ALTER не выполнен). Источник истины — словарь
+# t_db_oarb_ua_violation_metric_dict (флаг has_npl): бэкенд и фронт читают
+# один и тот же флаг, ручная синхронизация списков больше не нужна.
+NPL_METRIC_CODES_FALLBACK = frozenset({"602"})
 
 
 class FRValidationService:
@@ -106,6 +108,17 @@ class FRValidationService:
     # ГРУППОВОЕ СОХРАНЕНИЕ / УДАЛЕНИЕ
     # ------------------------------------------------------------------
 
+    async def _npl_metric_codes(self) -> frozenset[str]:
+        """Коды метрик с показателем «NPL 90+» — из словаря метрик (has_npl).
+
+        Если словарь ещё не отдаёт флаг (БД без колонки — в строках нет ключа
+        has_npl) — фолбэк на прежний захардкоженный набор, поведение не
+        меняется до миграции словаря."""
+        metrics = await self.dict_repo.get_metric_codes()
+        if any("has_npl" in m for m in metrics):
+            return frozenset(str(m["code"]).strip() for m in metrics if m.get("has_npl"))
+        return NPL_METRIC_CODES_FALLBACK
+
     async def group_save(self, req: FRGroupSaveRequest, username: str) -> dict:
         """Валидирует ТБ развертки по справочнику и сохраняет группу дифом."""
         terbanks = await self.dict_repo.get_terbanks()
@@ -118,12 +131,20 @@ class FRValidationService:
         # Метрика — из common (новое записываемое состояние), а не из group_key
         # (старый ключ поиска группы): при переименовании метрики группы
         # правило должно проверяться против того, что реально сохраняется.
+        npl_codes = await self._npl_metric_codes()
         metric = str(req.common.metric_code or "").strip()
         has_npl = any(item.npl_amount_rubles > 0 for item in req.breakdown)
-        if metric not in NPL_METRIC_CODES and has_npl:
-            raise FRValidationError("Показатель «NPL 90+» заполняется только для метрики 602")
-        if metric in NPL_METRIC_CODES and not has_npl:
-            raise FRValidationError("Для метрики 602 требуется распределение «NPL 90+» по ТБ")
+        if metric not in npl_codes and has_npl:
+            allowed = ", ".join(sorted(npl_codes))
+            raise FRValidationError(
+                f"Показатель «NPL 90+» заполняется только для метрики {allowed}"
+                if allowed
+                else "Показатель «NPL 90+» недоступен: в словаре метрик нет метрик с NPL 90+"
+            )
+        if metric in npl_codes and not has_npl:
+            raise FRValidationError(
+                f"Для метрики {metric} требуется распределение «NPL 90+» по ТБ"
+            )
         return await self.fr_repo.group_save(
             group_key=req.group_key.model_dump(),
             expected_row_ids=req.expected_row_ids,

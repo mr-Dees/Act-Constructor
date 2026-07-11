@@ -37,6 +37,10 @@ export class CkFinResPage {
         cfg.dictNames.forEach((name, i) => {
             this._dictionaries[name] = results[i];
         });
+        // Живой набор NPL-метрик из словаря (флаг has_npl) взамен статического
+        // фолбэка — тот же флаг читает бэкенд (единый источник истины).
+        const nplCodes = cfg.nplCodesFromMetrics(this._dictionaries.metrics);
+        if (nplCodes) cfg.NPL_METRIC_CODES = nplCodes;
     }
 
     static _initComponents() {
@@ -302,16 +306,17 @@ export class CkFinResPage {
         }
 
         const data = CkForm.collectData();
-        const isNpl = CkFinResConfig.NPL_METRIC_CODES.has(String(data.metric_code || '').trim());
+        const metricCode = String(data.metric_code || '').trim();
+        const isNpl = CkFinResConfig.NPL_METRIC_CODES.has(metricCode);
         const nplItems = data.npl_breakdown || [];
         delete data.npl_breakdown;
         if (isNpl && !nplItems.length) {
-            Notifications.error('Для метрики 602 требуется распределение «NPL 90+» по ТБ');
+            Notifications.error(`Для метрики ${metricCode} требуется распределение «NPL 90+» по ТБ`);
             return;
         }
         // Развертка по ТБ (основная + NPL) уходит отдельным полем breakdown
         // группового запроса — из common её убираем (common описывает только
-        // общегрупповые поля). Вне метрики 602 NPL в слияние не идёт — все
+        // общегрупповые поля). Вне NPL-метрики NPL в слияние не идёт — все
         // строки уходят с npl_amount_rubles='0.00' независимо от того, что
         // осталось в dataset формы.
         const breakdown = mergeTbBreakdowns(data.tb_breakdown || [], isNpl ? nplItems : []);
@@ -390,7 +395,8 @@ export class CkFinResPage {
         const cfg = CkFinResConfig;
         const isNpl = field.key === 'npl_breakdown';
         if (isNpl && !this._isNplMetric()) {
-            Notifications.warning('Поле «NPL 90+» доступно только для метрики 602');
+            const codes = [...CkFinResConfig.NPL_METRIC_CODES].sort().join(', ');
+            Notifications.warning(`Поле «NPL 90+» доступно только для метрики ${codes}`);
             return;
         }
         const current = CkForm.getBreakdownValue(field.key);
@@ -426,7 +432,7 @@ export class CkFinResPage {
         return CkFinResConfig.NPL_METRIC_CODES.has(this._currentMetricCode());
     }
 
-    /** Активность поля NPL: вне метрики 602 поле приглушено, значение очищается. */
+    /** Активность поля NPL: вне NPL-метрики поле приглушено, значение очищается. */
     static _syncNplField({ notifyOnClear = false } = {}) {
         const input = document.getElementById('ck-field-npl_breakdown');
         if (!input) return;

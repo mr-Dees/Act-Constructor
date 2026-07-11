@@ -29,8 +29,14 @@ def fr_repo():
 
 @pytest.fixture
 def dict_repo():
-    """Mock DictionaryRepository."""
-    return AsyncMock()
+    """Mock DictionaryRepository (словарь метрик несёт флаг has_npl)."""
+    repo = AsyncMock()
+    repo.get_metric_codes.return_value = [
+        {"id": 1, "code": "2001", "metric_name": "Искажение финансовой отчетности", "has_npl": False},
+        {"id": 2, "code": "2002", "metric_name": "Некорректный расчет финансовых показателей", "has_npl": False},
+        {"id": 3, "code": "602", "metric_name": "NPL 90+ (просроченная задолженность свыше 90 дней)", "has_npl": True},
+    ]
+    return repo
 
 
 @pytest.fixture
@@ -225,6 +231,49 @@ class TestGroupSave:
         fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
         req = FRGroupSaveRequest(
             group_key={**_group_key(), "metric_code": "2001"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "602"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
+                        "npl_amount_rubles": "120000.00", "metric_element_counts": 8}],
+        )
+
+        result = await service.group_save(req, "testuser")
+
+        fr_repo.group_save.assert_awaited_once()
+        assert result == {"deactivated": 1, "inserted": 1, "skipped": 0}
+
+    async def test_npl_codes_follow_dictionary_flag(self, service, fr_repo, dict_repo):
+        """Набор NPL-метрик читается из словаря (has_npl), а не из хардкода:
+        метрика '777' с флагом принимает NPL без правок кода."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        dict_repo.get_metric_codes.return_value = [
+            {"id": 1, "code": "777", "metric_name": "Новая NPL-метрика", "has_npl": True},
+            {"id": 3, "code": "602", "metric_name": "NPL 90+", "has_npl": False},
+        ]
+        fr_repo.group_save.return_value = {"deactivated": 0, "inserted": 1, "skipped": 0}
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "777"},
+            expected_row_ids=[101, 102],
+            common={"metric_code": "777"},
+            breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "1.00",
+                        "npl_amount_rubles": "1.00", "metric_element_counts": 1}],
+        )
+
+        result = await service.group_save(req, "testuser")
+
+        fr_repo.group_save.assert_awaited_once()
+        assert result == {"deactivated": 0, "inserted": 1, "skipped": 0}
+
+    async def test_npl_fallback_when_dictionary_has_no_flag_column(self, service, fr_repo, dict_repo):
+        """Словарь без ключа has_npl (БД до ALTER) → фолбэк на прежний набор
+        {'602'}: поведение не меняется до миграции словаря."""
+        dict_repo.get_terbanks.return_value = [{"tb_id": "7"}]
+        dict_repo.get_metric_codes.return_value = [
+            {"id": 3, "code": "602", "metric_name": "NPL 90+"},  # без has_npl
+        ]
+        fr_repo.group_save.return_value = {"deactivated": 1, "inserted": 1, "skipped": 0}
+        req = FRGroupSaveRequest(
+            group_key={**_group_key(), "metric_code": "602"},
             expected_row_ids=[101, 102],
             common={"metric_code": "602"},
             breakdown=[{"neg_finder_tb_id": "7", "metric_amount_rubles": "980000.00",
