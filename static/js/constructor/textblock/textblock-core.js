@@ -169,6 +169,29 @@ export class TextBlockManager {
     }
 
     /**
+     * @private DRY: ближайший предок-капсула (ссылка/сноска, contenteditable=false-
+     * атом) узла в пределах редактора, ИЛИ null. Капсулу в inline-правке
+     * (editing-mode) трактуем как обычный текст → null (её границы не атомарны,
+     * CARET-1). Единый обход границ для обоих expand-хелперов —
+     * _expandRangeOutOfMarkers (живой Range, textblock-toolbar.js) и
+     * _expandStaticRangeOutOfMarkers (StaticRange, textblock-capsule-integrity.js)
+     * — и для _rangeIsWholeCapsule; раньше дублировался. Живёт в core (базовый
+     * класс), т.к. используется из обоих миксинов. Литерал 3 (а не Node.TEXT_NODE)
+     * — без зависимости от глобала Node (как в исходных копиях).
+     * @param {Node} node
+     * @param {HTMLElement} editor
+     * @returns {Element|null}
+     */
+    _capsuleAncestor(node, editor) {
+        let el = node && node.nodeType === 3 ? node.parentElement : node;
+        while (el && el !== editor && editor && editor.contains(el)) {
+            if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    /**
      * Выполняет команду форматирования
      */
     execCommand(command, value = null) {

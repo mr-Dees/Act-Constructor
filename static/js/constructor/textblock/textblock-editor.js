@@ -449,6 +449,14 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
+        // «Вся капсула как юнит»: снимаем визуальную .node-selected отметку —
+        // выделение покидает редактор (handleSelectionChange его уже не чистит).
+        // Данные и так чисты (strip в _repairCapsulesInRoot), это только косметика.
+        if (typeof editor.querySelectorAll === 'function') {
+            editor.querySelectorAll('.node-selected')
+                .forEach(el => el.classList.remove('node-selected'));
+        }
+
         // Если фокус ушёл ДО compositionend (IME прервана внешне) — буфер
         // __composingRecords иначе провисит до следующего ввода в этот
         // редактор. Идемпотентно: при штатном compositionend __composing уже
@@ -680,9 +688,11 @@ Object.assign(TextBlockManager.prototype, {
 
         if (isCut) {
             // Удаляем расширенное выделение нативно — остаётся в undo-стеке.
-            selection.removeAllRanges();
-            selection.addRange(work);
-            document.execCommand('delete');
+            // Через _execDeleteRange (взводит __healing): иначе, если вырезается
+            // РОВНО одна капсула целиком, вложенный beforeinput от execCommand
+            // перехватила бы whole-capsule-ветка handleEditorBeforeInput. Клон/
+            // strip/setData выше не затрагиваются (CARET-2).
+            this._execDeleteRange(editor, work);
             this.finalizeEdit(editor);
         }
     },
@@ -1137,6 +1147,15 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
 
+        // «Вся капсула как юнит»: Shift+←/→ у границы капсулы расширяет выделение
+        // за ВСЮ капсулу одним шагом (атом при выделении, как node-selection).
+        // Только Shift, без Ctrl/Meta/Alt.
+        if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey &&
+            (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+            this._handleCapsuleShiftArrow(e, editor)) {
+            return;
+        }
+
         // Каретка у границы капсулы с КЛАВИАТУРЫ (Home/←/→) — приземляется в
         // caret-guard у ведущей/хвостовой капсулы (мышь делает то же через
         // click-обработчик). Только «голые» стрелки/Home, без модификаторов.
@@ -1212,7 +1231,29 @@ Object.assign(TextBlockManager.prototype, {
     handleSelectionChange() {
         if (this.activeEditor) {
             this.updateToolbarState();
+            this._updateNodeSelectedState(this.activeEditor);
         }
+    },
+
+    /**
+     * «Вся капсула как юнит» (визуальная часть): помечает классом .node-selected
+     * капсулу, ЦЕЛИКОМ охваченную текущим выделением (_rangeIsWholeCapsule), и
+     * снимает отметку с прежней. READ-only: диапазон НЕ мутируем (правка range на
+     * selectionchange/перетаскивании воевала бы с браузером). Класс рантайм-only,
+     * из сохранённого content вычищается в _repairCapsulesInRoot (как
+     * contenteditable). Снимаем по всему документу — выделение в документе одно.
+     * @param {HTMLElement} editor
+     * @private
+     */
+    _updateNodeSelectedState(editor) {
+        document.querySelectorAll('.text-link.node-selected, .text-footnote.node-selected')
+            .forEach(el => el.classList.remove('node-selected'));
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        if (!editor.contains(range.commonAncestorContainer)) return;
+        const capsule = this._rangeIsWholeCapsule(range, editor);
+        if (capsule && capsule.classList) capsule.classList.add('node-selected');
     },
 
     /**
@@ -1269,6 +1310,44 @@ Object.assign(TextBlockManager.prototype, {
             return false;
         }
         return false;
+    },
+
+    /**
+     * «Вся капсула как юнит»: Shift+←/→, когда ФОКУС выделения примыкает к
+     * капсуле по направлению движения, перепрыгивает фокус на ДАЛЬНЮЮ сторону
+     * всей капсулы (за её guard) одним шагом — параллель _handleCapsuleCaretKey,
+     * но для расширяющегося (не схлопнутого) выделения. Симметрично работает и
+     * на сжатие (Shift+← когда фокус справа от капсулы). Капсулу в inline-правке
+     * (editing-mode) пропускаем (обычный текст, CARET-1). Возвращает true, если
+     * перехватил клавишу.
+     * @private
+     */
+    _handleCapsuleShiftArrow(e, editor) {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || typeof sel.extend !== 'function') return false;
+        if (!sel.focusNode || !editor.contains(sel.focusNode)) return false;
+        const forward = e.key === 'ArrowRight';
+        // Точку ФОКУСА оборачиваем в схлопнутый range, чтобы переиспользовать
+        // _caretAdjacentMarkers (маркеры непосредственно у фокуса).
+        const focusRange = document.createRange();
+        focusRange.setStart(sel.focusNode, sel.focusOffset);
+        focusRange.collapse(true);
+        const { before, after } = this._caretAdjacentMarkers(focusRange);
+        // Вправо — капсула справа от фокуса; влево — слева.
+        const capsule = forward ? after : before;
+        if (!capsule || this._isEditingCapsule(capsule)) return false;
+        e.preventDefault();
+        // Дальняя сторона: за хвостовым guard'ом (вправо) / перед ведущим (влево);
+        // при отсутствии guard'а — по краю самой капсулы через offset родителя.
+        const guard = forward ? capsule.nextSibling : capsule.previousSibling;
+        if (this._isGuardNode(guard)) {
+            sel.extend(guard, forward ? guard.data.length : 0);
+        } else {
+            const parent = capsule.parentNode;
+            const idx = Array.prototype.indexOf.call(parent.childNodes, capsule);
+            sel.extend(parent, forward ? idx + 1 : idx);
+        }
+        return true;
     },
 
     /**
