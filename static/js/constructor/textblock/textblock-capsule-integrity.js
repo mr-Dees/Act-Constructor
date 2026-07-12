@@ -189,11 +189,14 @@ Object.assign(TextBlockManager.prototype, {
      * @param {object} textBlock
      */
     handleEditorBeforeInput(e, editor, textBlock) {
-        // Re-entrancy: наши собственные execCommand('delete')/('insertHTML')
-        // (в т.ч. _execDeleteRange для «вся капсула») синхронно диспатчат
-        // вложенный beforeinput. Под взведённым __healing он — no-op: иначе
-        // whole-capsule-ветка ниже перехватила бы его и отменила команду.
-        if (editor.__healing) return;
+        // Re-entrancy: наш собственный execCommand('delete') в _execDeleteRange
+        // («вся капсула») синхронно диспатчит вложенный beforeinput. Под взведённым
+        // __suppressBeforeInput он — no-op: иначе whole-capsule-ветка ниже
+        // перехватила бы его и отменила команду. ОТДЕЛЬНЫЙ флаг, а не __healing
+        // (тот — приватный гард MutationObserver'а): один флаг — один контракт,
+        // чтобы будущий observer-only healer, взводящий __healing, случайно не
+        // отключил защиты beforeinput (перехват delete/insert/whole-capsule).
+        if (editor.__suppressBeforeInput) return;
         const ranges = typeof e.getTargetRanges === 'function' ? e.getTargetRanges() : [];
         const type = e.inputType;
 
@@ -285,18 +288,12 @@ Object.assign(TextBlockManager.prototype, {
         const sc = range.startContainer, so = range.startOffset;
         const ec = range.endContainer, eo = range.endOffset;
 
-        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Капсулу в
-        // режиме inline-правки пропускаем — её тело сейчас обычный текст (CARET-1).
-        const insideCapsule = (node) => {
-            let el = node && node.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== editor) {
-                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
-                el = el.parentElement;
-            }
-            return null;
-        };
-        const insStart = insideCapsule(sc);
-        const insEnd = insideCapsule(ec);
+        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Единый обход
+        // границ _capsuleAncestor (textblock-core.js) — тот же, что у expand-
+        // хелперов; сам возвращает null для капсулы в inline-правке (editing-mode
+        // → её тело сейчас обычный текст, CARET-1).
+        const insStart = this._capsuleAncestor(sc, editor);
+        const insEnd = this._capsuleAncestor(ec, editor);
         if (insStart || insEnd) return { capsule: insStart || insEnd, side: 'inside' };
 
         // Схлопнутая каретка примыкает к капсуле (через guard или напрямую).
@@ -331,13 +328,13 @@ Object.assign(TextBlockManager.prototype, {
     /**
      * @private Удаляет живой диапазон (охватывающий капсулу целиком + её guard'ы)
      * нативной командой delete — удаление ОСТАЁТСЯ в undo-стеке (Ctrl+Z вернёт
-     * капсулу), в отличие от raw .remove()/deleteContents. Обёрнут в __healing +
-     * takeRecords: (1) observer не запускает heal-шторм на удалении guard'ов;
-     * (2) вложенный beforeinput, который execCommand('delete') диспатчит
-     * синхронно, гасится ранним return `if (editor.__healing)` в
-     * handleEditorBeforeInput (иначе рекурсия/отмена команды). Финализацию
-     * (normalizeMarkers/перенумерация/сохранение) делает ВЫЗЫВАЮЩИЙ через
-     * finalizeEdit после возврата.
+     * капсулу), в отличие от raw .remove()/deleteContents. Взводит ДВА флага +
+     * takeRecords: (1) __healing — observer не запускает heal-шторм на удалении
+     * guard'ов; (2) __suppressBeforeInput — вложенный beforeinput, который
+     * execCommand('delete') диспатчит синхронно, гасится ранним return в
+     * handleEditorBeforeInput (иначе рекурсия/отмена команды). Флаги раздельны:
+     * у каждого свой единственный контракт. Финализацию (normalizeMarkers/
+     * перенумерация/сохранение) делает ВЫЗЫВАЮЩИЙ через finalizeEdit после возврата.
      * @param {HTMLElement} editor
      * @param {Range} range
      */
@@ -345,7 +342,8 @@ Object.assign(TextBlockManager.prototype, {
         const sel = window.getSelection();
         if (!sel) return;
         const wasHealing = editor && editor.__healing;
-        if (editor) editor.__healing = true;
+        const wasSuppress = editor && editor.__suppressBeforeInput;
+        if (editor) { editor.__healing = true; editor.__suppressBeforeInput = true; }
         try {
             sel.removeAllRanges();
             sel.addRange(range);
@@ -355,6 +353,7 @@ Object.assign(TextBlockManager.prototype, {
                 editor.__capsuleObserver.takeRecords();
             }
             if (editor && !wasHealing) editor.__healing = false;
+            if (editor && !wasSuppress) editor.__suppressBeforeInput = false;
         }
     },
 

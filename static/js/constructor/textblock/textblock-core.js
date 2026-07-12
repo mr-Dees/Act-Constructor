@@ -6,6 +6,41 @@ import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
 import { ChangelogTracker } from '../changelog-tracker.js';
 
+/**
+ * Узел — inline-капсула (ссылка/сноска, contenteditable=false-атом)?
+ * Самостоятельный предикат (единый источник истины): прототипный `_isCapsule`
+ * делегирует сюда, а движок поиска (act-search-engine.js) импортирует напрямую —
+ * не завися от порядка загрузки/навешивания миксина textblock-editor.js. Литералы
+ * 1/3 вместо Node.* — без зависимости от глобала Node (как в _capsuleAncestor).
+ * @param {Node} node
+ * @returns {boolean}
+ */
+export function isCapsuleNode(node) {
+    return !!(node && node.nodeType === 1 && node.classList &&
+        (node.classList.contains('text-link') || node.classList.contains('text-footnote')));
+}
+
+/**
+ * Узел НЕ даёт каретке видимой опоры рядом с капсулой: пустой/zero-width текст
+ * (включая U+FEFF-guard и U+200B-якорь размера) ЛИБО инлайн-элемент ТОЛЬКО из
+ * zero-width-символов. Капсулы, <br>, <img> и пустые элементы — значимы.
+ * Самостоятельный предикат (см. isCapsuleNode): прототипный `_isZeroWidthNode`
+ * делегирует сюда, движок поиска импортирует напрямую.
+ * @param {Node} n
+ * @returns {boolean}
+ */
+export function isZeroWidthNode(n) {
+    if (!n) return false;
+    if (n.nodeType === 3) {
+        return /^[\uFEFF\u200B]*$/.test(n.data);            // '' или только FEFF/ZWSP
+    }
+    if (n.nodeType === 1 && !isCapsuleNode(n) && n.tagName !== 'BR') {
+        const t = n.textContent || '';
+        return t.length > 0 && /^[\uFEFF\u200B]+$/.test(t); // span ТОЛЬКО из zero-width (не <img>/пустой)
+    }
+    return false;
+}
+
 export class TextBlockManager {
     constructor() {
         this.selectedTextBlock = null;

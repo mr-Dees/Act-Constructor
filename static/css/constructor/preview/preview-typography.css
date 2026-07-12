@@ -72,6 +72,18 @@
     hyphens: auto;
 }
 
+/* Базовый дефолт .preview-textblock-content вне «листа» (.preview-sheet):
+   превью текстблоков в диалоге истории версий (PreviewTextBlockRenderer.create →
+   .version-preview-ui, БЕЗ .preview-sheet) не получает print-precise правило ниже.
+   Без этого правила оно теряло бы «по ширине» и межстрочный (регресс B-22 →
+   print-precise). Держим здесь дефолт как до print-precise: justify + редакторный
+   интервал; внутри .preview-sheet его перекрывает print-precise правило (выше
+   специфичность). */
+.preview-textblock-content {
+    line-height: var(--textblock-line-height, 1.75);
+    text-align: justify;
+}
+
 /* Print-precise (Task C) — СУПЕРСЕДИТ B-22. Было: line-height текстблока в
    превью = тот же токен, что у редактора (--textblock-line-height), ради
    визуального паритета с поверхностью правки. Стало: превью — это лист,

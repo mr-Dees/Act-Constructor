@@ -28,28 +28,55 @@ export const ActSearchHighlight = {
     },
 
     /**
-     * Регистрирует подсветку всех совпадений и текущего.
+     * @private Однократно предупреждает об отсутствии API.
+     * @returns {boolean} поддерживается ли API (false → вызывающий делает no-op)
+     */
+    _warnOnce() {
+        if (this._supported()) return true;
+        if (!this._warned) {
+            console.warn('CSS Custom Highlight API недоступен — подсветка поиска отключена (поиск/прокрутка работают).');
+            this._warned = true;
+        }
+        return false;
+    },
+
+    /**
+     * Подсветка ВСЕХ совпадений ('act-find'). Тяжёлая часть (до MAX_MATCHES
+     * диапазонов в одном Highlight) — звать только при СМЕНЕ набора совпадений
+     * (_runSearch), НЕ на каждую навигацию prev/next (там достаточно renderCurrent).
+     * @param {Array<{range:Range}>} matches плоский список (buildAllMatches)
+     */
+    renderAll(matches) {
+        if (!this._warnOnce()) return;
+        const ranges = (matches || []).map((m) => m && m.range).filter(Boolean);
+        CSS.highlights.set('act-find', new Highlight(...ranges));
+    },
+
+    /**
+     * Подсветка ТЕКУЩЕГО совпадения ('act-find-current'). Дёшево (один Range):
+     * prev/next обновляет только её, не пересобирая весь 'act-find'.
+     * @param {Range|null} range текущий диапазон (null — снять подсветку текущего)
+     */
+    renderCurrent(range) {
+        if (!this._warnOnce()) return;
+        if (range) {
+            CSS.highlights.set('act-find-current', new Highlight(range));
+        } else {
+            CSS.highlights.delete('act-find-current');
+        }
+    },
+
+    /**
+     * Полная перерисовка: подсветка всех совпадений и текущего.
      * @param {Array<{range:Range}>} matches плоский список (buildAllMatches)
      * @param {number} [currentIdx=-1] индекс текущего совпадения в matches
      */
     render(matches, currentIdx = -1) {
-        if (!this._supported()) {
-            if (!this._warned) {
-                console.warn('CSS Custom Highlight API недоступен — подсветка поиска отключена (поиск/прокрутка работают).');
-                this._warned = true;
-            }
-            return;
-        }
-        const ranges = (matches || []).map((m) => m && m.range).filter(Boolean);
-        CSS.highlights.set('act-find', new Highlight(...ranges));
-
+        if (!this._warnOnce()) return;
+        this.renderAll(matches);
         const current = (currentIdx >= 0 && matches && matches[currentIdx])
             ? matches[currentIdx].range : null;
-        if (current) {
-            CSS.highlights.set('act-find-current', new Highlight(current));
-        } else {
-            CSS.highlights.delete('act-find-current');
-        }
+        this.renderCurrent(current);
     },
 
     /** Снимает обе подсветки. */

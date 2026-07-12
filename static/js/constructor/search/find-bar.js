@@ -52,8 +52,6 @@ export const FindBar = {
     _bar: null,
     /** @private @type {Object} Ссылки на элементы управления. */
     _els: {},
-    /** @private @type {boolean} Открыта ли панель. */
-    _open: false,
     /** @private @type {Array} Текущий плоский список совпадений (buildAllMatches). */
     _matches: [],
     /** @private @type {boolean} Достигнут ли лимит совпадений. */
@@ -119,7 +117,6 @@ export const FindBar = {
         // (акт мог правиться между close и повторным open).
         this._clearUndo();
         this._bar.classList.remove('hidden');
-        this._open = true;
 
         if (!this._escUnsub) {
             this._escUnsub = EscapeStack.push(() => this.close());
@@ -154,7 +151,6 @@ export const FindBar = {
         // могут править вне поиска, а старый снимок затёр бы эти правки.
         this._clearUndo();
         if (this._bar) this._bar.classList.add('hidden');
-        this._open = false;
         if (this._escUnsub) {
             this._escUnsub();
             this._escUnsub = null;
@@ -333,9 +329,19 @@ export const FindBar = {
     /**
      * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку.
      * @param {boolean} [scroll] Прокрутить к текущему совпадению.
+     * @param {boolean} [currentOnly] Обновить только подсветку ТЕКУЩЕГО совпадения
+     *   ('act-find-current'), не пересобирая весь 'act-find' (для prev/next: набор
+     *   совпадений тот же, сменился лишь индекс — экономит перестройку до 5000
+     *   диапазонов на каждый шаг навигации).
      */
-    _render(scroll) {
-        ActSearchHighlight.render(this._matches, this._currentIdx);
+    _render(scroll, currentOnly) {
+        if (currentOnly) {
+            const cur = (this._currentIdx >= 0 && this._matches[this._currentIdx])
+                ? this._matches[this._currentIdx].range : null;
+            ActSearchHighlight.renderCurrent(cur);
+        } else {
+            ActSearchHighlight.render(this._matches, this._currentIdx);
+        }
         if (this._els.counter) {
             this._els.counter.textContent = formatMatchCounter(
                 this._currentIdx, this._matches.length, this._capped, ActSearchEngine.MAX_MATCHES);
@@ -354,7 +360,7 @@ export const FindBar = {
         this._flushSearch();
         if (this._matches.length === 0) return;
         this._currentIdx = wrapIndex(this._currentIdx + delta, this._matches.length);
-        this._render(true);
+        this._render(true, true); // только текущее — набор совпадений не менялся
     },
 
     /**
@@ -424,6 +430,12 @@ export const FindBar = {
     /** @private Заменяет ВСЕ совпадения (с подтверждением) + custom-undo. */
     async _replaceAll() {
         if (AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly) return;
+        // Свежие совпадения до замены (дебаунс 150мс мог ещё не сработать) — иначе
+        // быстрый ввод-затем-«Заменить всё» заменил бы совпадения ПРЕДЫДУЩЕГО
+        // запроса (пересбор во время диалога-подтверждения не трогает DOM, старые
+        // Range остаются валидны → детерминированное затирание не того текста).
+        // Тот же гард, что в _replaceCurrent и _go.
+        this._flushSearch();
         if (this._matches.length === 0) return;
         // Новый пакет вытесняет прежний одношаговый undo.
         this._clearUndo();
@@ -511,6 +523,14 @@ export const FindBar = {
         }
         const reverted = applySnapshotRestore(toRestore, AppState.textBlocks, (id) => {
             ItemsRenderer.updateTextBlock(id);
+            // Откат — тот же сток, что прямая замена: changelog + точечный патч
+            // превью (шаг 1). Без него превью оставалось бы с текстом ПОСЛЕ замены,
+            // а откат не попадал в аудит-историю. saveContent читает уже
+            // восстановленный tb.content (applySnapshotRestore записал его выше).
+            const tb = AppState.textBlocks ? AppState.textBlocks[id] : null;
+            if (tb && typeof textBlockManager.saveContent === 'function') {
+                textBlockManager.saveContent(id, tb.content);
+            }
         });
         this._clearUndo();
 

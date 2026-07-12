@@ -9,10 +9,12 @@
  * её. Капсула, <br> и любая капсула-элемент разрывают пробег; caret-guard'ы
  * (U+FEFF) и якоря размера (U+200B) исключаются как zero-width.
  *
- * Предикаты капсул/zero-width переиспользуются из textBlockManager
- * (textblock-editor.js навешивает их на прототип; импортируем его как
- * side-effect, чтобы _isCapsule/_isZeroWidthNode гарантированно существовали вне
- * зависимости от порядка загрузки).
+ * Предикаты капсул/zero-width — самостоятельные функции isCapsuleNode/
+ * isZeroWidthNode из textblock-core.js (единый источник истины, туда же
+ * делегируют прототипные _isCapsule/_isZeroWidthNode). Движок импортирует их
+ * НАПРЯМУЮ — не завися от side-effect навешивания миксина textblock-editor.js на
+ * прототип (тот UI-тяжёлый; порядок/факт его загрузки не должен решать
+ * работоспособность «чистого, без UI» движка).
  *
  * Персистентность: замена (replaceRange) МУТИРУЕТ текстовые узлы живого DOM;
  * ЕДИНСТВЕННЫЙ санкционированный путь фиксации после серии замен —
@@ -24,8 +26,7 @@
  * text-only-обходчик не видит; ручной DFS даёт точную семантику разрывов и
  * тестируется на фейковом дереве узлов без реального DOM.
  */
-import { textBlockManager } from '../textblock/textblock-core.js';
-import '../textblock/textblock-editor.js'; // side-effect: _isCapsule/_isZeroWidthNode на прототипе
+import { textBlockManager, isCapsuleNode, isZeroWidthNode } from '../textblock/textblock-core.js';
 
 /** Класс «словесного» символа для whole-word границ. JS `\b` — ASCII-only и
  *  НЕВЕРЕН для кириллицы ('акт' ложно матчился бы внутри 'характеристика').
@@ -37,13 +38,12 @@ const WORD_CHAR = '[\\p{L}\\p{N}_]';
  * ячейки таблиц, не трогая движок. Контракт (duck-typing):
  *   {
  *     id: string,                         // стабильный идентификатор цели
- *     getElement(): HTMLElement,          // корневой редактируемый элемент
  *     collectRuns(): Run[],               // пробеги текста (см. collectRuns)
- *     replaceRange(range: Range, text): void, // безопасная замена
  *     persist(): void                     // зафиксировать правку (finalizeEdit)
  *   }
- * v1: реализована только TextBlockSearchTarget (текстблоки). Ячейки таблиц —
- * будущая цель.
+ * Замену выполняет статический ActSearchEngine.replaceRange(range, text) (см.
+ * FindBar) — по Range, а не по цели. v1: реализована только TextBlockSearchTarget
+ * (текстблоки). Ячейки таблиц — будущая цель.
  *
  * Run (пробег): { text: string, segments: Array<{node: Text, start, end}> }
  *   text     — склеенный текст пробега;
@@ -61,23 +61,9 @@ export class TextBlockSearchTarget {
         this.id = (editor && editor.dataset) ? editor.dataset.textBlockId : null;
     }
 
-    /** @returns {HTMLElement} */
-    getElement() {
-        return this._editor;
-    }
-
-    /** @returns {Array} Пробеги текста редактора. */
+    /** @returns {Array} Пробеги текста редактора (кэш движка, инвалидируется по мутациям). */
     collectRuns() {
-        return ActSearchEngine.collectRuns(this._editor);
-    }
-
-    /**
-     * Безопасная замена диапазона (делегат движка). Капсулы не трогает.
-     * @param {Range} range
-     * @param {string} text
-     */
-    replaceRange(range, text) {
-        return ActSearchEngine.replaceRange(range, text);
+        return ActSearchEngine._collectRunsCached(this._editor);
     }
 
     /**
@@ -95,6 +81,62 @@ export const ActSearchEngine = {
      * результат capped=true (защита от зависания на «e» в огромном акте).
      */
     MAX_MATCHES: 5000,
+
+    /** @private @type {Map<HTMLElement,Array>|null} Кэш пробегов по редактору. */
+    _runsCache: null,
+    /** @private @type {MutationObserver|null} Инвалидатор кэша пробегов. */
+    _cacheObserver: null,
+
+    /**
+     * @private Ленивая инициализация кэша пробегов + наблюдателя-инвалидатора.
+     * Между поисками (набор в строке поиска, переключение опций, навигация) DOM
+     * текстблоков НЕ меняется — повторный DFS-обход всех редакторов на каждый
+     * ввод избыточен. Кэшируем пробеги по редактору; ЛЮБАЯ мутация поддерева
+     * текстблоков (ввод в блок, замена, структурная правка) сбрасывает кэш
+     * целиком. Class/attr-мутации (node-selected, подсветка) НЕ наблюдаем — на
+     * пробеги не влияют, а сброс на них съел бы весь выигрыш при наборе запроса.
+     * Без MutationObserver/контейнера кэш НЕ включается (надёжной инвалидации
+     * нет → отдаём свежий обход, staleness исключён).
+     * @returns {Map|null}
+     */
+    _ensureRunsCache() {
+        if (this._runsCache) return this._runsCache;
+        if (typeof MutationObserver === 'undefined' || typeof document === 'undefined'
+            || typeof document.getElementById !== 'function') return null;
+        const container = document.getElementById('itemsContainer');
+        if (!container) return null;
+        this._runsCache = new Map();
+        this._cacheObserver = new MutationObserver(() => { this._runsCache.clear(); });
+        this._cacheObserver.observe(container, { subtree: true, childList: true, characterData: true });
+        return this._runsCache;
+    },
+
+    /**
+     * @private Пробеги редактора с кэшем (инвалидируется наблюдателем и явно
+     * после replaceRange). Fallback без кэша — прямой collectRuns.
+     * @param {HTMLElement} editor
+     * @returns {Array}
+     */
+    _collectRunsCached(editor) {
+        const cache = this._ensureRunsCache();
+        if (!cache) return this.collectRuns(editor);
+        let runs = cache.get(editor);
+        if (!runs) {
+            runs = this.collectRuns(editor);
+            cache.set(editor, runs);
+        }
+        return runs;
+    },
+
+    /**
+     * Синхронно сбрасывает кэш пробегов. Наблюдатель ловит мутации асинхронно
+     * (microtask), поэтому replaceRange, за которым СИНХРОННО идёт пересбор
+     * совпадений (FindBar), обязан сбросить кэш сам — иначе пересбор построил бы
+     * Range по устаревшим (до замены) пробегам.
+     */
+    invalidateRunsCache() {
+        if (this._runsCache) this._runsCache.clear();
+    },
 
     /**
      * Собирает цели поиска в порядке документа (v1 — только текстблоки).
@@ -129,7 +171,6 @@ export const ActSearchEngine = {
     collectRuns(editor) {
         const runs = [];
         let current = null;
-        const tbm = textBlockManager;
 
         const flush = () => {
             if (current && current.text.length > 0) runs.push(current);
@@ -141,7 +182,7 @@ export const ActSearchEngine = {
                 if (child.nodeType === Node.TEXT_NODE) {
                     // Чистый zero-width (guard/якорь/пустой) — не текст: пропускаем
                     // без разрыва пробега.
-                    if (tbm._isZeroWidthNode(child)) continue;
+                    if (isZeroWidthNode(child)) continue;
                     const text = child.data != null ? child.data : (child.textContent || '');
                     if (!text) continue;
                     if (!current) current = { text: '', segments: [] };
@@ -149,7 +190,7 @@ export const ActSearchEngine = {
                     current.segments.push({ node: child, start, end: start + text.length });
                     current.text += text;
                 } else if (child.nodeType === Node.ELEMENT_NODE) {
-                    if (tbm._isCapsule(child)) {
+                    if (isCapsuleNode(child)) {
                         flush(); // капсула-атом: текст исключён, граница рвёт пробег
                     } else if (child.tagName === 'BR' || child.tagName === 'IMG') {
                         flush(); // void-атом: пробег не должен его пересекать
@@ -197,15 +238,19 @@ export const ActSearchEngine = {
         if (typeof query !== 'string' || query === '') {
             return { empty: true, regex: null };
         }
+        // Флаг `u` — ВСЕГДА, независимо от тумблеров. Причины: (1) whole-word
+        // оборачивает в \p{L} (требует `u`); (2) без `u` regex-точка/класс бьёт
+        // суррогатные пары — эмодзи режется пополам, и replaceRange портит
+        // астральный символ. Единый флаг развязывает `u` от «Слово целиком»:
+        // включение whole-word больше НЕ меняет валидность и число совпадений
+        // ранее рабочего regex-паттерна (в обоих положениях тумблера — один режим).
         let source = regex ? query : this._escapeRegExp(query);
-        let unicode = false;
         if (wholeWord) {
             source = this._wholeWordWrap(source);
-            unicode = true; // \p{L} требует флаг `u`
         }
         let flags = 'g';
         if (!caseSensitive) flags += 'i';
-        if (unicode) flags += 'u';
+        flags += 'u';
         try {
             return { regex: new RegExp(source, flags) };
         } catch (e) {
@@ -394,14 +439,16 @@ export const ActSearchEngine = {
 
     /**
      * @private Есть ли у узла (или он сам) предок-капсула? Защита от замены,
-     * пересекающей капсулу.
+     * пересекающей капсулу. Обход сознательно локален (движок «чистый, без UI» —
+     * не тянет editor-привязанный _capsuleAncestor), но предикат — общий
+     * isCapsuleNode (единый с textblock-core, чтобы «граница капсулы» не дрейфовала).
      * @param {Node} node
      * @returns {boolean}
      */
     _hasCapsuleAncestor(node) {
         let n = node;
         while (n) {
-            if (textBlockManager._isCapsule(n)) return true;
+            if (isCapsuleNode(n)) return true;
             n = n.parentNode;
         }
         return false;
@@ -443,6 +490,10 @@ export const ActSearchEngine = {
             range.setStartAfter(tn);
             range.setEndAfter(tn);
         }
+        // Пробеги затронутого редактора устарели — сбрасываем кэш синхронно
+        // (наблюдатель сработал бы только на microtask, а пересбор совпадений
+        // в FindBar идёт сразу после серии replaceRange).
+        this.invalidateRunsCache();
     },
 };
 

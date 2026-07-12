@@ -2,7 +2,7 @@
  * Расширение для работы с редактором
  */
 import { PreviewManager } from '../preview/preview.js';
-import { TextBlockManager } from './textblock-core.js';
+import { TextBlockManager, isCapsuleNode, isZeroWidthNode } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML, SAFE_HTML_PROFILES, renderActContent } from '../../shared/sanitize.js';
@@ -121,10 +121,11 @@ Object.assign(TextBlockManager.prototype, {
     /** Символ-«пустышка» caret-guard'а (U+FEFF, BOM/zero-width-no-break-space). */
     CAP_GUARD_CHAR: '\uFEFF',
 
-    /** @private Узел — это inline-капсула (ссылка/сноска)? */
+    /** @private Узел — это inline-капсула (ссылка/сноска)? Делегат единого
+     *  предиката isCapsuleNode (textblock-core.js) — тот же, что использует движок
+     *  поиска, чтобы «граница капсулы» не дрейфовала между слоями. */
     _isCapsule(node) {
-        return !!(node && node.nodeType === Node.ELEMENT_NODE && node.classList &&
-            (node.classList.contains('text-link') || node.classList.contains('text-footnote')));
+        return isCapsuleNode(node);
     },
 
     /** @private Текстовый узел — чистый caret-guard (один U+FEFF)? */
@@ -145,15 +146,7 @@ Object.assign(TextBlockManager.prototype, {
      * <img> и пустые элементы — НЕ zero-width (значимые границы/атомы).
      */
     _isZeroWidthNode(n) {
-        if (!n) return false;
-        if (n.nodeType === Node.TEXT_NODE) {
-            return /^[\uFEFF\u200B]*$/.test(n.data);            // '' или только FEFF/ZWSP
-        }
-        if (n.nodeType === Node.ELEMENT_NODE && !this._isCapsule(n) && n.tagName !== 'BR') {
-            const t = n.textContent || '';
-            return t.length > 0 && /^[\uFEFF\u200B]+$/.test(t); // span ТОЛЬКО из zero-width (не <img>/пустой)
-        }
-        return false;
+        return isZeroWidthNode(n); // делегат единого предиката (textblock-core.js)
     },
 
     /**
@@ -452,10 +445,8 @@ Object.assign(TextBlockManager.prototype, {
         // «Вся капсула как юнит»: снимаем визуальную .node-selected отметку —
         // выделение покидает редактор (handleSelectionChange его уже не чистит).
         // Данные и так чисты (strip в _repairCapsulesInRoot), это только косметика.
-        if (typeof editor.querySelectorAll === 'function') {
-            editor.querySelectorAll('.node-selected')
-                .forEach(el => el.classList.remove('node-selected'));
-        }
+        // Единый сток снятия: O(1) по кэшу + editor-скоуп sweep (blur нечаст).
+        this._clearNodeSelected(editor);
 
         // Если фокус ушёл ДО compositionend (IME прервана внешне) — буфер
         // __composingRecords иначе провисит до следующего ввода в этот
@@ -722,7 +713,7 @@ Object.assign(TextBlockManager.prototype, {
      * @private Похож ли СЫРОЙ HTML буфера на экспорт Microsoft Word? Проверяем
      * до санитизации — DOMPurify выпилит mso-разметку, и после неё сигнатур не
      * останется. Любой из признаков достаточен (регистронезависимо): класс
-     * `MsoNormal`/атрибут `class=Mso*`, CSS-префикс `mso-`, мета-генератор
+     * `MsoNormal`/атрибут `class=Mso*`, CSS-декларация `mso-*:`, мета-генератор
      * «Microsoft Word», office-namespace (`xmlns:o=`/`urn:schemas-microsoft-com:
      * office`), пустой абзац `<o:p>` или условный комментарий `<!--[if ...mso...`.
      */
@@ -730,7 +721,11 @@ Object.assign(TextBlockManager.prototype, {
         if (typeof rawHtml !== 'string' || !rawHtml) return false;
         return (
             /class=["']?[^"'>]*Mso/i.test(rawHtml)
-            || /mso-/i.test(rawHtml)
+            // Только CSS-ДЕКЛАРАЦИЯ `mso-*:` (Word всегда пишет mso- как свойство
+            // стиля, напр. `mso-fareast-language:`), НЕ голая подстрока «mso-» —
+            // иначе безобидный внешний HTML с «mso-» в тексте/URL уходил бы на
+            // Word-путь. Реальный Word ловится и этим, и class=Mso/Generator.
+            || /mso-[a-z][a-z-]*\s*:/i.test(rawHtml)
             || /<meta[^>]+name=["']?Generator["']?[^>]+Microsoft\s+Word/i.test(rawHtml)
             || /xmlns:o=/i.test(rawHtml)
             || /urn:schemas-microsoft-com:office/i.test(rawHtml)
@@ -843,8 +838,8 @@ Object.assign(TextBlockManager.prototype, {
         // допускаем как во внешнем пути; финальный гейт — validateLinkUrl ниже.
         const clean = SafeHTML.sanitize(pre, {
             USE_PROFILES: false,
-            ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'],
-            ALLOWED_ATTR: ['style', 'href'],
+            ALLOWED_TAGS: this._wordAllowedTags(),
+            ALLOWED_ATTR: this._wordAllowedAttrs(),
             ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
             __cssAllowlist: this._wordCssAllowlist(),
         });
@@ -885,6 +880,29 @@ Object.assign(TextBlockManager.prototype, {
             .replace(/<o:p\b[^>]*>[\s\S]*?<\/o:p>/gi, '')
             .replace(/<o:p\b[^>]*\/?>/gi, '')
             .replace(/<\/?w:[^>]*>/gi, '');
+    },
+
+    /**
+     * @private Теги для Word-вставки: инлайн-формат + блоки под расплющивание,
+     * ПЕРЕСЕЧЁННЫЕ с живым профилем 'acts' (SAFE_HTML_PROFILES.acts.ALLOWED_TAGS,
+     * трекает серверный applyActsAllowlist). Уберёт бэк тег из allowlist — Word-путь
+     * уронит его тоже (не «замороженный снимок»); шире набора Word'а не расширяет.
+     */
+    _wordAllowedTags() {
+        const WORD = ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'];
+        const profile = (SAFE_HTML_PROFILES.acts && SAFE_HTML_PROFILES.acts.ALLOWED_TAGS) || [];
+        return WORD.filter(t => profile.includes(t));
+    },
+
+    /**
+     * @private Атрибуты для Word-вставки (style + href) ∩ живой профиль 'acts'
+     * (ALLOWED_ATTR). Дериват — не дрейфует от рантайм-обновляемого набора, как
+     * _wordAllowedTags/_wordCssAllowlist.
+     */
+    _wordAllowedAttrs() {
+        const WORD = ['style', 'href'];
+        const profile = (SAFE_HTML_PROFILES.acts && SAFE_HTML_PROFILES.acts.ALLOWED_ATTR) || [];
+        return WORD.filter(a => profile.includes(a));
     },
 
     /**
@@ -1236,24 +1254,48 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * @private Снимает визуальную отметку «вся капсула как юнит» (.node-selected).
+     * Быстрый путь O(1): снять с закэшированной ссылки _nodeSelectedEl (отметку
+     * носит максимум одна капсула — выделение в документе одно). Единый сток снятия
+     * для _updateNodeSelectedState (на каждый keyup/mouseup — только O(1)) и blur.
+     * scope (опц.) — дополнительный editor-скоуп sweep для НЕЧАСТЫХ путей (blur):
+     * подчищает возможные «висящие» отметки, если кэш разошёлся с DOM.
+     * @param {HTMLElement} [scope]
+     */
+    _clearNodeSelected(scope) {
+        if (this._nodeSelectedEl) {
+            if (this._nodeSelectedEl.classList) this._nodeSelectedEl.classList.remove('node-selected');
+            this._nodeSelectedEl = null;
+        }
+        if (scope && typeof scope.querySelectorAll === 'function') {
+            scope.querySelectorAll('.text-link.node-selected, .text-footnote.node-selected')
+                .forEach(el => el.classList.remove('node-selected'));
+        }
+    },
+
+    /**
      * «Вся капсула как юнит» (визуальная часть): помечает классом .node-selected
      * капсулу, ЦЕЛИКОМ охваченную текущим выделением (_rangeIsWholeCapsule), и
      * снимает отметку с прежней. READ-only: диапазон НЕ мутируем (правка range на
      * selectionchange/перетаскивании воевала бы с браузером). Класс рантайм-only,
      * из сохранённого content вычищается в _repairCapsulesInRoot (как
-     * contenteditable). Снимаем по всему документу — выделение в документе одно.
+     * contenteditable). Прежнюю отметку снимаем за O(1) по _nodeSelectedEl — метод
+     * висит на keyup/mouseup (каждая клавиша), documentwide-querySelectorAll тут
+     * недопустим.
      * @param {HTMLElement} editor
      * @private
      */
     _updateNodeSelectedState(editor) {
-        document.querySelectorAll('.text-link.node-selected, .text-footnote.node-selected')
-            .forEach(el => el.classList.remove('node-selected'));
+        this._clearNodeSelected();
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
         const range = sel.getRangeAt(0);
         if (!editor.contains(range.commonAncestorContainer)) return;
         const capsule = this._rangeIsWholeCapsule(range, editor);
-        if (capsule && capsule.classList) capsule.classList.add('node-selected');
+        if (capsule && capsule.classList) {
+            capsule.classList.add('node-selected');
+            this._nodeSelectedEl = capsule;
+        }
     },
 
     /**
@@ -1328,9 +1370,22 @@ Object.assign(TextBlockManager.prototype, {
         if (!sel.focusNode || !editor.contains(sel.focusNode)) return false;
         const forward = e.key === 'ArrowRight';
         // Точку ФОКУСА оборачиваем в схлопнутый range, чтобы переиспользовать
-        // _caretAdjacentMarkers (маркеры непосредственно у фокуса).
+        // _caretAdjacentMarkers (маркеры непосредственно у фокуса). Если фокус стоит
+        // В caret-guard'е (после расширения над КРАЕВОЙ капсулой sel.extend оставил
+        // фокус на (guard, guard.length)) — переносим точку в РОДИТЕЛЯ по краю
+        // guard'а: _caretAdjacentMarkers по элемент-контейнеру пропускает guard
+        // (skipEmpty) и находит капсулу с ПЕРВОГО нажатия. Без этого первое сжатие
+        // Shift+← у краевой капсулы уходило вхолостую внутрь невидимого guard'а
+        // (beforeNode=null при непустом контейнере), перехватывалось лишь второе.
+        let fNode = sel.focusNode, fOff = sel.focusOffset;
+        if (this._isGuardNode(fNode) && fNode.parentNode) {
+            const p = fNode.parentNode;
+            const gi = Array.prototype.indexOf.call(p.childNodes, fNode);
+            fOff = (fOff >= fNode.data.length) ? gi + 1 : gi;
+            fNode = p;
+        }
         const focusRange = document.createRange();
-        focusRange.setStart(sel.focusNode, sel.focusOffset);
+        focusRange.setStart(fNode, fOff);
         focusRange.collapse(true);
         const { before, after } = this._caretAdjacentMarkers(focusRange);
         // Вправо — капсула справа от фокуса; влево — слева.
