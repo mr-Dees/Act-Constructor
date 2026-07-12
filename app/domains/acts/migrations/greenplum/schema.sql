@@ -489,7 +489,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_editor_telemetry (
     PRIMARY KEY (id, act_id),
     CONSTRAINT check_editor_telemetry_event_type_values
         CHECK (event_type IN ('observer_heal', 'capsule_repair', 'dup_id_fix',
-                              'save_failure', 'empty_paste'))
+                              'save_failure', 'empty_paste', 'word_paste'))
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (act_id);

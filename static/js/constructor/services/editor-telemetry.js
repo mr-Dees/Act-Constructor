@@ -26,6 +26,7 @@ const KNOWN_EVENTS = new Set([
     'dup_id_fix',
     'save_failure',
     'empty_paste',
+    'word_paste',
 ]);
 
 // Флаш при накоплении FLUSH_AT событий ИЛИ каждые FLUSH_INTERVAL_MS.

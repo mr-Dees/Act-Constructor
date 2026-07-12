@@ -19,6 +19,7 @@ EditorTelemetryEventType = Literal[
     "dup_id_fix",
     "save_failure",
     "empty_paste",
+    "word_paste",
 ]
 
 

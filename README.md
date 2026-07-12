@@ -131,7 +131,6 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | [integrations/agent-channel-cleanup.sql](docs/integrations/agent-channel-cleanup.sql) | Очистка завершённых строк bus-таблицы канала. |
 | [migrations/drop-all-tables.md](docs/migrations/drop-all-tables.md) | DROP всех таблиц приложения для пересоздания схемы (только dev). |
 | [migrations/drop-reference-tables.md](docs/migrations/drop-reference-tables.md) | DROP справочных/ETL-таблиц (`t_db_oarb_ua_*`, `t_db_oarb_ck_*`), отдельно от таблиц приложения. |
-| [migrations/2026-07-05-drop-textblock-formatting.md](docs/migrations/2026-07-05-drop-textblock-formatting.md) | Ручной `ALTER TABLE ... DROP COLUMN formatting` для уже развёрнутых БД (колонка вырезана из схемы текстблоков). |
 
 ## Конфигурация
 
