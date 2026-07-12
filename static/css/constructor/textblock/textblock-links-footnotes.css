@@ -26,6 +26,18 @@
     border-bottom-color: var(--primary);
 }
 
+/* «Вся капсула как юнит»: капсула, ЦЕЛИКОМ попавшая в выделение, подсвечивается
+   как единый выбранный объект (лёгкий аналог node-selection). Кольцо box-shadow
+   (не border) — без сдвига раскладки строки, как у editing-mode. Класс
+   рантайм-only, в сохранённый content не попадает. Светлая тема (у приложения
+   тёмной нет). */
+.text-link.node-selected,
+.text-footnote.node-selected {
+    background-color: var(--primary-subtle);
+    box-shadow: 0 0 0 var(--link-footnote-editing-border-width) var(--primary);
+    border-bottom-color: transparent;
+}
+
 /* Отличительный стиль для сносок */
 .text-footnote {
     background-color: var(--footnote-bg);

@@ -2,7 +2,7 @@
  * DOM-рендеринг diff с цветовой подсветкой.
  * Работает на основе результатов DiffEngine.compute().
  */
-import { SafeHTML } from '../../shared/sanitize.js';
+import { SafeHTML, renderActContent } from '../../shared/sanitize.js';
 import { iterateVisibleCells } from '../../constructor/table/grid-merges.js';
 
 export class DiffRenderer {
@@ -196,11 +196,16 @@ export class DiffRenderer {
         div.className = `diff-textblock diff-${tbDiff.status}`;
 
         if (tbDiff.status === 'added') {
-            SafeHTML.set(div, tbDiff.newContent || '');
+            renderActContent(div, tbDiff.newContent || '');
         } else if (tbDiff.status === 'removed') {
-            SafeHTML.set(div, tbDiff.oldContent || '');
+            renderActContent(div, tbDiff.oldContent || '');
         } else if (tbDiff.status === 'modified' && tbDiff.wordDiff) {
             div.className += ' diff-text';
+            // Профиль по умолчанию (НЕ 'acts'): здесь рендерится diff-разметка
+            // <ins>/<del> поверх уже pre-stripped plain text (_stripHtml в
+            // diff-engine.js), а не исходный HTML текстблока. <ins> вне
+            // acts-allowlist (ACTS_TAGS_FALLBACK в sanitize.js) — переключение
+            // на renderActContent срезало бы всю подсветку вставок.
             // _escapeHtml уже экранирует payload, но обёртки <ins>/<del> должны
             // проходить через DOMPurify — иначе вектор «текст содержит </ins><script>»
             // мог бы сломать конструкцию. SafeHTML.set sanitize всю итоговую строку.
@@ -212,7 +217,7 @@ export class DiffRenderer {
             }).join(' ');
             SafeHTML.set(div, html);
         } else {
-            SafeHTML.set(div, tbDiff.content || tbDiff.newContent || '');
+            renderActContent(div, tbDiff.content || tbDiff.newContent || '');
         }
 
         container.appendChild(div);

@@ -62,6 +62,9 @@
 @import '../constructor/textblock/textblock-content.css';
 @import '../constructor/textblock/textblock-links-footnotes.css';
 
+/* Search (find/replace bar + подсветка совпадений) */
+@import '../constructor/search/find-bar.css';
+
 /* Context menu */
 @import '../constructor/context-menu/context-menu-base.css';
 @import '../constructor/context-menu/context-menu-states.css';

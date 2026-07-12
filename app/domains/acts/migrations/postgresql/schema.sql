@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_editor_telemetry (
     event_type VARCHAR(32) NOT NULL
         CONSTRAINT check_editor_telemetry_event_type_values
         CHECK (event_type IN ('observer_heal', 'capsule_repair', 'dup_id_fix',
-                              'save_failure', 'empty_paste')),
+                              'save_failure', 'empty_paste', 'word_paste')),
     event_count INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -8,7 +8,7 @@
 
 ## 1. Введение
 
-**Что такое `tree_data`.** Это JSONB-документ с иерархической структурой акта. Хранится в таблице `act_tree` (одна запись на акт, см. `app/domains/acts/migrations/postgresql/schema.sql:136-147`). Корневой узел `{id: "root", label: "Акт", children: [...]}` — пять защищённых разделов (1–5), а в `children` — пункты, подпункты, таблицы, текстовые блоки и нарушения. Если запись отсутствует, репозиторий возвращает пустой каркас `{"id": "root", "label": "Акт", "children": []}` (`app/domains/acts/repositories/act_content.py:107-115`).
+**Что такое `tree_data`.** Это JSONB-документ с иерархической структурой акта. Хранится в таблице `act_tree` (одна запись на акт, см. `app/domains/acts/migrations/postgresql/schema.sql:142`). Корневой узел `{id: "root", label: "Акт", children: [...]}` — пять защищённых разделов (1–5), а в `children` — пункты, подпункты, таблицы, текстовые блоки и нарушения. Если запись отсутствует, репозиторий возвращает пустой каркас `{"id": "root", "label": "Акт", "children": []}` (`app/domains/acts/repositories/act_content.py:152`).
 
 **Где живёт всё остальное содержимое.** Дерево хранит только структуру и ссылки. Тяжёлые данные вынесены в отдельные таблицы:
 
@@ -24,7 +24,7 @@
 
 **API между фронтом и бэком.**
 
-- На загрузку: `ActContentRepository.get_content(act_id)` возвращает `{tree, tables, textBlocks, violations}` (`app/domains/acts/repositories/act_content.py:41-61`). Фактуры подмешиваются в `node.invoice` фронт-кодом `APIClient._attachInvoicesToTree` (`static/js/shared/api.js:602-626`).
+- На загрузку: `ActContentRepository.get_content(act_id)` возвращает `{tree, tables, textBlocks, violations}` (`app/domains/acts/repositories/act_content.py:41-61`). Фактуры подмешиваются в `node.invoice` фронт-кодом `APIClient._attachInvoicesToTree` (`static/js/shared/api.js:1038`).
 - На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Единую плоскую транзакцию (контент + diff аудита + снимок версии) держит сервис `ActContentService.save_content`; репозиторий собственную транзакцию не открывает (контракт в его докстринге). `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT`.
 
 Денормализация (дублирование `node_number`, `audit_point_id`, `audit_act_id` в `act_tables`/`act_textblocks`/`act_violations`/`act_invoices`) нужна для BI/выгрузок и поиска. Источник истины — `tree_data`; при сохранении бэк рассчитывает `node_map` и `audit_point_map` единым обходом дерева (`ActContentService::save_content` → `ActContentRepository::_save_tree`) и проставляет денормализованные поля.
@@ -56,7 +56,7 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 - Обратная сторона: записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя в БД не попадают — orphan-фильтр репозитория отбрасывает их при сохранении (с warning-логом) для всех трёх словарей. Фронт дополнительно чистит сирот при удалении узлов (`_deleteNodeData` в `state-tree.js`).
 - Когда при сохранении что-то вычищено (удалённые узлы-зомби и/или отброшенные сироты), ответ `PUT /content` несёт одно русскоязычное предупреждение в поле `warning` (`SaveContentResponse.warning`, `str | null`; фронт читает `result.warning`); `status` остаётся `success`. Нулевая половина в тексте опускается, `null` — если чистить было нечего.
 - **Статус валидации содержимого.** При каждом сохранении (и при restore версии) бэк вычисляет статус структуры акта (`services/content_validation.py::collect_validation_issues` — чистая, не бросающая) и персистит его в колонки `acts.validation_status` (`'ok'`/`'warning'`/`'error'`, CHECK `check_acts_validation_status_values`) + `acts.validation_issues` (JSONB). `error` — при любом замечании `severity='error'`; `warning` — при только мягких замечаниях (напр. пустые таблицы); иначе `ok`. Поля возвращаются в `SaveContentResponse` (`validation_status`/`validation_issues`) и выставляются в `ActListItem`/`ActResponse`. Это **отдельная** от `verification_status` (фактуры) и lock-полей система-сигнал «есть что проверить». Структурно невалидный WIP **сохраняется** (гейт снят), но **экспорт в файл** требует валидной структуры (error-level). Поверхности по уровню: `error` краснит карточку (`validation-error`, как фактура) + персистентное уведомление автору; `warning` карточку не красит, идёт агрегатом в колокольчик лендинга; полный список — внутри акта. Подробнее — dev-guide §10.5a.
-- `invoiceNodeIds` — плоский список ID узлов, у которых на фронте проставлено `node.invoice`. По нему бэк синхронизирует `act_invoices`: всё, чего нет в списке, удаляется (`act_content.py:396-433`).
+- `invoiceNodeIds` — плоский список ID узлов, у которых на фронте проставлено `node.invoice`. По нему бэк синхронизирует `act_invoices`: всё, чего нет в списке, удаляется (`act_content.py::_sync_invoices`, `478-516`).
 
 ---
 
@@ -64,8 +64,8 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 
 Pydantic-описание узла дерева — `ActItemSchema` (`app/domains/acts/schemas/act_content.py::ActItemSchema`). Поле `type` ограничено `Literal["item", "textblock", "violation", "table"]`. С точки зрения семантики узлы делятся на две группы:
 
-- **Item-узлы** (`type="item"`, либо отсутствие `type` — фронт трактует это как `item`, см. `state-core.js:365`) — структурные пункты. Могут иметь `children`.
-- **Content-узлы** (`type="table" | "textblock" | "violation"`) — «информационные» узлы по фронт-терминологии (`tree-utils.js:225-228`). У них не должно быть `children` (drag-and-drop запрещает делать их родителями: `canAcceptAsChild`, `tree-drag-drop.js:142-146`).
+- **Item-узлы** (`type="item"`, либо отсутствие `type` — фронт трактует это как `item`: `_isInformationalNode` не относит его к информационным, см. ниже) — структурные пункты. Могут иметь `children`.
+- **Content-узлы** (`type="table" | "textblock" | "violation"`) — «информационные» узлы по фронт-терминологии (`tree-utils.js::_isInformationalNode`, `271`). У них не должно быть `children` (drag-and-drop запрещает делать их родителями: `canAcceptAsChild`, `tree-drag-drop.js:153`).
 
 Сводная таблица обязательности полей. «—» означает «не используется/не имеет смысла».
 
@@ -79,7 +79,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `tableId`             | —                    | обяз.                | —                    | —                    | FK на `tables[tableId]`                                                                         |
 | `textBlockId`         | —                    | —                    | обяз.                | —                    | FK на `textBlocks[id]`                                                                          |
 | `violationId`         | —                    | —                    | —                    | обяз.                | FK на `violations[id]`                                                                          |
-| `number`              | опц.                 | опц.                 | опц.                 | опц.                 | автогенерируется фронтом: для item — иерархия (`5.1.2`), для content — `"Таблица N"` и т.п. (`state-tree.js:36-67`) |
+| `number`              | опц.                 | опц.                 | опц.                 | опц.                 | автогенерируется фронтом: для item — иерархия (`5.1.2`), для content — `"Таблица N"` и т.п. (`state-tree.js::generateNumbering`, `29`) |
 | `customLabel`         | опц.                 | опц.                 | опц.                 | опц.                 | пользовательское название (приоритет над автоматическим)                                        |
 | `protected`           | опц., default false  | опц., default false  | опц., default false  | опц., default false  | защита от перемещения и удаления (для разделов 1–5: `true`)                                     |
 | `deletable`           | опц., default true   | опц., default true   | опц., default true   | опц., default true   | разрешено ли удаление; работает независимо от `protected`                                       |
@@ -93,7 +93,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 
 - Подвид таблицы кодируется единым enum-полем `kind` (а не набором boolean-флагов `is*Table` — те убраны в kind-рефакторе, `table-kind.js`). Источник истины — `kind` на узле-таблице; значение дублируется в `tables[tableId].kind` для денормализованной выгрузки в `act_tables` (колонка `kind VARCHAR(20)` + CHECK `check_table_kind_values`). Согласованность node↔table при загрузке поддерживает `reconcileTableKind`.
 - Проверка «закреплённости»: `isPinnedTable(node)` = `kind !== 'regular'`; «является ли risk-таблицей»: `isRiskTable(node)` = `kind ∈ {regularRisk, operationalRisk, taxRisk, otherRisk}` (`table-kind.js`).
-- В сохранённом дереве `_serializeTree` (`state-core.js:361-391`) форсирует `protected` и `deletable` к булевым значениям и взаимоисключает `content` ↔ `tableId/textBlockId/violationId` (content пишется только для item-узлов).
+- В сохранённом дереве `_serializeTree` (`state-core.js:592`) форсирует `protected` и `deletable` к булевым значениям и взаимоисключает `content` ↔ `tableId/textBlockId/violationId` (content пишется только для item-узлов).
 
 ### 3.1. Подсхемы вложенных сущностей
 
@@ -120,7 +120,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `colWidths`               | `list[int]`, max 16, все > 0 | относительные веса ширины колонок (DOCX-билдер нормирует по сумме; редактор рендерит colgroup в %)        |
 | `protected`               | bool, default false          | защита от изменения структуры (добавление/удаление строк/колонок)                                       |
 | `deletable`               | bool, default true           | можно ли удалить таблицу                                                                                |
-| `kind`                    | `TableKind`, default `'regular'` | подвид таблицы (`act_content.py:60,143`): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`; зеркалит `node.kind`. CHECK `check_table_kind_values` в миграциях PG/GP |
+| `kind`                    | `TableKind`, default `'regular'` | подвид таблицы (`act_content.py::TABLE_KINDS`, `109`; поле `TableSchema.kind`, `205`): `regular`/`metrics`/`mainMetrics`/`regularRisk`/`operationalRisk`/`taxRisk`/`otherRisk`; зеркалит `node.kind`. CHECK `check_table_kind_values` в миграциях PG/GP |
 
 `TextBlockSchema` (`act_content.py::TextBlockSchema`):
 
@@ -172,7 +172,7 @@ underline}` **вырезан целиком** (директива владель
 
 **Что это.** Узлы, которые удерживаются в начале массива `children` родителя и не могут быть перетащены/смещены ниже обычных пунктов. Используется для спец-таблиц.
 
-**Какие узлы считаются pinned.** `TreeUtils.isPinnedTable` (`static/js/constructor/tree/tree-utils.js:313-315`) делегирует единому дискриминатору `table-kind.js::isPinnedTable` (один источник истины):
+**Какие узлы считаются pinned.** `TreeUtils.isPinnedTable` (`static/js/constructor/tree/tree-utils.js:355`) делегирует единому дискриминатору `table-kind.js::isPinnedTable` (один источник истины):
 
 ```js
 // tree-utils.js
@@ -187,12 +187,12 @@ isPinnedTable(node) {
 2. главная сводная таблица метрик раздела 5 (`kind='mainMetrics'`),
 3. таблицы рисков (`kind ∈ {regularRisk, operationalRisk, taxRisk, otherRisk}`).
 
-**Правила сортировки.** Метод `AppState._getFirstNonPinnedIndex(parent)` (`state-tree.js:708-714`) ищет первый незакреплённый индекс в `children` родителя — это «нижняя граница» pinned-зоны. Используется в двух местах:
+**Правила сортировки.** Метод `AppState._getFirstNonPinnedIndex(parent)` (`state-tree.js:820`) ищет первый незакреплённый индекс в `children` родителя — это «нижняя граница» pinned-зоны. Используется в двух местах:
 
-- При drag-and-drop: если `position === 'before'/'after'` указывает в pinned-зону, эффективный индекс прижимается вниз (`_performMove`, `state-tree.js:686-693`). Дополнительно `_calculateDropPosition` (`tree-drag-drop.js:226-240`) запрещает `'before'` на pinned-узле и блокирует `'after'` между двумя соседними pinned-таблицами.
-- При создании risk-таблицы: вставляется через `splice(firstNonPinnedIdx, 0, tableNode)` (`state-content.js:594-596`, `state-content.js:629-631`).
+- При drag-and-drop: если `position === 'before'/'after'` указывает в pinned-зону, эффективный индекс прижимается вниз (`_performMove`, `state-tree.js:783`). Дополнительно `_calculateDropPosition` (`tree-drag-drop.js:203`) запрещает `'before'` на pinned-узле и блокирует `'after'` между двумя соседними pinned-таблицами.
+- При создании risk-таблицы: вставляется по индексу `_getFirstNonPinnedIndex` (`state-content.js:545`, `584`, `722`, `810` — `_createRegularRiskTable`/`_createOperationalRiskTable`/`_createTaxRiskTable`/`_createOtherRiskTable`).
 
-Метрик-таблицы (`kind='metrics'`, `kind='mainMetrics'`) создаются через `node.children.unshift(tableNode)` (`state-content.js:295`, `state-content.js:442`) — то есть всегда первыми. Если в `children` уже есть pinned-таблицы, новая всё равно встаёт нулевой; порядок между metrics и risk на одном уровне определяется временем создания.
+Метрик-таблицы (`kind='metrics'`, `kind='mainMetrics'`) создаются через `node.children.unshift(tableNode)` (`state-content.js:252`, `state-content.js:406`) — то есть всегда первыми. Если в `children` уже есть pinned-таблицы, новая всё равно встаёт нулевой; порядок между metrics и risk на одном уровне определяется временем создания.
 
 ---
 
@@ -200,7 +200,7 @@ isPinnedTable(node) {
 
 **Что это.** Узлы с флагом `protected: true`. Дополнительно у них может стоять `deletable: false` — это два независимых ограничения.
 
-**Где задаётся.** Разделы 1–5 создаются защищёнными при инициализации дерева через `_createProtectedSection` (`state-core.js:70-79`):
+**Где задаётся.** Разделы 1–5 создаются защищёнными при инициализации дерева через `_createProtectedSection` (`state-core.js:76`):
 
 ```js
 {
@@ -212,17 +212,17 @@ isPinnedTable(node) {
 }
 ```
 
-Список разделов — `AppConfig.tree.defaultSections` (`app-config.js:262-268`): `1` «Информация о процессе, клиентском пути» (для непроцессной проверки — «Характеристика проверяемого направления»), `2` «Оценка качества…», `3` «Примененные технологии», `4` «Основные выводы», `5` «Результаты проверки» (`state-core.js:48-54`).
+Список разделов — `AppConfig.tree.defaultSections` (`app-config.js:331-337`): `1` «Информация о процессе, клиентском пути» (для непроцессной проверки — «Характеристика проверяемого направления», подставляется в `state-core.js::_createRootStructure`), `2` «Оценка качества…», `3` «Примененные технологии», `4` «Основные выводы», `5` «Результаты проверки».
 
-Помимо разделов, `protected: true` ставится фронт-кодом всем спец-таблицам (metrics, main metrics, regular risk, operational risk) и предустановленным таблицам разделов 2 и 3 (`state-core.js:97-107`, `state-content.js:292-310`, `state-content.js:439-457`, `state-content.js:593-611`, `state-content.js:629-647`).
+Помимо разделов, `protected: true` ставится фронт-кодом всем спец-таблицам (metrics, main metrics, regular risk, operational risk) и предустановленным таблицам разделов 2 и 3 (`state-core.js:100`, `state-content.js:263`, `state-content.js:417`, `state-content.js:556`, `state-content.js:595`, `state-content.js:733`, `state-content.js:823`).
 
 **Что нельзя делать с protected-узлами:**
 
 | Действие                  | Ограничение                                                                                     |
 |---------------------------|--------------------------------------------------------------------------------------------------|
 | Удаление                  | Если `deletable === false` — невозможно ни через UI, ни через `deleteNode` (`state-tree.js`). Разделы 1–5 имеют `deletable: false`. |
-| Перемещение               | Drag запрещён в `_validateMove` (`state-tree.js:425-427`) и при `dragstart` (`tree-drag-drop.js:85-88`). |
-| Изменение структуры таблицы | Для `protected: true` таблиц добавление/удаление строк и колонок блокируется в `table-cells-operations.js` (см. строки 310, 378, 527, 732, 827). |
+| Перемещение               | Drag запрещён в `_validateMove` (`state-tree.js:506`) и при `dragstart` (`tree-drag-drop.js:108`). |
+| Изменение структуры таблицы | Для `protected: true` таблиц добавление/удаление строк и колонок блокируется в `table-cells-operations.js` (см. строки 398, 480, 653, 979, 1064). |
 
 `deletable` работает независимо: можно иметь `protected: true, deletable: true` (защищена от перемещения, но удалить можно) — такая комбинация встречается у спец-таблиц.
 
@@ -236,7 +236,7 @@ isPinnedTable(node) {
 
 **Подтипы.**
 
-- `kind='metrics'` — таблица метрик одного пункта `5.X`. Создаётся, когда в потомках узла `5.X` (т.е. на уровне `5.X.X+`) появляется хотя бы одна risk-таблица (`_updateMetricsTablesAfterRiskTableCreated`, `state-content.js:490-519`). Удаляется автоматически, когда последняя глубокая risk-таблица исчезает (`_cleanupMetricsTablesAfterRiskTableDeleted`, `state-content.js:526-576`).
+- `kind='metrics'` — таблица метрик одного пункта `5.X`. Создаётся, когда в потомках узла `5.X` (т.е. на уровне `5.X.X+`) появляется хотя бы одна risk-таблица (`_updateMetricsTablesAfterRiskTableCreated`, `state-content.js:445`). Удаляется автоматически, когда последняя глубокая risk-таблица исчезает (`_cleanupMetricsTablesAfterRiskTableDeleted`, `state-content.js:481`).
 - `kind='mainMetrics'` — главная сводная для всего раздела 5. Создаётся при появлении ЛЮБОЙ risk-таблицы в дереве 5, удаляется при их полном отсутствии (та же функция).
 
 **Структура `grid`.** Сетка 4×7 с двумя строками заголовков и двумя строками данных. Заголовки используют объединения (`colSpan`/`rowSpan`/`isSpanned`/`spanOrigin`) для группировки «Количество клиентов / элементов» (ФЛ/ЮЛ под общей шапкой) и «Сумма, руб.» / «Код БП» / «Пункт акта». Полный шаблон — `_createMetricsHeaderGrid` (`state-content.js`).
@@ -259,7 +259,7 @@ isPinnedTable(node) {
 
 В коде ячейки-«дырки» под объединениями явно описаны как `isSpanned: true` с `spanOrigin: {row, col}` — это нужно для корректной отрисовки и редактирования (cм. `headerRow2` в `_createMetricsHeaderGrid`).
 
-**Имя таблицы (`label`).** `"Объем выявленных отклонений (В метриках) по {nodeNumber}"` для `kind='metrics'` и `"Объем выявленных отклонений"` для `kind='mainMetrics'`. При перенумерации узла `5.X` фронт обновляет label автоматически — `updateMetricsTableLabel` (`state-tree.js:102-115`), не затирая пользовательский `customLabel` (guard `isAutoMetricsTableLabel`).
+**Имя таблицы (`label`).** `"Объем выявленных отклонений (В метриках) по {nodeNumber}"` для `kind='metrics'` и `"Объем выявленных отклонений"` для `kind='mainMetrics'`. При перенумерации узла `5.X` фронт обновляет label автоматически — `updateMetricsTableLabel` (`state-tree.js:77`), не затирая пользовательский `customLabel` (guard `isAutoMetricsTableLabel`).
 
 **Ограничения.**
 
@@ -271,27 +271,27 @@ isPinnedTable(node) {
 
 **Подтипы.**
 
-- `kind='regularRisk'` — регулярные риски. Шаблон в `AppConfig.content.tablePresets.regularRisk` (см. `app-config.js`), создаётся через `_createRegularRiskTable` (`state-content.js:584-612`).
-- `kind='operationalRisk'` — операционные риски. Шаблон 4×6, заголовки с объединениями, см. `_createOperationalRiskGrid` (`state-content.js:655-745`).
-- Дополнительно схема допускает `kind='taxRisk'`/`'otherRisk'` (полный набор из 7 подвидов).
+- `kind='regularRisk'` — регулярные риски. Шаблон в `AppConfig.content.tablePresets.regularRisk` (см. `app-config.js`), создаётся через `_createRegularRiskTable` (`state-content.js:532`).
+- `kind='operationalRisk'` — операционные риски. Шаблон 4×6, заголовки с объединениями, создаётся через `_createOperationalRiskTable` (`state-content.js:571`), сетка — `_createOperationalRiskGrid` (`state-content.js:609`).
+- Дополнительно схема допускает `kind='taxRisk'`/`'otherRisk'` (полный набор из 7 подвидов) — `_createTaxRiskTable`/`_createTaxRiskGrid` (`state-content.js:710`/`750`), `_createOtherRiskTable` (`state-content.js:797`).
 
 Подвид `kind` хранится на узле-таблице (источник истины) и дублируется в `tables[tableId].kind`. Проверка «узел — risk-таблица»: `isRiskTable(node)` (`table-kind.js`; `TreeUtils.isPinnedTable`/`isRiskTable` делегируют туда).
 
 **Правила размещения.**
 
 - Только под разделом 5 (любая глубина: `5.X`, `5.X.Y`, …).
-- Все risk-таблицы в разделе 5 должны быть на ОДНОМ уровне глубины — либо все на уровне пунктов (`5.X`), либо все на уровне подпунктов (`5.X.Y+`), смешивать запрещено (`_checkSection5RiskConstraints`, `state-tree.js:596-662`).
+- Все risk-таблицы в разделе 5 должны быть на ОДНОМ уровне глубины — либо все на уровне пунктов (`5.X`), либо все на уровне подпунктов (`5.X.Y+`), смешивать запрещено (`_checkSection5RiskConstraints`, `state-tree.js:705`).
 - Pinned: вставляются через `splice` после всех остальных pinned-таблиц.
 - Создание risk-таблицы триггерит ревизию metrics-таблиц (см. §6.1).
-- Risk-таблицы **нельзя перетаскивать** — `dragstart` блокирует любую попытку, см. `_hasRiskTablesInSubtree` (`tree-drag-drop.js:91-95`). Это касается и перетаскивания узла-носителя, и перетаскивания пункта, содержащего risk-таблицу в любой ветке поддерева (исключение — перемещение в пределах раздела 5).
+- Risk-таблицы **нельзя перетаскивать** — `dragstart` блокирует любую попытку, см. `_hasRiskTablesInSubtree` (`tree-drag-drop.js:143`). Это касается и перетаскивания узла-носителя, и перетаскивания пункта, содержащего risk-таблицу в любой ветке поддерева (исключение — перемещение в пределах раздела 5).
 
 ---
 
 ## 7. Invoice attachment (прикреплённые фактуры)
 
-**Куда прикрепляются.** К листовым item-узлам под разделом 5 («TB-leaf»: item под `5.*` без дочерних item-узлов). Проверка: `TreeUtils.isTbLeaf` (`tree-utils.js:282-286`).
+**Куда прикрепляются.** К листовым item-узлам под разделом 5 («TB-leaf»: item под `5.*` без дочерних item-узлов). Проверка: `TreeUtils.isTbLeaf` (`tree-utils.js:328`).
 
-**Структура `node.invoice`.** Объект на узле, существующий ТОЛЬКО во фронт-объекте — в сериализованный `tree_data` он не попадает (см. `_serializeTree`, `state-core.js:361-391`). Содержимое (`dialog-invoice.js:~769-810`, `api.js:611-619`):
+**Структура `node.invoice`.** Объект на узле, существующий ТОЛЬКО во фронт-объекте — в сериализованный `tree_data` он не попадает (см. `_serializeTree`, `state-core.js:592`). Содержимое (`dialog-invoice.js:771-776`):
 
 ```jsonc
 {
@@ -308,14 +308,14 @@ isPinnedTable(node) {
 
 **Как привязывается.**
 
-1. На фронте `InvoiceDialog` при сохранении отправляет POST `/api/v1/acts/invoices/save` через `APIClient.saveInvoice` (`dialog-invoice.js:795`) и сразу проставляет фактуру на узел через мутатор `AppState.setNodeInvoice(this._currentNode.id, {...})` (`dialog-invoice.js:803-810`; мутатор помечает dirty через Proxy-трекинг — ручной `markAsUnsaved` убран, см. state-6).
-2. На бэке создаётся/обновляется строка в `act_invoices` (`{SCHEMA}.{PREFIX}act_invoices`, схема в `migrations/postgresql/schema.sql:279-307`). `UNIQUE(act_id, node_id)` гарантирует одну фактуру на узел.
-3. При следующем `save_content` бэк синхронизирует `act_invoices`: всё, что отсутствует в `data.invoiceNodeIds`, удаляется; для оставшихся обновляются `node_number`, `audit_act_id`, `audit_point_id` (`act_content.py:396-433`).
-4. На загрузке акта `APIClient._attachInvoicesToTree` обходит дерево и навешивает `node.invoice` на узлы с прикреплёнными фактурами (`api.js:602-626`).
+1. На фронте `InvoiceDialog` при сохранении отправляет POST `/api/v1/acts/invoices/save` через `APIClient.saveInvoice` (`dialog-invoice.js:795`) и сразу проставляет фактуру на узел через мутатор `AppState.setNodeInvoice(this._currentNode.id, {...})` (`dialog-invoice.js:804`; мутатор помечает dirty через Proxy-трекинг — ручной `markAsUnsaved` убран, см. state-6).
+2. На бэке создаётся/обновляется строка в `act_invoices` (`{SCHEMA}.{PREFIX}act_invoices`, схема в `migrations/postgresql/schema.sql:270`). `UNIQUE(act_id, node_id)` гарантирует одну фактуру на узел.
+3. При следующем `save_content` бэк синхронизирует `act_invoices`: всё, что отсутствует в `data.invoiceNodeIds`, удаляется; для оставшихся обновляются `node_number`, `audit_act_id`, `audit_point_id` (`act_content.py::_sync_invoices`, `478-516`).
+4. На загрузке акта `APIClient._attachInvoicesToTree` обходит дерево и навешивает `node.invoice` на узлы с прикреплёнными фактурами (`api.js:1038`).
 
-**Сборка `invoiceNodeIds` для отправки.** Фронт-функция `_collectInvoiceNodeIds` обходит дерево и собирает ID всех узлов с `node.invoice` (`state-core.js:345-353`). Это единственный канал, через который бэк узнаёт о привязках; самой структуры `invoice` бэк из дерева не читает.
+**Сборка `invoiceNodeIds` для отправки.** Фронт-функция `_collectInvoiceNodeIds` обходит дерево и собирает ID всех узлов с `node.invoice` (`state-core.js:575`). Это единственный канал, через который бэк узнаёт о привязках; самой структуры `invoice` бэк из дерева не читает.
 
-**Чистка при перемещении.** Если узел уезжает за пределы раздела 5, `_clearInvoiceRecursive` стирает `invoice` у узла и всех потомков (`state-tree.js:382-386, 843-853`). Аналогично при добавлении ребёнка к TB-leaf — родитель перестаёт быть листом, и его `invoice` удаляется (`state-tree.js:147-150`).
+**Чистка при перемещении.** Если узел уезжает за пределы раздела 5, `_clearInvoiceRecursive` стирает `invoice` у узла и всех потомков (`state-tree.js:1024`). Аналогично при добавлении ребёнка к TB-leaf — родитель перестаёт быть листом, и его `invoice` удаляется (`state-tree.js:126`).
 
 **Дополнительные denormalized-поля в `act_invoices`.** `verification_status` (`pending|verified|rejected`, default `pending`), `audit_act_id`, `audit_point_id`, `etl_loading_id`, `create_date`, `created_by` — заполняются бэком, не приходят с фронта.
 
@@ -323,24 +323,24 @@ isPinnedTable(node) {
 
 ## 8. Drag-and-drop: правила
 
-Реализация — `TreeDragDrop` (`static/js/constructor/tree/tree-drag-drop.js`) + `AppState.moveNode` (`static/js/constructor/state/state-tree.js:309-392`). Валидация на старте и на drop'е.
+Реализация — `TreeDragDrop` (`static/js/constructor/tree/tree-drag-drop.js`) + `AppState.moveNode` (`static/js/constructor/state/state-tree.js:378`). Валидация на старте и на drop'е.
 
 | Правило                                                                                          | Где проверяется                                                  |
 |--------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| Узлы с `protected: true` не draggable                                                            | `handleDragStart` (`tree-drag-drop.js:85-88`), `_validateMove` (`state-tree.js:425-427`) |
-| Узлы, содержащие risk-таблицу в поддереве, draggable только внутри раздела 5                     | `handleDragStart` (`tree-drag-drop.js:91-95`), повторно в `moveNode` (`state-tree.js:347-353`) |
-| Content-узлы (`table`, `textblock`, `violation`) не могут быть родителями                        | `canAcceptAsChild` (`tree-drag-drop.js:142-146`)                  |
-| Запрет drop'а в собственного потомка                                                              | `handleDragOver` через `TreeUtils.isDescendant` (`tree-drag-drop.js:169-172`) |
-| Запрет drop'а `'before'` на pinned-узле; `'after'` блокируется, если следом ещё одна pinned       | `_calculateDropPosition` (`tree-drag-drop.js:226-240`)            |
-| Превышение `AppConfig.tree.maxDepth` (= 4) запрещено                                              | `_checkDepthConstraints` (`state-tree.js:506-522`)                |
-| Перенос узла на первый уровень (`root.children`) запрещён (пункт «Process Mining» добавляется только через меню) | `_checkFirstLevelConstraints` (`state-tree.js:621-628`)           |
-| В разделе 5: risk-таблицы должны быть на одном уровне глубины                                    | `_checkSection5RiskConstraints` (`state-tree.js:596-662`)         |
+| Узлы с `protected: true` не draggable                                                            | `handleDragStart` (`tree-drag-drop.js:108`), `_validateMove` (`state-tree.js:506`) |
+| Узлы, содержащие risk-таблицу в поддереве, draggable только внутри раздела 5                     | `handleDragStart` (`tree-drag-drop.js:114`), повторно в `moveNode` (`state-tree.js::_getNodesForMove`) |
+| Content-узлы (`table`, `textblock`, `violation`) не могут быть родителями                        | `canAcceptAsChild` (`tree-drag-drop.js:153`)                      |
+| Запрет drop'а в собственного потомка                                                              | `handleDragOver` через `TreeUtils.isDescendant` (`tree-drag-drop.js:184`) |
+| Запрет drop'а `'before'` на pinned-узле; `'after'` блокируется, если следом ещё одна pinned       | `_calculateDropPosition` (`tree-drag-drop.js:203`)                |
+| Превышение `AppConfig.tree.maxDepth` (= 4) запрещено                                              | `_checkDepthConstraints` (`state-tree.js:588`)                    |
+| Перенос узла на первый уровень (`root.children`) запрещён (пункт «Process Mining» добавляется только через меню) | `_checkFirstLevelConstraints` (`state-tree.js:629`)      |
+| В разделе 5: risk-таблицы должны быть на одном уровне глубины                                    | `_checkSection5RiskConstraints` (`state-tree.js:705`)             |
 | В разделе 5: нельзя создавать подпункты `5.X.X+`, если risk-таблицы стоят на уровне пунктов     | то же                                                              |
-| Перемещение metrics-таблицы за пределы раздела 5: требуется подтверждение пользователя (диалог) и она удаляется | `_checkMetricsTableDeletion` (`state-tree.js:455-477`)            |
-| В режиме read-only любое перемещение запрещено                                                    | `handleDragStart` (`tree-drag-drop.js:73-77`), `moveNode` (`state-tree.js:310-313`) |
-| Эффективный индекс drop'а прижимается ниже pinned-зоны, даже если drop был «выше»                | `_performMove` (`state-tree.js:686-693`)                          |
+| Перемещение metrics-таблицы за пределы раздела 5: требуется подтверждение пользователя (диалог) и она удаляется | `_checkMetricsTableDeletion` (`state-tree.js:536`)       |
+| В режиме read-only любое перемещение запрещено                                                    | `handleDragStart` (`tree-drag-drop.js:97`), `moveNode` (`state-tree.js:379`, `ValidationCore.requireWrite`) |
+| Эффективный индекс drop'а прижимается ниже pinned-зоны, даже если drop был «выше»                | `_performMove` (`state-tree.js:783`)                              |
 
-Дополнительный side-effect перемещения: пересчёт metrics-таблиц через `_reconcileMetricsTablesAfterMove` (`state-tree.js:785-819`) и очистка `tb`/`invoice` у поддерева, ушедшего из раздела 5 (`state-tree.js:382-386`).
+Дополнительный side-effect перемещения: пересчёт metrics-таблиц через `_reconcileMetricsTablesAfterMove` (`state-tree.js:894`) и очистка `tb`/`invoice` у поддерева, ушедшего из раздела 5 (`state-tree.js:453-465`).
 
 ---
 
@@ -500,7 +500,7 @@ isPinnedTable(node) {
   2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации и `field_validator`'ы на `TableSchema.grid`/`colWidths`. Политика незнакомых полей задана явно: словарные схемы и `ActDataSchema` — `extra="forbid"` (незадекларированное поле → 422), узлы дерева (`ActItemSchema`) — явный `extra="ignore"` с нормализацией через `model_dump` (дерево хранится нормализованным). При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — новые поля добавляются опциональными с `default=` и обязательно декларируются в схеме.
   3. Денормализация — если меняется набор флагов в `act_tables` (например, новый тип спец-таблицы), нужно одновременно обновить SQL-миграции (новая колонка, индекс при необходимости) и `ActContentRepository._load_tables`/`_save_tables`.
 
-**Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:354-368`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data` по номерам версий, для просмотра истории и восстановления. Это версионирование данных конкретного акта, а не схемы.
+**Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:345`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data` по номерам версий, для просмотра истории и восстановления. Это версионирование данных конкретного акта, а не схемы.
 
 **Рекомендации при изменении модели.**
 

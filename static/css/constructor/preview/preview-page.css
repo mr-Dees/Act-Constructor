@@ -69,7 +69,12 @@
     outline-offset: -1px;
     font-family: "Times New Roman", serif;
     font-size: 12pt;
-    line-height: 1.15;
+    /* Task C: одинарный Word-интервал (DOCX app/domains/acts/formatters/docx/
+       styles.py::Spacing, line_single = w:line 240/lineRule auto). Токен
+       переиспользуется текстблоком в preview-typography.css (супersedes
+       B-22), чтобы значение листа и текстблока не разъезжались. */
+    --preview-print-line-height: 1.15;
+    line-height: var(--preview-print-line-height);
     color: #000;
 }
 
@@ -138,7 +143,11 @@
     text-align: left;
 }
 
-/* Обёртка таблицы на листе не скроллится: таблица всегда влезает в колонку. */
+/* Обёртка таблицы на листе не скроллится: таблица всегда влезает в колонку.
+   Task C: margin 6pt уже соответствует DOCX add_blank_line() после таблицы
+   (styles.py::Sizes.blank_line_pt=6) — этот же отступ стоит и ДО таблицы
+   (в DOCX «до» — обычно 3pt от Normal-спейсинга предыдущего абзаца, не 6pt);
+   сознательное приближение ради симметрии сверху/снизу, отдельно не правим. */
 .preview-sheet .preview-table-wrapper {
     overflow-x: visible;
     margin: 6pt 0;

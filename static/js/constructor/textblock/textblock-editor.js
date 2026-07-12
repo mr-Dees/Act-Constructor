@@ -2,10 +2,11 @@
  * Расширение для работы с редактором
  */
 import { PreviewManager } from '../preview/preview.js';
-import { TextBlockManager } from './textblock-core.js';
+import { TextBlockManager, isCapsuleNode, isZeroWidthNode } from './textblock-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML, SAFE_HTML_PROFILES, renderActContent } from '../../shared/sanitize.js';
+import { getStructureLimits } from '../violation/violation-image-validator.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -120,10 +121,11 @@ Object.assign(TextBlockManager.prototype, {
     /** Символ-«пустышка» caret-guard'а (U+FEFF, BOM/zero-width-no-break-space). */
     CAP_GUARD_CHAR: '\uFEFF',
 
-    /** @private Узел — это inline-капсула (ссылка/сноска)? */
+    /** @private Узел — это inline-капсула (ссылка/сноска)? Делегат единого
+     *  предиката isCapsuleNode (textblock-core.js) — тот же, что использует движок
+     *  поиска, чтобы «граница капсулы» не дрейфовала между слоями. */
     _isCapsule(node) {
-        return !!(node && node.nodeType === Node.ELEMENT_NODE && node.classList &&
-            (node.classList.contains('text-link') || node.classList.contains('text-footnote')));
+        return isCapsuleNode(node);
     },
 
     /** @private Текстовый узел — чистый caret-guard (один U+FEFF)? */
@@ -144,15 +146,7 @@ Object.assign(TextBlockManager.prototype, {
      * <img> и пустые элементы — НЕ zero-width (значимые границы/атомы).
      */
     _isZeroWidthNode(n) {
-        if (!n) return false;
-        if (n.nodeType === Node.TEXT_NODE) {
-            return /^[\uFEFF\u200B]*$/.test(n.data);            // '' или только FEFF/ZWSP
-        }
-        if (n.nodeType === Node.ELEMENT_NODE && !this._isCapsule(n) && n.tagName !== 'BR') {
-            const t = n.textContent || '';
-            return t.length > 0 && /^[\uFEFF\u200B]+$/.test(t); // span ТОЛЬКО из zero-width (не <img>/пустой)
-        }
-        return false;
+        return isZeroWidthNode(n); // делегат единого предиката (textblock-core.js)
     },
 
     /**
@@ -448,6 +442,12 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
+        // «Вся капсула как юнит»: снимаем визуальную .node-selected отметку —
+        // выделение покидает редактор (handleSelectionChange его уже не чистит).
+        // Данные и так чисты (strip в _repairCapsulesInRoot), это только косметика.
+        // Единый сток снятия: O(1) по кэшу + editor-скоуп sweep (blur нечаст).
+        this._clearNodeSelected(editor);
+
         // Если фокус ушёл ДО compositionend (IME прервана внешне) — буфер
         // __composingRecords иначе провисит до следующего ввода в этот
         // редактор. Идемпотентно: при штатном compositionend __composing уже
@@ -679,24 +679,59 @@ Object.assign(TextBlockManager.prototype, {
 
         if (isCut) {
             // Удаляем расширенное выделение нативно — остаётся в undo-стеке.
-            selection.removeAllRanges();
-            selection.addRange(work);
-            document.execCommand('delete');
+            // Через _execDeleteRange (взводит __healing): иначе, если вырезается
+            // РОВНО одна капсула целиком, вложенный beforeinput от execCommand
+            // перехватила бы whole-capsule-ветка handleEditorBeforeInput. Клон/
+            // strip/setData выше не затрагиваются (CARET-2).
+            this._execDeleteRange(editor, work);
             this.finalizeEdit(editor);
         }
     },
 
     /**
-     * Строит DocumentFragment из вставленного HTML, выбирая режим по метке
-     * происхождения data-aw-clip: свой буфер → реконструкция капсул + инлайн-
-     * формат; внешний HTML → строгая политика «только ссылки».
+     * Строит DocumentFragment из вставленного HTML, выбирая режим по источнику:
+     *  - свой буфер (data-aw-clip) → реконструкция капсул + полный инлайн-формат;
+     *  - Word (mso-сигнатуры) → формат ПОДМНОЖЕСТВОМ тулбара (b/i/u/s + размер),
+     *    ссылки-капсулы; цвет/фон/выравнивание/списки отбрасываются;
+     *  - прочий внешний HTML → строгая политика «только ссылки».
+     * Порядок веток: свой → Word → внешний (Word проверяем ДО внешнего, иначе
+     * его разметка ушла бы в «только ссылки» и формат бы потерялся).
      * @private
      */
     _buildPasteFragment(html) {
         if (this._isOwnClipboardHtml(html)) {
             return this._buildOwnPasteFragment(html);
         }
+        if (this._isWordHtml(html)) {
+            window.EditorTelemetry?.track?.('word_paste');
+            return this._buildWordPasteFragment(html);
+        }
         return this._buildExternalPasteFragment(html);
+    },
+
+    /**
+     * @private Похож ли СЫРОЙ HTML буфера на экспорт Microsoft Word? Проверяем
+     * до санитизации — DOMPurify выпилит mso-разметку, и после неё сигнатур не
+     * останется. Любой из признаков достаточен (регистронезависимо): класс
+     * `MsoNormal`/атрибут `class=Mso*`, CSS-декларация `mso-*:`, мета-генератор
+     * «Microsoft Word», office-namespace (`xmlns:o=`/`urn:schemas-microsoft-com:
+     * office`), пустой абзац `<o:p>` или условный комментарий `<!--[if ...mso...`.
+     */
+    _isWordHtml(rawHtml) {
+        if (typeof rawHtml !== 'string' || !rawHtml) return false;
+        return (
+            /class=["']?[^"'>]*Mso/i.test(rawHtml)
+            // Только CSS-ДЕКЛАРАЦИЯ `mso-*:` (Word всегда пишет mso- как свойство
+            // стиля, напр. `mso-fareast-language:`), НЕ голая подстрока «mso-» —
+            // иначе безобидный внешний HTML с «mso-» в тексте/URL уходил бы на
+            // Word-путь. Реальный Word ловится и этим, и class=Mso/Generator.
+            || /mso-[a-z][a-z-]*\s*:/i.test(rawHtml)
+            || /<meta[^>]+name=["']?Generator["']?[^>]+Microsoft\s+Word/i.test(rawHtml)
+            || /xmlns:o=/i.test(rawHtml)
+            || /urn:schemas-microsoft-com:office/i.test(rawHtml)
+            || /<o:p/i.test(rawHtml)
+            || /<!--\[if[\s\S]*?mso/i.test(rawHtml)
+        );
     },
 
     /**
@@ -782,6 +817,201 @@ Object.assign(TextBlockManager.prototype, {
             // Невалидная/пустая капсула → её видимый текст.
             if (!replacement) replacement = document.createTextNode(text);
             el.parentNode.replaceChild(replacement, el);
+        });
+    },
+
+    /**
+     * Вставка из Microsoft Word: сохраняем РОВНО тот формат, что умеет выставить
+     * тулбар редактора — bold/italic/underline/strikethrough + font-size (инлайн),
+     * плюс ссылки-капсулы. Цвет, фон, выравнивание, списки и всё прочее сознательно
+     * отбрасываются (симметрия «вставка ⊆ возможности UI»). Блоки (p/div/li)
+     * расплющиваются в инлайн + <br> — структура абзацев из Word в v1 не
+     * переносится (известное ограничение).
+     * @private
+     */
+    _buildWordPasteFragment(html) {
+        const pre = this._wordPreClean(html);
+        // Санитизация тем же контрактом словаря форматирования, что превью/PUT:
+        // теги — подмножество инлайн-формата + блоки под расплющивание; style
+        // фильтруется CSS-allowlist'ом (хук afterSanitizeAttributes читает
+        // __cssAllowlist), из которого выкинуты color/фон/выравнивание. Схему href
+        // допускаем как во внешнем пути; финальный гейт — validateLinkUrl ниже.
+        const clean = SafeHTML.sanitize(pre, {
+            USE_PROFILES: false,
+            ALLOWED_TAGS: this._wordAllowedTags(),
+            ALLOWED_ATTR: this._wordAllowedAttrs(),
+            ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+            __cssAllowlist: this._wordCssAllowlist(),
+        });
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean; // clean уже прошёл DOMPurify — безопасно для парсинга
+        // Word пишет размер в pt (и как «11.0pt»); фронтовый CSS-хук единицы не
+        // валидирует, а бэк на save срезает не-px → без нормализации был бы шов
+        // превью↔сохранённое. Приводим к целым px в допустимом диапазоне.
+        this._normalizeWordFontSizes(tmp);
+        // <a href> → капсулы ссылок со свежими id (невалидная схема → разворот в
+        // инлайн-детей, чтобы окружающий формат не потерялся).
+        this._reconstructWordLinks(tmp);
+        // Расплющиваем блоки в инлайн + <br>, сохраняя вложенный формат.
+        const fragment = document.createDocumentFragment();
+        this._flattenWordBlocks(tmp, fragment);
+        // Хвостовой перенос после последнего абзаца не нужен.
+        while (fragment.lastChild
+            && fragment.lastChild.nodeType === Node.ELEMENT_NODE
+            && fragment.lastChild.tagName === 'BR') {
+            fragment.removeChild(fragment.lastChild);
+        }
+        return fragment;
+    },
+
+    /**
+     * @private Тонкая regex-пред-очистка Word-разметки, которую allowlist
+     * DOMPurify не убирает начисто: условные комментарии `<!--[if]...<![endif]-->`
+     * (несут mso-CSS и <xml>), блоки-острова `<xml>…</xml>` (office-метаданные,
+     * не видимый текст) и пустые абзацы `<o:p>`. Теги `<w:*>` (content-control'ы
+     * `w:sdt`/`w:smartTag`) РАЗворачиваются, а не удаляются с содержимым — иначе
+     * терялся бы видимый текст рана внутри них. mso-* CSS-свойства чистить не
+     * нужно — их срежет CSS-allowlist. Работает по строке ДО парсинга.
+     */
+    _wordPreClean(html) {
+        return String(html)
+            .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, '')
+            .replace(/<xml\b[^>]*>[\s\S]*?<\/xml>/gi, '')
+            .replace(/<o:p\b[^>]*>[\s\S]*?<\/o:p>/gi, '')
+            .replace(/<o:p\b[^>]*\/?>/gi, '')
+            .replace(/<\/?w:[^>]*>/gi, '');
+    },
+
+    /**
+     * @private Теги для Word-вставки: инлайн-формат + блоки под расплющивание,
+     * ПЕРЕСЕЧЁННЫЕ с живым профилем 'acts' (SAFE_HTML_PROFILES.acts.ALLOWED_TAGS,
+     * трекает серверный applyActsAllowlist). Уберёт бэк тег из allowlist — Word-путь
+     * уронит его тоже (не «замороженный снимок»); шире набора Word'а не расширяет.
+     */
+    _wordAllowedTags() {
+        const WORD = ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span', 'a', 'br', 'p', 'div', 'li'];
+        const profile = (SAFE_HTML_PROFILES.acts && SAFE_HTML_PROFILES.acts.ALLOWED_TAGS) || [];
+        return WORD.filter(t => profile.includes(t));
+    },
+
+    /**
+     * @private Атрибуты для Word-вставки (style + href) ∩ живой профиль 'acts'
+     * (ALLOWED_ATTR). Дериват — не дрейфует от рантайм-обновляемого набора, как
+     * _wordAllowedTags/_wordCssAllowlist.
+     */
+    _wordAllowedAttrs() {
+        const WORD = ['style', 'href'];
+        const profile = (SAFE_HTML_PROFILES.acts && SAFE_HTML_PROFILES.acts.ALLOWED_ATTR) || [];
+        return WORD.filter(a => profile.includes(a));
+    },
+
+    /**
+     * @private CSS-allowlist для Word-вставки: набор профиля 'acts' МИНУС
+     * color/background-color/text-align. Оставляет ровно то, что умеет тулбар
+     * (font-size + жирный/курсив/подчёркивание/зачёркивание через *-weight/
+     * -style/-decoration), не давая просочиться цвету/фону/выравниванию. Дериват
+     * из активного профиля — остаётся синхронным с бэком (applyActsAllowlist).
+     */
+    _wordCssAllowlist() {
+        const base = SAFE_HTML_PROFILES.acts.__cssAllowlist || [];
+        const drop = ['color', 'background-color', 'text-align'];
+        return base.filter(p => !drop.includes(p));
+    },
+
+    /**
+     * @private Приводит inline font-size у всех элементов поддерева к целым px в
+     * диапазоне [fontSizeMin,fontSizeMax]: pt→px = round(v*4/3), px оставляем,
+     * em/rem/%/прочее — declaration отбрасываем (не-px единиц не оставляем).
+     * Переписываем даже px-в-диапазоне, чтобы после нормализации не осталось ни
+     * одной не-px величины.
+     * @param {HTMLElement} root
+     */
+    _normalizeWordFontSizes(root) {
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        const { fontSizeMin, fontSizeMax } = getStructureLimits();
+        root.querySelectorAll('*').forEach((el) => {
+            if (!el || !el.style) return;
+            const raw = el.style.fontSize;
+            if (!raw) return;
+            const px = this._wordFontSizeToPx(raw, fontSizeMin, fontSizeMax);
+            // null → единица не-px: убираем только font-size, прочие allowed-свойства
+            // (font-weight/…) не трогаем.
+            el.style.fontSize = px == null ? '' : `${px}px`;
+        });
+    },
+
+    /**
+     * @private Чистая конвертация значения font-size из Word в целые px внутри
+     * [min,max]. pt→round(v*4/3), px→round(v), em/rem/%/без единицы/прочее → null
+     * (отбросить). Возвращает число px или null.
+     */
+    _wordFontSizeToPx(raw, min, max) {
+        const m = String(raw).trim().match(/^([0-9]*\.?[0-9]+)\s*(pt|px|em|rem|%)?$/i);
+        if (!m) return null;
+        const val = parseFloat(m[1]);
+        if (!Number.isFinite(val)) return null;
+        const unit = m[2] ? m[2].toLowerCase() : '';
+        let px;
+        if (unit === 'pt') px = Math.round(val * 4 / 3);
+        else if (unit === 'px') px = Math.round(val);
+        else return null;
+        return Math.max(min, Math.min(max, px));
+    },
+
+    /**
+     * @private <a href> из Word → капсулы ссылок (createLinkMarker, свежие id),
+     * схема прогоняется через validateLinkUrl. Невалидная/пустая ссылка не
+     * выкидывается, а разворачивается в свои инлайн-дети — окружающий и вложенный
+     * формат сохраняется. validateLinkUrl лежит в window (как в остальных путях).
+     * @param {HTMLElement} root
+     */
+    _reconstructWordLinks(root) {
+        root.querySelectorAll('a').forEach((a) => {
+            if (!a.parentNode) return;
+            const href = (a.getAttribute('href') || '').trim();
+            const text = (a.textContent || '').replace(/\s+/g, ' ').trim();
+            const verdict = href && window.validateLinkUrl
+                ? window.validateLinkUrl(href) : { ok: false };
+            if (text && verdict.ok) {
+                a.parentNode.replaceChild(this.createLinkMarker(text, verdict.url), a);
+            } else {
+                // Разворот в инлайн-детей (сохраняем формат), а не удаление.
+                while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+                a.parentNode.removeChild(a);
+            }
+        });
+    },
+
+    /**
+     * @private Расплющивает блочные элементы (p/div/li) поддерева в инлайн-поток +
+     * <br>-разделители, ПЕРЕНОСЯ инлайн-детей целиком (в отличие от external-пути,
+     * который берёт только textContent — тут формат сохраняем). Соседство блоков
+     * считаем по снапшоту детей (узлы переезжают во фрагмент по ходу обхода).
+     * @param {HTMLElement} root
+     * @param {DocumentFragment} fragment
+     */
+    _flattenWordBlocks(root, fragment) {
+        const BLOCK = new Set(['P', 'DIV', 'LI']);
+        const isBlockNode = (n) => n && n.nodeType === Node.ELEMENT_NODE && BLOCK.has(n.tagName);
+        const nodes = Array.from(root.childNodes);
+        nodes.forEach((node, i) => {
+            if (isBlockNode(node)) {
+                this._flattenWordBlocks(node, fragment);
+                this._appendPasteBreak(fragment);
+            } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
+                this._appendPasteBreak(fragment);
+            } else if (node.nodeType === Node.TEXT_NODE) {
+                // Чисто-пробельный whitespace МЕЖДУ блоками (перевод строки между
+                // </p> и <p>) пропускаем — иначе лишний пробел; внутри-абзацные
+                // пробелы сохраняем.
+                const blank = !node.textContent.trim();
+                if (blank && (isBlockNode(nodes[i - 1]) || isBlockNode(nodes[i + 1]))) return;
+                if (node.textContent) fragment.appendChild(node);
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                // Инлайн-элемент (b/i/u/s/span-формат или капсула) — целиком,
+                // сохраняя вложенное форматирование.
+                fragment.appendChild(node);
+            }
         });
     },
 
@@ -935,6 +1165,15 @@ Object.assign(TextBlockManager.prototype, {
             }
         }
 
+        // «Вся капсула как юнит»: Shift+←/→ у границы капсулы расширяет выделение
+        // за ВСЮ капсулу одним шагом (атом при выделении, как node-selection).
+        // Только Shift, без Ctrl/Meta/Alt.
+        if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey &&
+            (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+            this._handleCapsuleShiftArrow(e, editor)) {
+            return;
+        }
+
         // Каретка у границы капсулы с КЛАВИАТУРЫ (Home/←/→) — приземляется в
         // caret-guard у ведущей/хвостовой капсулы (мышь делает то же через
         // click-обработчик). Только «голые» стрелки/Home, без модификаторов.
@@ -1010,6 +1249,52 @@ Object.assign(TextBlockManager.prototype, {
     handleSelectionChange() {
         if (this.activeEditor) {
             this.updateToolbarState();
+            this._updateNodeSelectedState(this.activeEditor);
+        }
+    },
+
+    /**
+     * @private Снимает визуальную отметку «вся капсула как юнит» (.node-selected).
+     * Быстрый путь O(1): снять с закэшированной ссылки _nodeSelectedEl (отметку
+     * носит максимум одна капсула — выделение в документе одно). Единый сток снятия
+     * для _updateNodeSelectedState (на каждый keyup/mouseup — только O(1)) и blur.
+     * scope (опц.) — дополнительный editor-скоуп sweep для НЕЧАСТЫХ путей (blur):
+     * подчищает возможные «висящие» отметки, если кэш разошёлся с DOM.
+     * @param {HTMLElement} [scope]
+     */
+    _clearNodeSelected(scope) {
+        if (this._nodeSelectedEl) {
+            if (this._nodeSelectedEl.classList) this._nodeSelectedEl.classList.remove('node-selected');
+            this._nodeSelectedEl = null;
+        }
+        if (scope && typeof scope.querySelectorAll === 'function') {
+            scope.querySelectorAll('.text-link.node-selected, .text-footnote.node-selected')
+                .forEach(el => el.classList.remove('node-selected'));
+        }
+    },
+
+    /**
+     * «Вся капсула как юнит» (визуальная часть): помечает классом .node-selected
+     * капсулу, ЦЕЛИКОМ охваченную текущим выделением (_rangeIsWholeCapsule), и
+     * снимает отметку с прежней. READ-only: диапазон НЕ мутируем (правка range на
+     * selectionchange/перетаскивании воевала бы с браузером). Класс рантайм-only,
+     * из сохранённого content вычищается в _repairCapsulesInRoot (как
+     * contenteditable). Прежнюю отметку снимаем за O(1) по _nodeSelectedEl — метод
+     * висит на keyup/mouseup (каждая клавиша), documentwide-querySelectorAll тут
+     * недопустим.
+     * @param {HTMLElement} editor
+     * @private
+     */
+    _updateNodeSelectedState(editor) {
+        this._clearNodeSelected();
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        if (!editor.contains(range.commonAncestorContainer)) return;
+        const capsule = this._rangeIsWholeCapsule(range, editor);
+        if (capsule && capsule.classList) {
+            capsule.classList.add('node-selected');
+            this._nodeSelectedEl = capsule;
         }
     },
 
@@ -1067,6 +1352,57 @@ Object.assign(TextBlockManager.prototype, {
             return false;
         }
         return false;
+    },
+
+    /**
+     * «Вся капсула как юнит»: Shift+←/→, когда ФОКУС выделения примыкает к
+     * капсуле по направлению движения, перепрыгивает фокус на ДАЛЬНЮЮ сторону
+     * всей капсулы (за её guard) одним шагом — параллель _handleCapsuleCaretKey,
+     * но для расширяющегося (не схлопнутого) выделения. Симметрично работает и
+     * на сжатие (Shift+← когда фокус справа от капсулы). Капсулу в inline-правке
+     * (editing-mode) пропускаем (обычный текст, CARET-1). Возвращает true, если
+     * перехватил клавишу.
+     * @private
+     */
+    _handleCapsuleShiftArrow(e, editor) {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || typeof sel.extend !== 'function') return false;
+        if (!sel.focusNode || !editor.contains(sel.focusNode)) return false;
+        const forward = e.key === 'ArrowRight';
+        // Точку ФОКУСА оборачиваем в схлопнутый range, чтобы переиспользовать
+        // _caretAdjacentMarkers (маркеры непосредственно у фокуса). Если фокус стоит
+        // В caret-guard'е (после расширения над КРАЕВОЙ капсулой sel.extend оставил
+        // фокус на (guard, guard.length)) — переносим точку в РОДИТЕЛЯ по краю
+        // guard'а: _caretAdjacentMarkers по элемент-контейнеру пропускает guard
+        // (skipEmpty) и находит капсулу с ПЕРВОГО нажатия. Без этого первое сжатие
+        // Shift+← у краевой капсулы уходило вхолостую внутрь невидимого guard'а
+        // (beforeNode=null при непустом контейнере), перехватывалось лишь второе.
+        let fNode = sel.focusNode, fOff = sel.focusOffset;
+        if (this._isGuardNode(fNode) && fNode.parentNode) {
+            const p = fNode.parentNode;
+            const gi = Array.prototype.indexOf.call(p.childNodes, fNode);
+            fOff = (fOff >= fNode.data.length) ? gi + 1 : gi;
+            fNode = p;
+        }
+        const focusRange = document.createRange();
+        focusRange.setStart(fNode, fOff);
+        focusRange.collapse(true);
+        const { before, after } = this._caretAdjacentMarkers(focusRange);
+        // Вправо — капсула справа от фокуса; влево — слева.
+        const capsule = forward ? after : before;
+        if (!capsule || this._isEditingCapsule(capsule)) return false;
+        e.preventDefault();
+        // Дальняя сторона: за хвостовым guard'ом (вправо) / перед ведущим (влево);
+        // при отсутствии guard'а — по краю самой капсулы через offset родителя.
+        const guard = forward ? capsule.nextSibling : capsule.previousSibling;
+        if (this._isGuardNode(guard)) {
+            sel.extend(guard, forward ? guard.data.length : 0);
+        } else {
+            const parent = capsule.parentNode;
+            const idx = Array.prototype.indexOf.call(parent.childNodes, capsule);
+            sel.extend(parent, forward ? idx + 1 : idx);
+        }
+        return true;
     },
 
     /**

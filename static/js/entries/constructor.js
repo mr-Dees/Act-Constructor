@@ -136,6 +136,7 @@ import { App } from '../constructor/app.js';
 import { _initStateTracking } from '../constructor/state/state-core.js';
 import { UndoDeleteManager } from '../constructor/state/undo-delete.js';
 import { NodeClipboard } from '../constructor/clipboard/node-clipboard.js';
+import { FindBar } from '../constructor/search/find-bar.js';
 
 /**
  * Инициализирует shared-центр уведомлений в конструкторе и регистрирует
@@ -158,6 +159,9 @@ function _bootstrap() {
     // installMenuItems — после App.init (там ContextMenuManager.init рендерит #contextMenu).
     NodeClipboard.installHotkey();
     NodeClipboard.installMenuItems();
+    // Ctrl+F / Cmd+F — панель поиска/замены по текстблокам (перехватывает
+    // браузерный поиск, при необходимости переключает на Step 2).
+    FindBar.installHotkey();
 }
 
 if (document.readyState === 'loading') {

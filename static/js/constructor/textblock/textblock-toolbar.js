@@ -547,22 +547,13 @@ Object.assign(TextBlockManager.prototype, {
      * @private
      */
     _expandRangeOutOfMarkers(range, editor = this.activeEditor) {
-        const markerAncestor = (node) => {
-            let el = node?.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== editor && editor?.contains(el)) {
-                // Капсула в inline-правке (editing-mode) — обычный редактируемый
-                // контент, за её границы диапазон НЕ расширяем (CARET-1).
-                if ((el.classList?.contains('text-link') || el.classList?.contains('text-footnote')) &&
-                        !this._isEditingCapsule(el)) {
-                    return el;
-                }
-                el = el.parentElement;
-            }
-            return null;
-        };
-        const startMarker = markerAncestor(range.startContainer);
+        // Обход границ вынесен в общий _capsuleAncestor (textblock-core.js): раньше
+        // здесь была копия того же marker-ancestor-walk. Живой вариант, в отличие
+        // от StaticRange-варианта, guard'ы НЕ включает (двигает границы ровно по
+        // краям маркера).
+        const startMarker = this._capsuleAncestor(range.startContainer, editor);
         if (startMarker) range.setStartBefore(startMarker);
-        const endMarker = markerAncestor(range.endContainer);
+        const endMarker = this._capsuleAncestor(range.endContainer, editor);
         if (endMarker) range.setEndAfter(endMarker);
     }
 });

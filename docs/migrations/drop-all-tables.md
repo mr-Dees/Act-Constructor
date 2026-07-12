@@ -70,6 +70,7 @@ DROP TABLE IF EXISTS t_db_oarb_audit_act_notifications;
 -- ║  Домен ACTS (зависимые → родительские)                              ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_audit_log;
+DROP TABLE IF EXISTS t_db_oarb_audit_act_act_editor_telemetry;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_act_content_versions;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_act_invoices;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_act_violations;
@@ -131,6 +132,7 @@ DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_notifica
 -- ║  Домен ACTS (зависимые → родительские)                              ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_audit_log;
+DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_act_editor_telemetry;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_act_content_versions;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_act_invoices;
 DROP TABLE IF EXISTS s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_act_violations;

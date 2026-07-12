@@ -89,6 +89,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 |---|---|
 | [developer-guide.md](docs/guides/developer-guide.md) | Основной справочник: архитектура, домены, плагинная система, БД, миграции, тестирование, deploy, env-vars, deep-dive по чату. |
 | [adding-chat-tool.md](docs/guides/adding-chat-tool.md) | Как добавить новый ChatTool (function-calling инструмент ассистента). |
+| [agent-integration-iframe.md](docs/guides/agent-integration-iframe.md) | Встраивание стороннего агента в AW через iframe (пункт бокового меню, общая рамка портала); живой пример — домен `sqlagent`. |
+| [agent-integration-inprocess.md](docs/guides/agent-integration-inprocess.md) | 🚧 Заглушка: план на полное слияние стороннего агента с AW (in-process, вместо iframe). |
+| [chat-observability-and-feedback.md](docs/guides/chat-observability-and-feedback.md) | Наблюдаемость чата: метрики инструментов, аудит-лог, фидбек по сообщениям. |
 
 ### 🏗️ Architecture — устройство системы
 
@@ -96,6 +99,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 |---|---|
 | [frontend-architecture.md](docs/architecture/frontend-architecture.md) | Фронт-архитектура: 3 зоны (shared/portal/constructor), ES-модули без бандлера, entry-модули, CSS. |
 | [chat-frontend-architecture.md](docs/architecture/chat-frontend-architecture.md) | Deep-dive по фронту чата: ядерные модули, шина событий, транспорт POST + polling, режимы inline/modal/popup, client actions. |
+| [textblock-editor-architecture.md](docs/architecture/textblock-editor-architecture.md) | Deep-dive по редактору текстблоков: капсулы ссылок/сносок, caret-guard, целостность капсул, поиск/замена, DOCX-экспорт. |
 | [cross-domain-contracts.md](docs/architecture/cross-domain-contracts.md) | Межсервисные контракты: factory-registry, ChatTool, канал к внешнему агенту, URL-контракты. |
 | [agent-channel-sequence.md](docs/architecture/agent-channel-sequence.md) | Sequence-диаграммы канала к внешнему ИИ-агенту: единая bus-таблица `chat_agent_messages_bus`, режимы `agent_mode`, poll-транспорт. |
 | [data-model-acts.md](docs/architecture/data-model-acts.md) | Модель данных домена актов: таблицы, связи, дерево содержимого. |
@@ -126,6 +130,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | [integrations/external-agent-imitation.sql](docs/integrations/external-agent-imitation.sql) | SQL-стенд для имитации внешнего ИИ-агента (ответы в bus-таблицу `chat_agent_messages_bus`). |
 | [integrations/agent-channel-cleanup.sql](docs/integrations/agent-channel-cleanup.sql) | Очистка завершённых строк bus-таблицы канала. |
 | [migrations/drop-all-tables.md](docs/migrations/drop-all-tables.md) | DROP всех таблиц приложения для пересоздания схемы (только dev). |
+| [migrations/drop-reference-tables.md](docs/migrations/drop-reference-tables.md) | DROP справочных/ETL-таблиц (`t_db_oarb_ua_*`, `t_db_oarb_ck_*`), отдельно от таблиц приложения. |
 
 ## Конфигурация
 
@@ -183,7 +188,7 @@ FastAPI Application
 - **Vanilla JavaScript** (ES6+) — без фреймворков
 - 3-зонная модульная архитектура: `shared/`, `portal/`, `constructor/`
 - Jinja2-шаблоны с двумя независимыми базовыми шаблонами
-- Чат-система: event-driven архитектура из 11 ядерных модулей в `shared/chat/` (EventBus, UI, Files, Context, Messages, Manager, Stream, Renderer, History, Modal, ClientActions) + региональный `ChatPopupManager` в `constructor/header/`
+- Чат-система: event-driven архитектура из 13 ядерных модулей в `shared/chat/` (EventBus, UI, Files, Context, Messages, Manager, Stream, Renderer, History, Modal, ClientActions, Feedback, Title) + региональный `ChatPopupManager` в `constructor/header/`
 
 ### Структура проекта
 
@@ -211,7 +216,7 @@ app/
 static/
 ├── css/                    — модульные CSS (entry/ -> base/ + shared/ + zone/)
 └── js/                     — модульный JS (shared/ + portal/ + constructor/)
-    └── shared/chat/        — 11 ядерных модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal, client-actions
+    └── shared/chat/        — 13 ядерных модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal, client-actions, feedback, title
                               (12-й — constructor/header/chat-popup.js, региональный)
 templates/
 ├── shared/                 — общие компоненты (chat, dialog, errors)
@@ -302,16 +307,13 @@ npx playwright test --reporter=html && npm run e2e:report
   PID хранится в `tests/playwright/.uvicorn.pid`, лог в `.uvicorn.log` (gitignored).
 - `tests/playwright/seed.py` — создаёт 3 акта (`SEED_ACTS` в `fixtures.ts`).
 - `tests/playwright/fixtures.ts` — общие helpers (`openAct`, `waitForSaveComplete`).
-- `tests/playwright/specs/*.spec.ts` — 8 baseline-сценариев (`@smoke`-теги).
+- `tests/playwright/specs/*.spec.ts` — 30 spec-файлов (`@smoke`-теги).
 
-Скип/fail-семантика baseline:
-
-- Часть сценариев (table-cell ops, tree DnD, contenteditable textblock,
-  inline-edit заголовка, cross-tab удаление) помечены `test.skip` с
-  TODO-комментарием — разблокируются агентами Phase 1
-  (`per-node-rendering-api`, `acts-cross-tab-sync` и др.).
-- Регрессионный smoke `notifications-storm` сейчас **проходит**: дедупликация
-  через `.notification-counter` уже реализована в `static/js/shared/notifications.js`.
+Скип-семантика: 6 spec-файлов несут условный `test.skip`, гейтящийся
+переменной окружения (`RUN_<NAME>_E2E=1`) — по умолчанию пропускаются, т.к.
+требуют явно поднятого харнесса (uvicorn + засиженная БД) сверх обычного
+global-setup. Не TODO/недоделанность — включаются вручную для точечного
+прогона. Остальные сценарии активны без условий.
 
 ## Деплой
 

@@ -24,7 +24,10 @@
     --line-height-tight: 1.25;
     --line-height-normal: 1.5;
     --line-height-relaxed: 1.75;
-    /* Единый line-height тела текстового блока: редактор и превью (B-22). */
+    /* line-height тела текстового блока в РЕДАКТОРЕ (было общим с превью —
+       B-22; Task C, 2026-07: превью печатного листа больше не использует
+       этот токен, мирит одинарный Word-интервал DOCX — см.
+       preview-typography.css / --preview-print-line-height). */
     --textblock-line-height: 1.75;
 
     --letter-spacing-tight: -0.025em;

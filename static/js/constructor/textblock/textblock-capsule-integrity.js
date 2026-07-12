@@ -77,6 +77,13 @@ Object.assign(TextBlockManager.prototype, {
 
             // Тело капсулы — без contenteditable и guard-символов.
             span.removeAttribute('contenteditable');
+            // .node-selected — рантайм-only визуальная отметка «вся капсула как
+            // юнит»; в хранимый content/превью/DOCX не попадает (косметика, как
+            // contenteditable — changed не взводим). contains-гейт: на фейк-узлах
+            // node-тестов (classList без .remove) .remove не зовётся.
+            if (span.classList && span.classList.contains('node-selected')) {
+                span.classList.remove('node-selected');
+            }
             if (span.textContent && span.textContent.indexOf(guardChar) !== -1) {
                 span.textContent = span.textContent.split(guardChar).join('');
             }
@@ -182,6 +189,14 @@ Object.assign(TextBlockManager.prototype, {
      * @param {object} textBlock
      */
     handleEditorBeforeInput(e, editor, textBlock) {
+        // Re-entrancy: наш собственный execCommand('delete') в _execDeleteRange
+        // («вся капсула») синхронно диспатчит вложенный beforeinput. Под взведённым
+        // __suppressBeforeInput он — no-op: иначе whole-capsule-ветка ниже
+        // перехватила бы его и отменила команду. ОТДЕЛЬНЫЙ флаг, а не __healing
+        // (тот — приватный гард MutationObserver'а): один флаг — один контракт,
+        // чтобы будущий observer-only healer, взводящий __healing, случайно не
+        // отключил защиты beforeinput (перехват delete/insert/whole-capsule).
+        if (editor.__suppressBeforeInput) return;
         const ranges = typeof e.getTargetRanges === 'function' ? e.getTargetRanges() : [];
         const type = e.inputType;
 
@@ -204,7 +219,7 @@ Object.assign(TextBlockManager.prototype, {
                         : (hit.side === 'after' ? hit.capsule : null);
                     if (target) {
                         e.preventDefault();
-                        this._deleteCapsuleWhole(target);
+                        this._deleteCapsuleWhole(target, editor);
                         // Единый сток: удаление капсулы могло убрать сноску —
                         // finalizeEdit перенумеровывает по изменению их числа
                         // (CARET-7) и пере-расставляет guard'ы у оставшихся капсул.
@@ -225,6 +240,20 @@ Object.assign(TextBlockManager.prototype, {
                 this.finalizeEdit(editor);
                 const sel = window.getSelection();
                 if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+                return;
+            }
+            // (в) «Вся капсула как юнит»: выделена РОВНО одна капсула целиком →
+            // атомарное удаление ОДНОЙ undo-записью. Делегируем в
+            // _deleteCapsuleWhole (тот же надёжный путь, что и примыкающее
+            // Backspace/Delete): он строит диапазон setStartBefore/setEndAfter
+            // ЗА капсулу и её guard'ы. Расширять r напрямую нельзя — его границы
+            // лежат ВНЕ капсулы, поэтому _expandStaticRangeOutOfMarkers был бы
+            // no-op и execCommand('delete') мог не удалить голый ce=false-атом.
+            const whole = this._rangeIsWholeCapsule(r, editor);
+            if (whole) {
+                e.preventDefault();
+                this._deleteCapsuleWhole(whole, editor);
+                this.finalizeEdit(editor);
             }
             return;
         }
@@ -259,18 +288,12 @@ Object.assign(TextBlockManager.prototype, {
         const sc = range.startContainer, so = range.startOffset;
         const ec = range.endContainer, eo = range.endOffset;
 
-        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Капсулу в
-        // режиме inline-правки пропускаем — её тело сейчас обычный текст (CARET-1).
-        const insideCapsule = (node) => {
-            let el = node && node.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== editor) {
-                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
-                el = el.parentElement;
-            }
-            return null;
-        };
-        const insStart = insideCapsule(sc);
-        const insEnd = insideCapsule(ec);
+        // Конец/начало ВНУТРИ тела капсулы (граница клипает атом). Единый обход
+        // границ _capsuleAncestor (textblock-core.js) — тот же, что у expand-
+        // хелперов; сам возвращает null для капсулы в inline-правке (editing-mode
+        // → её тело сейчас обычный текст, CARET-1).
+        const insStart = this._capsuleAncestor(sc, editor);
+        const insEnd = this._capsuleAncestor(ec, editor);
         if (insStart || insEnd) return { capsule: insStart || insEnd, side: 'inside' };
 
         // Схлопнутая каретка примыкает к капсуле (через guard или напрямую).
@@ -302,9 +325,62 @@ Object.assign(TextBlockManager.prototype, {
         return null;
     },
 
-    /** @private Удаляет капсулу целиком вместе с её caret-guard'ами по бокам. */
-    _deleteCapsuleWhole(capsule) {
+    /**
+     * @private Удаляет живой диапазон (охватывающий капсулу целиком + её guard'ы)
+     * нативной командой delete — удаление ОСТАЁТСЯ в undo-стеке (Ctrl+Z вернёт
+     * капсулу), в отличие от raw .remove()/deleteContents. Взводит ДВА флага +
+     * takeRecords: (1) __healing — observer не запускает heal-шторм на удалении
+     * guard'ов; (2) __suppressBeforeInput — вложенный beforeinput, который
+     * execCommand('delete') диспатчит синхронно, гасится ранним return в
+     * handleEditorBeforeInput (иначе рекурсия/отмена команды). Флаги раздельны:
+     * у каждого свой единственный контракт. Финализацию (normalizeMarkers/
+     * перенумерация/сохранение) делает ВЫЗЫВАЮЩИЙ через finalizeEdit после возврата.
+     * @param {HTMLElement} editor
+     * @param {Range} range
+     */
+    _execDeleteRange(editor, range) {
+        const sel = window.getSelection();
+        if (!sel) return;
+        const wasHealing = editor && editor.__healing;
+        const wasSuppress = editor && editor.__suppressBeforeInput;
+        if (editor) { editor.__healing = true; editor.__suppressBeforeInput = true; }
+        try {
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand('delete');
+        } finally {
+            if (editor && editor.__capsuleObserver && editor.__capsuleObserver.takeRecords) {
+                editor.__capsuleObserver.takeRecords();
+            }
+            if (editor && !wasHealing) editor.__healing = false;
+            if (editor && !wasSuppress) editor.__suppressBeforeInput = false;
+        }
+    },
+
+    /**
+     * @private Удаляет капсулу целиком вместе с её caret-guard'ами по бокам.
+     * Единообразие undo: как и удаление ВЫДЕЛЕННОЙ целиком капсулы (ветка (в)
+     * handleEditorBeforeInput), примыкающее Backspace/Delete идёт нативной
+     * командой delete — остаётся в undo-стеке (раньше был raw .remove() ВНЕ него).
+     * Диапазон строим за целую капсулу + её guard'ы. Фолбэк на .remove() — только
+     * без editor/execCommand (не-браузерная среда).
+     * @param {Element} capsule
+     * @param {HTMLElement} [editor]
+     */
+    _deleteCapsuleWhole(capsule, editor) {
         const prev = capsule.previousSibling, next = capsule.nextSibling;
+        if (editor && typeof document !== 'undefined' &&
+                typeof document.execCommand === 'function' &&
+                typeof document.createRange === 'function') {
+            const range = document.createRange();
+            if (this._isGuardNode(prev)) range.setStartBefore(prev);
+            else range.setStartBefore(capsule);
+            if (this._isGuardNode(next)) range.setEndAfter(next);
+            else range.setEndAfter(capsule);
+            this._execDeleteRange(editor, range);
+            return;
+        }
+        // Фолбэк без редактора/execCommand: прямое удаление (вне undo-стека).
         if (this._isGuardNode(prev)) prev.remove();
         if (this._isGuardNode(next)) next.remove();
         capsule.remove();
@@ -501,23 +577,14 @@ Object.assign(TextBlockManager.prototype, {
         const range = document.createRange();
         range.setStart(staticRange.startContainer, staticRange.startOffset);
         range.setEnd(staticRange.endContainer, staticRange.endOffset);
-        const ancestor = (node) => {
-            let el = node && node.nodeType === 3 ? node.parentElement : node;
-            while (el && el !== editor) {
-                // Капсула в inline-правке — обычный контент, за неё не расширяем (CARET-1).
-                if (this._isCapsule(el)) return this._isEditingCapsule(el) ? null : el;
-                el = el.parentElement;
-            }
-            return null;
-        };
-        const sm = ancestor(range.startContainer);
+        const sm = this._capsuleAncestor(range.startContainer, editor);
         if (sm) {
             // Если перед капсулой стоит guard-узел — включаем и его.
             const guardBefore = sm.previousSibling;
             if (this._isGuardNode(guardBefore)) range.setStartBefore(guardBefore);
             else range.setStartBefore(sm);
         }
-        const em = ancestor(range.endContainer);
+        const em = this._capsuleAncestor(range.endContainer, editor);
         if (em) {
             // Если после капсулы стоит guard-узел — включаем и его.
             const guardAfter = em.nextSibling;
@@ -525,5 +592,63 @@ Object.assign(TextBlockManager.prototype, {
             else range.setEndAfter(em);
         }
         return range;
+    },
+
+    /**
+     * @private Узел, непосредственно СЛЕДУЮЩИЙ за границей (container, offset) —
+     * первый узел, попадающий в диапазон с этой границы. null — граница в конце
+     * контейнера. Для текстового контейнера: offset в конце → следующий сосед,
+     * иначе сам текст. Чистая (для _rangeIsWholeCapsule и node-тестов).
+     */
+    _boundaryNodeAfter(container, offset) {
+        if (!container) return null;
+        if (container.nodeType === Node.TEXT_NODE) {
+            const len = container.data ? container.data.length : 0;
+            return offset >= len ? container.nextSibling : container;
+        }
+        return container.childNodes ? (container.childNodes[offset] || null) : null;
+    },
+
+    /**
+     * @private Узел, непосредственно ПРЕДшествующий границе (container, offset) —
+     * последний узел, попадающий в диапазон до этой границы. null — граница в
+     * начале контейнера. Зеркало _boundaryNodeAfter.
+     */
+    _boundaryNodeBefore(container, offset) {
+        if (!container) return null;
+        if (container.nodeType === Node.TEXT_NODE) {
+            return offset <= 0 ? container.previousSibling : container;
+        }
+        return container.childNodes ? (container.childNodes[offset - 1] || null) : null;
+    },
+
+    /**
+     * @private «Вся капсула как юнит»: диапазон охватывает РОВНО одну капсулу
+     * целиком (её границы — на/сразу-до начала капсулы, включая ведущий guard, и
+     * на/сразу-после её конца, включая хвостовой guard), не клипая тело и ничего
+     * сверх неё. Возвращает эту капсулу либо null. Капсула в inline-правке
+     * (editing-mode) — обычный редактируемый текст, не атом → null (CARET-1).
+     * READ-only: DOM не мутирует (безопасно звать на selectionchange). Работает и
+     * на StaticRange (beforeinput), и на живом Range (Selection).
+     * @param {Range|StaticRange} range
+     * @param {HTMLElement} editor
+     * @returns {Element|null}
+     */
+    _rangeIsWholeCapsule(range, editor) {
+        if (!range || range.collapsed) return null;
+        // Любая граница ВНУТРИ тела капсулы (клип атома) → выделение не целое.
+        if (this._capsuleAncestor(range.startContainer, editor)) return null;
+        if (this._capsuleAncestor(range.endContainer, editor)) return null;
+        let first = this._boundaryNodeAfter(range.startContainer, range.startOffset);
+        let last = this._boundaryNodeBefore(range.endContainer, range.endOffset);
+        if (!first || !last) return null;
+        // Ведущий/хвостовой guard'ы, попавшие в выделение, пропускаем — они часть
+        // юнита капсулы (расстановка _placeCapGuards), а не отдельные узлы.
+        if (this._isGuardNode(first)) first = first.nextSibling;
+        if (this._isGuardNode(last)) last = last.previousSibling;
+        if (!first || first !== last) return null;   // между границами не один узел
+        if (!this._isCapsule(first)) return null;      // единственный узел — не капсула
+        if (this._isEditingCapsule(first)) return null; // капсула в правке — не атом
+        return first;
     },
 });

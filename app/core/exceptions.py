@@ -126,7 +126,8 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     # ── acts: act_editor_telemetry ───────────────────────────────────────────
     "check_editor_telemetry_event_type_values": (
         "Недопустимый тип события телеметрии редактора. Допустимые значения: "
-        "observer_heal, capsule_repair, dup_id_fix, save_failure, empty_paste"
+        "observer_heal, capsule_repair, dup_id_fix, save_failure, empty_paste, "
+        "word_paste"
     ),
     # ── chat: chat_files ─────────────────────────────────────────────────────
     "check_chat_files_file_size_positive": "Размер файла должен быть больше нуля",
