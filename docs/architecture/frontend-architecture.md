@@ -149,7 +149,7 @@ CSS повторяет тройное разделение — см. главу 
 | `shared/filter-engine.js` | `FilterEngine` | static class |
 | `shared/dialog/dialog-base.js` | `DialogBase` | static class |
 | `shared/dialog/dialog-confirm.js` | `DialogManager` | static class |
-| `shared/ck/{ck-table,ck-pagination,ck-form,ck-process-picker}.js` | `Ck*` | static classes |
+| `shared/ck/{ck-form,ck-process-picker}.js` | `Ck*` | static classes |
 | `shared/resizable-panel.js` | `makeResizablePanel` | функция-фабрика |
 | `shared/format-units.js` | `formatMb`, `formatFileSize` | утилиты форматирования |
 | `shared/notifications-center/notification-center.js` | `NotificationCenter` | class |
