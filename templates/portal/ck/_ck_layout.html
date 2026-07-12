@@ -43,7 +43,8 @@
     import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
     import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
     // ck-страницы (fin-res, client-exp) подключают свои page-модули, которые
-    // в свою очередь импортят shared/ck/* (CkTable, CkPagination, CkForm, CkProcessPicker).
+    // в свою очередь импортят shared/ck/* (CkForm, CkProcessPicker) и таблицу/
+    // пагинацию берут из generic-тулкита shared/datatable/*.
     {% block ck_init_imports %}{% endblock %}
 
     document.addEventListener('DOMContentLoaded', async () => {

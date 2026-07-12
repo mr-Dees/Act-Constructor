@@ -66,8 +66,9 @@ export class CkFinResConfig {
     };
     /**
      * Полные названия ТБ — тот же фиксированный набор id, что TB_PALETTE/TB_ABBR.
-     * Источник filterOptions чекбокс-фильтра tb_breakdown (см. columns ниже) —
-     * но только исходное значение: `columns` — геттер без параметров, ему
+     * Источник filterOptions чекбокс-фильтров tb_breakdown и npl_breakdown
+     * (см. columns ниже) — но только исходное значение: `columns` — геттер
+     * без параметров, ему
      * неоткуда принять dicts, поэтому изначально берётся статика отсюда.
      * После загрузки словарей страница подставляет живой список через
      * tbFilterOptions(dicts) (см. ниже).
@@ -177,10 +178,10 @@ export class CkFinResConfig {
     }
 
     /**
-     * Опции чекбокс-фильтра tb_breakdown из живого словаря dicts.terbanks —
-     * страница подставляет их взамен статических (см. TB_NAMES выше) после
-     * загрузки словарей. Порядок — как в словаре. При отсутствии/пустоте
-     * словаря — фолбэк на статику (TB_ABBR/TB_NAMES).
+     * Опции чекбокс-фильтров tb_breakdown и npl_breakdown из живого словаря
+     * dicts.terbanks — страница подставляет их взамен статических (см.
+     * TB_NAMES выше) после загрузки словарей. Порядок — как в словаре. При
+     * отсутствии/пустоте словаря — фолбэк на статику (TB_ABBR/TB_NAMES).
      */
     static tbFilterOptions(dicts) {
         const terbanks = (dicts && dicts.terbanks) || [];
@@ -205,12 +206,13 @@ export class CkFinResConfig {
      *
      * Групповая модель (Task 10): строка таблицы — логическая группа (пункт ×
      * метрика), а не физическая строка ТБ. `total_amount`/`tb_count`/
-     * `total_counts` — чистые read-only display-колонки (extra, поля в форме
-     * нет). `tb_breakdown` — ЕСТЬ как поле формы (тип `amount-breakdown`,
-     * секция «Метрика»), поэтому его табличное представление (чипы ТБ,
-     * словарный фильтр по ТБ, noSort, своя ширина) задаётся через `overrides`,
-     * а не `extra` — иначе `buildColumns` собрал бы ДВЕ колонки с одним и тем
-     * же ключом (одну — из `extra`, другую — автовыведенную из `fields`).
+     * `total_counts`/`total_npl_amount` — чистые read-only display-колонки
+     * (extra, поля в форме нет). `tb_breakdown`/`npl_breakdown` — ЕСТЬ как
+     * поля формы (тип `amount-breakdown`, секция «Метрика»), поэтому их
+     * табличное представление (чипы ТБ, словарный фильтр по ТБ, noSort, своя
+     * ширина) задаётся через `overrides`, а не `extra` — иначе `buildColumns`
+     * собрал бы ДВЕ колонки с одним и тем же ключом (одну — из `extra`,
+     * другую — автовыведенную из `fields`).
      */
     static get columns() {
         return buildColumns(this.fields, {
@@ -234,7 +236,7 @@ export class CkFinResConfig {
                 {
                     key: 'total_npl_amount',
                     label: 'NPL 90+, руб.',
-                    description: 'Итог по группе. Заполняется только для метрики 602',
+                    description: 'Итог по группе. Заполняется только для метрик с флагом «NPL 90+» в словаре метрик',
                     type: 'number',
                     align: 'right',
                     width: 140,
@@ -256,7 +258,7 @@ export class CkFinResConfig {
                 tb_leader: {
                     label: 'ТБ-рук. проверки',
                     format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts),
-                    // Словарный резолвер для F1-фильтра: имя ТБ → массив сырых tb_id.
+                    // Резолвер словарного фильтра: введённое имя ТБ → массив сырых tb_id.
                     filterResolve: (q, dicts) => (dicts.terbanks || [])
                         .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
                         .map(t => String(t.tb_id)),
@@ -357,7 +359,8 @@ export class CkFinResConfig {
             { key: 'deviation_reason', label: 'Причина отклонения', type: 'textarea', rows: 2 },
             { key: 'deviation_consequence', label: 'Последствия отклонения', type: 'textarea', rows: 2 },
             { row: [
-                { key: 'risk', label: 'Вид риска', type: 'dictionary', dict: 'risk_types' },
+                { key: 'risk', label: 'Вид риска', type: 'dictionary', dict: 'risk_types',
+                  dictItemsFormat: (r) => ({ value: r.risk, label: r.risk }) },
                 { key: 'used_pm_lib', label: 'Использование PM', type: 'dictionary', dict: 'used_pm_options' },
             ]},
         ]},
@@ -365,9 +368,11 @@ export class CkFinResConfig {
         { section: 'Метрика', key: 'metric', fields: [
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
             { key: 'tb_breakdown', label: 'Сумма по ТБ (руб.)', type: 'amount-breakdown', required: true,
+              sumKey: 'metric_amount_rubles', countLabel: 'ТБ',
               description: 'Сумма выявленных возможностей финансового результата банка — итог и развертка по ТБ' },
             { key: 'npl_breakdown', label: 'NPL 90+, руб.', type: 'amount-breakdown', required: false,
-              description: 'Заполняется только для метрики 602' },
+              sumKey: 'metric_amount_rubles', countLabel: 'ТБ',
+              description: 'Заполняется только для метрик с флагом «NPL 90+» в словаре метрик' },
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },
                 { key: 'is_sent_to_top_brass', label: 'На наблюдательный совет', type: 'checkbox' },

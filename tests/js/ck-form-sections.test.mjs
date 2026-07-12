@@ -76,3 +76,61 @@ test('collectData: nullable-число — пустое → null; обычное
     document.getElementById = origGet;
   }
 });
+
+test('CkForm.setBreakdownValue: sumKey/countLabel из конфига поля, а не хардкод metric_amount_rubles/ТБ', () => {
+  const FIELDS = [
+    { key: 'custom_breakdown', label: 'Custom', type: 'amount-breakdown', sumKey: 'amount', countLabel: 'позиций' },
+  ];
+  CkForm.init({ fields: FIELDS, dictionaries: {}, containerEl: document.createElement('div') });
+  const el = { dataset: {}, textContent: '', classList: { remove: () => {} } };
+  const origGet = document.getElementById;
+  document.getElementById = (id) => (id === 'ck-field-custom_breakdown' ? el : null);
+  try {
+    CkForm.setBreakdownValue('custom_breakdown', [{ amount: '100.00' }, { amount: '50.00' }]);
+    assert.match(el.textContent, /150,00 ₽ · позиций: 2/);
+  } finally {
+    document.getElementById = origGet;
+  }
+});
+
+test('CkForm.setBreakdownValue: без sumKey/countLabel в конфиге — дефолт metric_amount_rubles/записей', () => {
+  const FIELDS = [
+    { key: 'plain_breakdown', label: 'Plain', type: 'amount-breakdown' },
+  ];
+  CkForm.init({ fields: FIELDS, dictionaries: {}, containerEl: document.createElement('div') });
+  const el = { dataset: {}, textContent: '', classList: { remove: () => {} } };
+  const origGet = document.getElementById;
+  document.getElementById = (id) => (id === 'ck-field-plain_breakdown' ? el : null);
+  try {
+    CkForm.setBreakdownValue('plain_breakdown', [{ metric_amount_rubles: '10.00' }]);
+    assert.match(el.textContent, /10,00 ₽ · записей: 1/);
+  } finally {
+    document.getElementById = origGet;
+  }
+});
+
+test('CkForm._getDictItems: field.dictItemsFormat переопределяет формат для доменных словарей (например risk_types)', () => {
+  CkForm.init({
+    fields: [],
+    dictionaries: { risk_types: [{ risk: 'Кредитный' }, { risk: 'Операционный' }] },
+    containerEl: document.createElement('div'),
+  });
+  const field = { dict: 'risk_types', dictItemsFormat: (r) => ({ value: r.risk, label: r.risk }) };
+  assert.deepEqual(CkForm._getDictItems(field), [
+    { value: 'Кредитный', label: 'Кредитный' },
+    { value: 'Операционный', label: 'Операционный' },
+  ]);
+});
+
+test('CkForm._getDictItems: metrics/terbanks — встроенный общий формат без dictItemsFormat', () => {
+  CkForm.init({
+    fields: [],
+    dictionaries: {
+      metrics: [{ code: '602', metric_name: 'Тест' }],
+      terbanks: [{ tb_id: 7, short_name: 'МБ' }],
+    },
+    containerEl: document.createElement('div'),
+  });
+  assert.deepEqual(CkForm._getDictItems({ dict: 'metrics' }), [{ value: '602', label: '602 — Тест' }]);
+  assert.deepEqual(CkForm._getDictItems({ dict: 'terbanks' }), [{ value: '7', label: '7 — МБ' }]);
+});

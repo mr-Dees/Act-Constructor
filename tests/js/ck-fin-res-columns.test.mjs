@@ -256,12 +256,16 @@ test('nplCodesFromMetrics: словарь без ключа has_npl → null (о
   assert.equal(CkFinResConfig.nplCodesFromMetrics(undefined), null);
 });
 
-test('в полях формы есть npl_breakdown типа amount-breakdown с подсказкой про 602, сразу после tb_breakdown', () => {
+test('в полях формы есть npl_breakdown типа amount-breakdown с подсказкой про флаг has_npl, сразу после tb_breakdown', () => {
   const flat = flattenFields(CkFinResConfig.fields);
   const f = flat.find((x) => x.key === 'npl_breakdown');
   assert.ok(f, 'поле npl_breakdown должно быть в конфиге формы');
   assert.equal(f.type, 'amount-breakdown');
-  assert.match(f.description, /602/);
+  // Описание не хардкодит код метрики — источник истины флаг has_npl в словаре
+  assert.doesNotMatch(f.description, /602/);
+  assert.match(f.description, /NPL 90\+/);
+  assert.equal(f.sumKey, 'metric_amount_rubles');
+  assert.equal(f.countLabel, 'ТБ');
   assert.ok(!f.required);
   const idx = flat.findIndex((x) => x.key === 'npl_breakdown');
   const tbIdx = flat.findIndex((x) => x.key === 'tb_breakdown');
@@ -287,7 +291,9 @@ test('«NPL 90+ по ТБ» (npl_breakdown): чекбокс-фильтр, noSort
   assert.deepEqual(col.filterValue({}), []); // нет развертки — не падает
   assert.equal(col.noSort, true); // ключ колонки (чипы) неизвестен бэкенду — сортировка на сервере уведёт в ValueError
   assert.equal(col.width, 260);
-  assert.match(col.description, /602/); // унаследовано от поля формы, override его не трогает
+  // Описание унаследовано от поля формы (override его не трогает) и не хардкодит код метрики
+  assert.doesNotMatch(col.description, /602/);
+  assert.match(col.description, /NPL 90\+/);
 
   const empty = col.render([], { npl_breakdown: [] }, {});
   assert.equal(empty.className, 'frb-cell-chips');
@@ -339,10 +345,11 @@ test('total_npl_amount: render — «—» без минибара при пус
   assert.ok(full.created.some((el) => el.className === 'frb-cell-minibar'), 'при непустой развертке должен быть минибар');
 });
 
-test('total_npl_amount: label и description содержат «NPL 90+» и «602»', () => {
+test('total_npl_amount: label и description содержат «NPL 90+», описание не хардкодит код метрики', () => {
   const col = CkFinResConfig.columns.find((c) => c.key === 'total_npl_amount');
   assert.match(col.label, /NPL 90\+/);
-  assert.match(col.description, /602/);
+  assert.match(col.description, /NPL 90\+/);
+  assert.doesNotMatch(col.description, /602/);
 });
 
 test('total_npl_amount: сразу после total_amount, видима по умолчанию, сортируется как total_amount', () => {

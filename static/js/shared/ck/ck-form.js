@@ -363,7 +363,7 @@ export class CkForm {
                 emptyOpt.value = '';
                 emptyOpt.textContent = '— выберите —';
                 input.appendChild(emptyOpt);
-                const items = this._getDictItems(field.dict);
+                const items = this._getDictItems(field);
                 for (const item of items) {
                     const opt = document.createElement('option');
                     opt.value = item.value;
@@ -423,10 +423,20 @@ export class CkForm {
         return wrapper;
     }
 
-    static _getDictItems(dictName) {
+    /**
+     * @param {Object} field - конфиг поля (нужен field.dict и опциональный
+     *   field.dictItemsFormat для словарей со специфичной для домена формой
+     *   строки — metrics/terbanks общие для обоих ЦК-доменов и разобраны
+     *   встроенно, остальное разбирает сам домен через dictItemsFormat).
+     */
+    static _getDictItems(field) {
+        const dictName = field.dict;
         const dicts = this._config.dictionaries || {};
         const items = dicts[dictName] || [];
 
+        if (typeof field.dictItemsFormat === 'function') {
+            return items.map(field.dictItemsFormat);
+        }
         if (dictName === 'metrics') {
             return items.map(m => ({
                 value: m.code,
@@ -438,9 +448,6 @@ export class CkForm {
                 value: String(t.tb_id),
                 label: `${t.tb_id} — ${t.short_name}`
             }));
-        }
-        if (dictName === 'risk_types') {
-            return items.map(r => ({ value: r.risk, label: r.risk }));
         }
         // Дефолтный формат
         return items.map(i => ({
@@ -531,15 +538,23 @@ export class CkForm {
         }
     }
 
-    /** Записывает развертку по ТБ в поле формы и обновляет readonly-итог. */
+    /**
+     * Записывает развертку по элементам в поле формы и обновляет readonly-итог.
+     * Какое числовое поле суммировать и как подписать счётчик элементов —
+     * задаёт сам домен через field.sumKey/field.countLabel (дефолты ниже
+     * соответствуют единственному текущему потребителю — развёртке по ТБ).
+     */
     static setBreakdownValue(fieldKey, breakdown) {
         const el = document.getElementById(`ck-field-${fieldKey}`);
         if (!el) return;
         const list = Array.isArray(breakdown) ? breakdown : [];
         el.dataset.value = JSON.stringify(list);
-        const totalKop = list.reduce((s, b) => s + Math.round(Number(b.metric_amount_rubles || 0) * 100), 0);
+        const cfg = this._findFieldConfig(fieldKey) || {};
+        const sumKey = cfg.sumKey || 'metric_amount_rubles';
+        const countLabel = cfg.countLabel || 'записей';
+        const totalKop = list.reduce((s, b) => s + Math.round(Number(b[sumKey] || 0) * 100), 0);
         el.textContent = list.length
-            ? `${(totalKop / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽ · ТБ: ${list.length}`
+            ? `${(totalKop / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽ · ${countLabel}: ${list.length}`
             : '— не распределено —';
         el.classList.remove('ck-form__input--error');
     }

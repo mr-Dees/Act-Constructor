@@ -117,7 +117,8 @@ export class DataTable {
    * Активная сортировка помечается `aria-sort` только на ВЕДУЩЕЙ колонке набора.
    * Колонка с `noFilter: true` — только подпись и сортировка, без фильтр-контрола.
    * Колонка с `noSort: true` — без кнопки/обработчика сортировки и индикаторов
-   * (ключ колонки неизвестен бэкенду, например pivot-колонки ТБ и чипы tb_breakdown).
+   * (ключ колонки неизвестен бэкенду — например pivot/вычисляемые колонки без
+   * парного серверного ключа сортировки).
    */
   _buildHeaderCell(col) {
     const th = document.createElement('th');
@@ -858,7 +859,7 @@ export class DataTable {
         const raw = record[col.key];
         let text = '';
         if (col.render) {
-          // Кастомный DOM-рендер ячейки (сумма с мини-баром, чипы ТБ и т.п.)
+          // Кастомный DOM-рендер ячейки — форму задаёт конфиг колонки домена
           const node = col.render(raw, record, this._dicts);
           if (node) td.appendChild(node);
         } else {

@@ -50,7 +50,7 @@ export class CkClientExpConfig {
                 neg_finder_tb_id: {
                     label: 'ТБ',
                     format: (v, dicts) => CkClientExpConfig.formatTerbank(v, dicts),
-                    // Словарный резолвер для F1-фильтра: имя ТБ → массив сырых tb_id.
+                    // Резолвер словарного фильтра: введённое имя ТБ → массив сырых tb_id.
                     filterResolve: (q, dicts) => (dicts.terbanks || [])
                         .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
                         .map(t => String(t.tb_id)),

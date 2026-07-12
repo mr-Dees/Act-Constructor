@@ -16,7 +16,9 @@ import { FRBreakdownEditor } from './fr-breakdown-editor.js';
 import { extractNplBreakdown, mergeTbBreakdowns } from './fr-breakdown-logic.js';
 
 /** Ключ pivot-колонки пары ТБ (piv: сумма, pivnpl: NPL) — единственное место
- * знания о схеме префиксов. */
+ * РАСПОЗНАВАНИЯ pivot-ключа (сами префиксы 'piv'/'pivnpl' захардкожены и в
+ * других местах — CkFinResConfig.tbPivotColumns, вызов с keyPrefix:'pivnpl'
+ * ниже, шаблонные строки в _buildTbViewSection). */
 const isPivotKey = (k) => String(k).startsWith('piv:') || String(k).startsWith('pivnpl:');
 
 export class CkFinResPage {

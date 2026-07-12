@@ -19,7 +19,7 @@ from app.domains.ck_client_exp.settings import CkClientExpSettings
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 
 # Колонки представления v_db_oarb_ck_cs_validation, разрешённые для серверной
-# фильтрации (ILIKE) и сортировки (ORDER BY). Источник истины — поля схемы
+# фильтрации и сортировки (ORDER BY). Источник истины — поля схемы
 # CSValidationView; whitelist защищает от инъекций в имена колонок/ORDER BY.
 ALLOWED_COLUMNS: set[str] = set(CSValidationView.model_fields.keys())
 
@@ -212,7 +212,11 @@ class CSValidationRepository(BaseRepository):
     ) -> tuple[list[dict], int]:
         """Поиск записей по колоночным фильтрам с сортировкой и подсчётом total.
 
-        - Фильтры — ILIKE по whitelisted-колонкам (значения — bind-параметры).
+        - Фильтры по whitelisted-колонкам (значения — bind-параметры): ``contains``/
+          ``contains_any`` — ILIKE (одна фраза / любая из нескольких через OR);
+          ``eq`` — точное равенство; ``in`` — членство в списке; ``range`` —
+          типизированные границы (DATE/NUMERIC). Экранирование ILIKE-метасимволов —
+          через ``_escape_like``.
         - Сортировка: ``sort`` — упорядоченный список (колонка, направление) для
           многоколоночного ORDER BY; если не задан — одиночные ``sort_by``/
           ``sort_dir``. Каждая колонка валидируется против ALLOWED_COLUMNS (иначе

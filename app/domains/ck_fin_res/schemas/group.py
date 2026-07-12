@@ -28,7 +28,7 @@ class TBBreakdownItem(BaseModel):
     metric_amount_rubles: Decimal = Field(..., ge=Decimal("0"))
     npl_amount_rubles: Decimal = Field(
         default=Decimal("0"), ge=Decimal("0"),
-        description="NPL 90+, руб. — заполняется только для метрики 602",
+        description="NPL 90+, руб. — заполняется только для метрик с флагом «NPL 90+» в словаре метрик",
     )
     metric_element_counts: int = Field(default=0, ge=0)
 

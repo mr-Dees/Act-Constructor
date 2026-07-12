@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS t_db_oarb_ck_fr_validation (
 
     -- Сумма по метрике в рублях
     metric_amount_rubles NUMERIC(38, 2) DEFAULT 0,
-    npl_amount_rubles NUMERIC(38, 2) DEFAULT 0, -- NPL 90+, руб. (заполняется только для метрики 602)
+    npl_amount_rubles NUMERIC(38, 2) DEFAULT 0, -- NPL 90+, руб. (заполняется только для метрик с флагом has_npl в словаре метрик, см. ua_data)
 
     -- Признак: направлено ли руководству
     is_sent_to_top_brass BOOLEAN DEFAULT false,
