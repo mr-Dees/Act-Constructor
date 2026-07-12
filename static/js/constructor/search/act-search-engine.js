@@ -426,7 +426,13 @@ export const ActSearchEngine = {
         if (sc === range.endContainer && sc.nodeType === Node.TEXT_NODE) {
             const s = range.startOffset;
             const e = range.endOffset;
-            sc.nodeValue = sc.nodeValue.slice(0, s) + replacement + sc.nodeValue.slice(e);
+            // replaceData(s, e-s, ...), НЕ nodeValue=: правит смещения только в
+            // [s, e), сохраняя ДРУГИЕ живые Range в этом же узле. Присваивание
+            // nodeValue эквивалентно replaceData(0, len, ...) — схлопывает ВСЕ
+            // границы к 0 и ломает back-to-front replace-all при нескольких
+            // совпадениях в одном текст-узле (обычный абзац): «кот кот кот» →
+            // «пёспёскот кот пёс» вместо «пёс пёс пёс».
+            sc.replaceData(s, e - s, replacement);
             const caret = s + replacement.length;
             range.setStart(sc, caret);
             range.setEnd(sc, caret);
