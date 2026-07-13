@@ -547,3 +547,36 @@ test.describe('Find/Replace (Task B): read-only', () => {
     expect(await highlightSize(page, 'act-find')).toBe(3);
   });
 });
+
+test.describe('Find/Replace (Task B): кнопка во всплывающем тулбаре редактора', () => {
+  test.beforeEach(async ({ page }) => {
+    await openAct(page, SEED_ACTS.withContent);
+    await openStep2(page);
+  });
+
+  // 13. Кнопка 🔍 (data-command="findReplace") в #globalTextBlockToolbar
+  // (тот же тулбар, что жирный/курсив/размер/ссылка/сноска) открывает панель
+  // поиска. В отличие от прочих команд тулбара, редактор НЕ перефокусируется
+  // после клика (иначе activeEditor.focus() увёл бы фокус от поля поиска) —
+  // тулбар вместо этого явно скрывается (textblock-toolbar.js).
+  test('кнопка поиска в тулбаре открывает панель и скрывает сам тулбар', async ({ page }) => {
+    await seed(page, 'кот кот');
+
+    const editor = page.locator(EDITOR_SEL);
+    await editor.click(); // фокус → показывает #globalTextBlockToolbar
+
+    const toolbarBtn = page.locator(
+      '#globalTextBlockToolbar .toolbar-btn[data-command="findReplace"]',
+    );
+    await expect(toolbarBtn).toBeVisible();
+    await toolbarBtn.click();
+
+    await expect(page.locator(BAR)).not.toHaveClass(/\bhidden\b/);
+    await expect(findInput(page)).toBeFocused();
+    await expect(page.locator('#globalTextBlockToolbar')).toHaveClass(/\bhidden\b/);
+
+    // Панель рабочая: поиск находит совпадения.
+    await findInput(page).fill('кот');
+    await expect(counter(page)).toHaveText('1 / 2');
+  });
+});
