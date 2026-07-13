@@ -6,6 +6,7 @@
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { AppConfig } from '../../shared/app-config.js';
 import {
     CONTENT_TYPE_CASE,
     CONTENT_TYPE_FREE_TEXT,
@@ -19,6 +20,10 @@ Object.assign(ViolationManager.prototype, {
      */
     setupPasteHandler() {
         document.addEventListener('paste', async (e) => {
+            // Режим просмотра: вставка в дополнительный контент запрещена (#1).
+            // Глобальный слушатель живёт всегда — guard именно здесь обязателен.
+            if (AppConfig.readOnlyMode?.isReadOnly) return;
+
             // Проверяем, есть ли текущий активный контейнер
             if (!this.currentActiveContainer) {
                 return;

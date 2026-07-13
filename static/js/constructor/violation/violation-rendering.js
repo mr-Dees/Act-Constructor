@@ -32,7 +32,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер для элементов
      */
-    renderContentItems(violation, container) {
+    renderContentItems(violation, container, isReadOnly = AppConfig.readOnlyMode?.isReadOnly) {
         container.innerHTML = '';
 
         // Вычисляем нумерацию для последовательных кейсов
@@ -43,13 +43,13 @@ Object.assign(ViolationManager.prototype, {
 
             if (item.type === CONTENT_TYPE_CASE) {
                 const caseNumber = itemsWithNumbers[index];
-                itemElement = this.createCaseElement(violation, item, index, caseNumber);
+                itemElement = this.createCaseElement(violation, item, index, caseNumber, isReadOnly);
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_IMAGE, index);
-                itemElement = this.createImageElement(violation, item, index, imageNumber);
+                itemElement = this.createImageElement(violation, item, index, imageNumber, isReadOnly);
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
                 const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_FREE_TEXT, index);
-                itemElement = this.createFreeTextElement(violation, item, index, textNumber);
+                itemElement = this.createFreeTextElement(violation, item, index, textNumber, isReadOnly);
             }
 
             if (itemElement) {
@@ -58,7 +58,6 @@ Object.assign(ViolationManager.prototype, {
                 itemElement.dataset.itemIndex = index;
 
                 // Добавляем drag-and-drop атрибуты (только если не режим чтения)
-                const isReadOnly = AppConfig.readOnlyMode?.isReadOnly;
                 itemElement.draggable = !isReadOnly;
 
                 // Обработчики перетаскивания (только если не режим чтения)
@@ -126,7 +125,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} caseNumber - Номер кейса
      * @returns {HTMLElement} Элемент кейса
      */
-    createCaseElement(violation, item, index, caseNumber) {
+    createCaseElement(violation, item, index, caseNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
@@ -143,10 +142,15 @@ Object.assign(ViolationManager.prototype, {
         textarea.value = item.content;
         textarea.rows = 3;
 
-        textarea.addEventListener('input', () => {
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            this.setContentItemField(violation, item, 'content', textarea.value);
-        });
+        if (isReadOnly) {
+            textarea.readOnly = true;
+            textarea.classList.add('read-only');
+        } else {
+            textarea.addEventListener('input', () => {
+                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+                this.setContentItemField(violation, item, 'content', textarea.value);
+            });
+        }
 
         itemDiv.appendChild(textarea);
         wrapper.appendChild(label);
@@ -163,7 +167,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} imageNumber - Номер изображения
      * @returns {HTMLElement} Элемент изображения
      */
-    createImageElement(violation, item, index, imageNumber) {
+    createImageElement(violation, item, index, imageNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
@@ -200,10 +204,15 @@ Object.assign(ViolationManager.prototype, {
         captionInput.placeholder = 'Подпись к изображению';
         captionInput.value = item.caption;
 
-        captionInput.addEventListener('input', () => {
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            this.setContentItemField(violation, item, 'caption', captionInput.value);
-        });
+        if (isReadOnly) {
+            captionInput.readOnly = true;
+            captionInput.classList.add('read-only');
+        } else {
+            captionInput.addEventListener('input', () => {
+                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+                this.setContentItemField(violation, item, 'caption', captionInput.value);
+            });
+        }
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
         // (натуральный размер с потолком по ширине). Пишет item.width —
@@ -225,10 +234,13 @@ Object.assign(ViolationManager.prototype, {
         }
         widthSelect.value = String(item.width || 0);
         widthLabel.htmlFor = widthSelect.id = `${item.id}-width`;
+        widthSelect.disabled = isReadOnly;
 
-        widthSelect.addEventListener('change', () => {
-            this.setContentItemField(violation, item, 'width', parseInt(widthSelect.value, 10) || 0);
-        });
+        if (!isReadOnly) {
+            widthSelect.addEventListener('change', () => {
+                this.setContentItemField(violation, item, 'width', parseInt(widthSelect.value, 10) || 0);
+            });
+        }
 
         widthControl.appendChild(widthLabel);
         widthControl.appendChild(widthSelect);
@@ -252,7 +264,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} textNumber - Номер текстового блока
      * @returns {HTMLElement} Элемент текста
      */
-    createFreeTextElement(violation, item, index, textNumber) {
+    createFreeTextElement(violation, item, index, textNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
@@ -269,10 +281,15 @@ Object.assign(ViolationManager.prototype, {
         textarea.value = item.content;
         textarea.rows = 4;
 
-        textarea.addEventListener('input', () => {
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            this.setContentItemField(violation, item, 'content', textarea.value);
-        });
+        if (isReadOnly) {
+            textarea.readOnly = true;
+            textarea.classList.add('read-only');
+        } else {
+            textarea.addEventListener('input', () => {
+                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
+                this.setContentItemField(violation, item, 'content', textarea.value);
+            });
+        }
 
         itemDiv.appendChild(textarea);
         wrapper.appendChild(label);

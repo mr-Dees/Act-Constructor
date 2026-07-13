@@ -24,7 +24,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} violation - Объект нарушения
      * @returns {HTMLElement} Контейнер с подсущностями
      */
-    createAdditionalContentField(violation) {
+    createAdditionalContentField(violation, isReadOnly = false) {
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field violation-additional-content';
 
@@ -43,16 +43,20 @@ Object.assign(ViolationManager.prototype, {
         checkbox.type = 'checkbox';
         checkbox.id = `${violation.id}-additionalContent`;
         checkbox.checked = violation.additionalContent.enabled;
+        checkbox.disabled = isReadOnly;
 
-        checkbox.addEventListener('change', () => {
-            this.setViolationField(violation, 'additionalContent.enabled', checkbox.checked);
-            contentContainer.style.display = checkbox.checked ? 'block' : 'none';
+        // В режиме просмотра чекбокс заблокирован, мутирующий слушатель не вешаем.
+        if (!isReadOnly) {
+            checkbox.addEventListener('change', () => {
+                this.setViolationField(violation, 'additionalContent.enabled', checkbox.checked);
+                contentContainer.style.display = checkbox.checked ? 'block' : 'none';
 
-            // Если выключаем - сбрасываем активный контейнер
-            if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
-                this._resetActiveZone();
-            }
-        });
+                // Если выключаем - сбрасываем активный контейнер
+                if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
+                    this._resetActiveZone();
+                }
+            });
+        }
 
         const checkboxLabel = document.createElement('label');
         checkboxLabel.htmlFor = checkbox.id;
@@ -110,35 +114,39 @@ Object.assign(ViolationManager.prototype, {
             }
         });
 
-        // Настраиваем Drag and Drop для файлов
-        this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
+        // В режиме просмотра — только чтение: без приёма файлов и без меню
+        // добавления/удаления элементов.
+        if (!isReadOnly) {
+            // Настраиваем Drag and Drop для файлов
+            this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
 
-        // Обработчик контекстного меню - используем новый ContextMenuManager
-        itemsContainer.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+            // Обработчик контекстного меню - используем новый ContextMenuManager
+            itemsContainer.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
 
-            // Вычисляем позицию для вставки на основе клика
-            const insertPosition = this.calculateCursorPosition(e, itemsContainer);
+                // Вычисляем позицию для вставки на основе клика
+                const insertPosition = this.calculateCursorPosition(e, itemsContainer);
 
-            // Проверяем, клик по элементу или по пустой области
-            const clickedWrapper = e.target.closest('.content-item-wrapper');
+                // Проверяем, клик по элементу или по пустой области
+                const clickedWrapper = e.target.closest('.content-item-wrapper');
 
-            const options = {
-                violation,
-                contentContainer,
-                itemId: clickedWrapper ? clickedWrapper.dataset.itemId : null,
-                insertPosition
-            };
+                const options = {
+                    violation,
+                    contentContainer,
+                    itemId: clickedWrapper ? clickedWrapper.dataset.itemId : null,
+                    insertPosition
+                };
 
-            // Используем новый единый ContextMenuManager
-            ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', options);
-        });
+                // Используем новый единый ContextMenuManager
+                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', options);
+            });
+        }
 
         contentContainer.appendChild(itemsContainer);
 
         // Рендерим существующие элементы
-        this.renderContentItems(violation, itemsContainer);
+        this.renderContentItems(violation, itemsContainer, isReadOnly);
 
         fieldContainer.appendChild(contentContainer);
         return fieldContainer;

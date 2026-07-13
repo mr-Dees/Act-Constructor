@@ -5,6 +5,7 @@
 
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { AppConfig } from '../../shared/app-config.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -15,6 +16,10 @@ Object.assign(ViolationManager.prototype, {
      * @param {HTMLElement} contentContainer - Родительский контейнер
      */
     setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
+        // Режим просмотра: приём файлов не навешиваем (#1). Defense-in-depth —
+        // в RO createAdditionalContentField этот метод уже не вызывает.
+        if (AppConfig.readOnlyMode?.isReadOnly) return;
+
         // Повторная установка поля для того же нарушения снимает прежний
         // document-слушатель drop — иначе он накапливался на каждый ре-рендер
         // и удерживал отсоединённые контейнеры. Abort также дергают
