@@ -9,6 +9,7 @@ import { ViolationManager } from './violation-core.js';
 // через EscapeStack в violation-core.js), остальные
 // методы — в соседних модулях. Импорт здесь делает модуль самодостаточным
 // при импорте violationManager из любого места (не только из entry).
+import './violation-mutations.js';
 import './violation-paste.js';
 import './violation-additional-content.js';
 import './violation-rendering.js';
