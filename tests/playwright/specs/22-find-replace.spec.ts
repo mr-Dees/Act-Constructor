@@ -225,9 +225,9 @@ test.describe('Find/Replace (Task B): флагман — капсулы', () => 
     ' contenteditable="false">слово-ссылка</span>' +
     ' слово';
 
-  // 5. Поиск находит и собственный видимый текст капсулы (капсула-ссылка -search),
-  //    но замена всё равно не разрезает её.
-  test('поиск матчит и внешний текст, и видимый текст капсулы; «Заменить всё» правит только внешний текст', async ({ page }) => {
+  // 5. Поиск находит и собственный видимый текст капсулы (капсула-ссылка-search).
+  //    Замена теперь правит И подпись капсулы — оставаясь внутри span (URL/id целы).
+  test('поиск матчит и внешний текст, и видимый текст капсулы; «Заменить всё» правит и подпись капсулы', async ({ page }) => {
     await seed(page, CAPSULE_HTML);
     await openBar(page);
 
@@ -239,16 +239,16 @@ test.describe('Find/Replace (Task B): флагман — капсулы', () => 
     await expect(counter(page)).toHaveText('1 / 3');
     expect(await highlightSize(page, 'act-find')).toBe(3);
 
-    // (b) Заменить всё «слово» → «X». Два ВНЕШНИХ совпадения заменяются; совпадение
-    //     ВНУТРИ капсулы отклоняется replaceRange (_hasCapsuleAncestor) — капсула
-    //     остаётся неразрезанной, поэтому после пакета остаётся ровно 1 совпадение
-    //     (само «слово-ссылка»), а не 0.
+    // (b) Заменить всё «слово» → «X». Теперь заменяются ВСЕ три, включая подпись
+    //     капсулы: её текст-узел мутируется, сам span (id/url) остаётся цел →
+    //     после пакета совпадений 0, без «пропущено».
     await replaceInput(page).fill('X');
     await page.locator(`${BAR} [data-role="replaceAll"]`).click();
     await page.locator('.custom-dialog .dialog-confirm').click();
-    await expect(counter(page)).toHaveText('1 / 1');
-    await expect(page.locator('.notification-container .notification.warning .notification-message'))
-      .toContainText('пропущено 1');
+    await expect(counter(page)).toHaveText('0 / 0');
+    await expect(page.locator(
+      '.notification-container .notification.success .notification-message',
+      { hasText: 'Заменено' })).toContainText('Заменено 3');
 
     const state = await page.evaluate(() => {
       const ed = document.querySelector(
@@ -273,16 +273,16 @@ test.describe('Find/Replace (Task B): флагман — капсулы', () => 
       };
     });
 
-    // Капсула байт-в-байт цела.
+    // Капсула жива, id/url целы; подпись «слово-ссылка» → «X-ссылка».
     expect(state.capAlive).toBe(true);
     expect(state.capId).toBe('cap1');
     expect(state.capUrl).toBe('https://a.ru');
-    expect(state.capText).toBe('слово-ссылка');
+    expect(state.capText).toBe('X-ссылка');
     expect(state.content).toContain('data-link-id="cap1"');
     expect(state.content).toContain('data-link-url="https://a.ru"');
-    expect(state.content).toContain('слово-ссылка');
+    expect(state.content).toContain('X-ссылка');
 
-    // Два ВНЕШНИХ «слово» стали «X»; снаружи капсулы «слово» не осталось.
+    // Оба ВНЕШНИХ «слово» тоже стали «X»; «слово» нигде не осталось.
     expect(state.outer).not.toContain('слово');
     expect((state.outer.match(/X/g) || []).length).toBe(2);
   });
@@ -312,10 +312,9 @@ test.describe('Find/Replace (Task B): капсула-ссылка — собст
     expect(await highlightSize(page, 'act-find')).toBe(1);
   });
 
-  // 9. Замена совпадения, целиком лежащего ВНУТРИ текста капсулы, отклоняется
-  // движком (replaceRange._hasCapsuleAncestor) — «Заменить всё» ловит исключение,
-  // считает его как «пропущено», капсула остаётся байт-в-байт цела.
-  test('«Заменить всё» на совпадении внутри капсулы отклоняется; капсула цела', async ({ page }) => {
+  // 9. Замена совпадения, целиком лежащего ВНУТРИ подписи капсулы, теперь
+  // ПРИМЕНЯЕТСЯ: replaceRange мутирует текст-узел, а span (id/url) остаётся цел.
+  test('«Заменить всё» на совпадении внутри капсулы применяется; span цел', async ({ page }) => {
     await seed(page, LINK_TEXT_HTML);
     await openBar(page);
 
@@ -326,11 +325,11 @@ test.describe('Find/Replace (Task B): капсула-ссылка — собст
     await page.locator(`${BAR} [data-role="replaceAll"]`).click();
     await page.locator('.custom-dialog .dialog-confirm').click();
 
-    // Замена отклонена (диапазон пересекает капсулу) → совпадение никуда не делось.
-    await expect(counter(page)).toHaveText('1 / 1');
-
-    const warn = page.locator('.notification-container .notification.warning .notification-message');
-    await expect(warn).toContainText('пропущено 1');
+    // Замена применилась → совпадений больше нет.
+    await expect(counter(page)).toHaveText('0 / 0');
+    await expect(page.locator(
+      '.notification-container .notification.success .notification-message',
+      { hasText: 'Заменено' })).toContainText('Заменено 1');
 
     const state = await page.evaluate(() => {
       const ed = document.querySelector(
@@ -345,12 +344,38 @@ test.describe('Find/Replace (Task B): капсула-ссылка — собст
       };
     });
 
+    // span цел (id/url), подпись «важное слово» → «X слово».
     expect(state.capId).toBe('cap1');
     expect(state.capUrl).toBe('https://a.ru');
-    expect(state.capText).toBe('важное слово');
+    expect(state.capText).toBe('X слово');
     expect(state.content).toContain('data-link-id="cap1"');
-    expect(state.content).toContain('важное слово');
-    expect(state.content).not.toContain('X'); // замена нигде не применилась
+    expect(state.content).toContain('X слово');
+    expect(state.content).not.toContain('важное');
+  });
+
+  // 10. Замена, ОПУСТОШАЮЩАЯ подпись капсулы (вся подпись → пусто), пропускается:
+  // пустая ссылка бесполезна, span остаётся с прежним текстом.
+  test('замена, опустошающая подпись капсулы, пропускается; подпись цела', async ({ page }) => {
+    await seed(page, LINK_TEXT_HTML);
+    await openBar(page);
+
+    // Ищем всю подпись целиком и заменяем на пустоту.
+    await findInput(page).fill('важное слово');
+    await expect(counter(page)).toHaveText('1 / 1');
+    await replaceInput(page).fill('');
+    await page.locator(`${BAR} [data-role="replaceAll"]`).click();
+    await page.locator('.custom-dialog .dialog-confirm').click();
+
+    await expect(page.locator('.notification-container .notification.warning .notification-message'))
+      .toContainText('пропущено 1');
+
+    const capText = await page.evaluate(() => {
+      const ed = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"]',
+      ) as HTMLElement;
+      return (ed.querySelector('.text-link') as HTMLElement | null)?.textContent ?? null;
+    });
+    expect(capText).toBe('важное слово'); // подпись не тронута
   });
 });
 
@@ -428,6 +453,40 @@ test.describe('Find/Replace (Task B): тело сноски (data-footnote-text)
 
     const content = await stateContent(page);
     expect(content).toContain('data-footnote-text="секретное послание сноски"');
+  });
+
+  // 11a. Замена ЯКОРЯ сноски (видимый текст капсулы-сноски, capsuleText-пробег) —
+  // теперь тоже применяется через replaceRange; тело (data-footnote-text) и span целы.
+  test('«Заменить» правит видимый якорь сноски; тело и span целы', async ({ page }) => {
+    await seed(page, FOOTNOTE_HTML);
+    await openBar(page);
+
+    await findInput(page).fill('якорь');
+    await expect(counter(page)).toHaveText('1 / 1');
+    expect(await highlightSize(page, 'act-find')).toBe(1); // у якоря есть DOM Range
+
+    await replaceInput(page).fill('ссылка');
+    await page.locator(`${BAR} [data-role="replaceOne"]`).click();
+    await expect(counter(page)).toHaveText('0 / 0');
+
+    const state = await page.evaluate(() => {
+      const ed = document.querySelector(
+        '.textblock-editor[data-text-block-id="txt-seed-1"]',
+      ) as HTMLElement;
+      const fn = ed.querySelector('.text-footnote') as HTMLElement | null;
+      return {
+        anchorText: fn?.textContent ?? null,
+        footnoteText: fn?.getAttribute('data-footnote-text') ?? null,
+        footnoteId: fn?.getAttribute('data-footnote-id') ?? null,
+        content: (window as any).AppState.textBlocks['txt-seed-1'].content as string,
+      };
+    });
+    expect(state.anchorText).toBe('ссылка');                  // якорь заменён
+    expect(state.footnoteText).toBe('тайное послание сноски'); // тело не тронуто
+    expect(state.footnoteId).toBe('fn1');                      // span цел
+    expect(state.content).toContain('ссылка');
+    expect(state.content).not.toContain('якорь');
+    expect(state.content).toContain('data-footnote-text="тайное послание сноски"');
   });
 
   // 12. «Заменить всё» с совпадениями И во внешнем тексте, И в теле сноски ОДНОГО

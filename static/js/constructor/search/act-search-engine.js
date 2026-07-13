@@ -3,16 +3,25 @@
  * сбора «пробегов» текста и безопасной замены — БЕЗ UI (find-bar приходит в B2 и
  * потребляет этот экспортируемый API).
  *
- * Флагманская гарантия безопасности: собственный видимый текст КАПСУЛ
- * (span.text-link / span.text-footnote, contenteditable="false") попадает в
- * ОТДЕЛЬНЫЙ пробег, помеченный capsuleText:true, — искать и подсвечивать его
- * можно, но он остаётся математически неприкасаемым для ЗАМЕНЫ: границу
- * замены держит не пометка пробега, а replaceRange._hasCapsuleAncestor,
- * отклоняющая любой Range с предком-капсулой — совпадение видит текст
- * капсулы, но реально заменить его (или зацепить окружающий текст через
- * границу капсулы) не может. Капсула, <br> и любой void-элемент разрывают
- * ОКРУЖАЮЩИЙ (не капсульный) пробег; caret-guard'ы (U+FEFF) и якоря размера
- * (U+200B) исключаются как zero-width — как снаружи, так и внутри капсулы.
+ * Собственный видимый текст КАПСУЛ (span.text-link / span.text-footnote,
+ * contenteditable="false") попадает в ОТДЕЛЬНЫЙ пробег, помеченный
+ * capsuleText:true. Его можно искать, подсвечивать И заменять: подпись ссылки
+ * и текст-якорь сноски — обычные текстовые узлы ВНУТРИ капсулы, replaceRange
+ * мутирует их через replaceData/Range, не трогая ни span, ни его data-*-атрибуты
+ * (data-link-url / data-footnote-text — там живут URL и тело сноски, отдельные
+ * поверхности), ни guard-узлы по бокам. Целостности это не нарушает: разворот
+ * капсулы в plain-text срабатывает только на пустом ЗНАЧЕНИИ атрибута, а не на
+ * пустом видимом тексте, а self-heal MutationObserver не реагирует на
+ * characterData вне guard-узлов (textblock-capsule-integrity.js). Замену, которая
+ * опустошила бы видимую подпись/якорь капсулы, вызывающий (find-bar.js)
+ * ПРОПУСКАЕТ — пустая подпись бесполезна и сбивает вид. Границу замены держит
+ * replaceRange._capsuleAncestorOf: диапазон, ПЕРЕСЕКАЮЩИЙ границу капсулы (концы
+ * в разных капсулах либо капсула+внешний текст), отклоняется — но сам движок
+ * таких не порождает (капсула-атом всегда собирается в СВОЙ отдельный пробег),
+ * это defense-in-depth для произвольного Range из публичного API. Капсула, <br>
+ * и любой void-элемент разрывают ОКРУЖАЮЩИЙ (не капсульный) пробег; caret-guard'ы
+ * (U+FEFF) и якоря размера (U+200B) исключаются как zero-width — как снаружи, так
+ * и внутри капсулы.
  *
  * Предикаты капсул/zero-width — самостоятельные функции isCapsuleNode/
  * isZeroWidthNode из textblock-core.js (единый источник истины, туда же
@@ -75,9 +84,13 @@ const WORD_CHAR = '[\\p{L}\\p{N}_]';
  *                  в его узле, end ↔ длина узла. Пробег может охватывать несколько
  *                  текстовых узлов (сквозь inline-форматирование b/i/u/span);
  *   capsuleText  — true, если пробег собран из СОБСТВЕННОГО видимого текста
- *                  капсулы (см. collectRuns/_collectCapsuleTextRun); искать
- *                  можно, заменить нельзя (replaceRange отклоняет по
- *                  _hasCapsuleAncestor независимо от этой пометки). На
+ *                  капсулы (см. collectRuns/_collectCapsuleTextRun). Сегменты
+ *                  указывают на РЕАЛЬНЫЕ текстовые узлы капсулы, поэтому такой
+ *                  пробег и ищется, и ЗАМЕНЯЕТСЯ штатно (replaceRange мутирует
+ *                  узлы внутри капсулы; отклоняет лишь диапазон, ПЕРЕСЕКАЮЩИЙ
+ *                  границу капсулы, — движок таких не строит). Пометка
+ *                  информативна: вызывающий по ней узнаёт «найдено в капсуле»
+ *                  (напр. чтобы пропустить замену, опустошающую подпись). На
  *                  обычных пробегах поле отсутствует (falsy).
  *   footnoteBody — true для пробега ТЕЛА сноски (FootnoteBodySearchTarget).
  *                  segments ВСЕГДА [] — текст взят из атрибута
@@ -248,18 +261,16 @@ export const ActSearchEngine = {
     },
 
     /**
-     * Собирает пробеги текста редактора ручным DFS. Правила:
-     *  - текстовый узел с предком-капсулой в основной обход не попадает (DFS
-     *    сюда не спускается) — только в отдельный пробег капсулы, см. ниже;
+     * Собирает пробеги текста редактора ручным DFS (единый обходчик _visitRuns).
+     * Правила:
      *  - чистый zero-width узел (caret-guard U+FEFF / якорь размера U+200B /
      *    пустой) — пропускается, НЕ разрывая пробег (в т.ч. внутри капсулы);
      *  - капсула (.text-link/.text-footnote) — АТОМ для ОКРУЖАЮЩЕГО текста:
      *    граница капсулы разрывает пробег снаружи. Собственный видимый текст
-     *    капсулы при этом собирается в ОТДЕЛЬНЫЙ пробег с пометкой
-     *    capsuleText:true (_collectCapsuleTextRun) и пушится в runs сразу по
-     *    месту (между «до» и «после» — порядок документа). Искать/подсвечивать
-     *    его можно; заменить — нельзя (replaceRange отклоняет по
-     *    _hasCapsuleAncestor вне зависимости от пометки пробега);
+     *    капсулы при этом собирается ТЕМ ЖЕ обходчиком в ОТДЕЛЬНЫЙ пробег с
+     *    пометкой capsuleText:true и пушится в runs сразу по месту (между «до»
+     *    и «после» — порядок документа). Его можно искать, подсвечивать И
+     *    заменять — сегменты указывают на реальные текст-узлы капсулы;
      *  - <br> и <img> — АТОМЫ/void: разрывают пробег. <img> тоже, иначе
      *    совпадение, «перепрыгнувшее» картинку, при replaceRange удалило бы её
      *    (deleteContents) — картинки в текстблоках значимы (_toggleEmptyClass);
@@ -269,77 +280,95 @@ export const ActSearchEngine = {
      * @returns {Array<{text:string, segments:Array<{node:Node,start:number,end:number}>, capsuleText?:true}>}
      */
     collectRuns(editor) {
-        const runs = [];
-        let current = null;
-
-        const flush = () => {
-            if (current && current.text.length > 0) runs.push(current);
-            current = null;
-        };
-
-        const visit = (node) => {
-            for (let child = node.firstChild; child; child = child.nextSibling) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    // Чистый zero-width (guard/якорь/пустой) — не текст: пропускаем
-                    // без разрыва пробега.
-                    if (isZeroWidthNode(child)) continue;
-                    const text = child.data != null ? child.data : (child.textContent || '');
-                    if (!text) continue;
-                    if (!current) current = { text: '', segments: [] };
-                    const start = current.text.length;
-                    current.segments.push({ node: child, start, end: start + text.length });
-                    current.text += text;
-                } else if (child.nodeType === Node.ELEMENT_NODE) {
-                    if (isCapsuleNode(child)) {
-                        flush(); // капсула-атом: граница рвёт ОКРУЖАЮЩИЙ пробег
-                        // Собственный текст капсулы — отдельный пробег, пушится
-                        // сразу по месту (порядок документа сохраняется).
-                        const capsuleRun = this._collectCapsuleTextRun(child);
-                        if (capsuleRun) runs.push(capsuleRun);
-                    } else if (child.tagName === 'BR' || child.tagName === 'IMG') {
-                        flush(); // void-атом: пробег не должен его пересекать
-                    } else {
-                        visit(child); // прозрачный inline/блок — текст склеивается
-                    }
-                }
-            }
-        };
-
-        if (editor) visit(editor);
-        flush();
-        return runs;
+        const ctx = { runs: [], current: null };
+        if (editor) this._visitRuns(editor, ctx, null);
+        this._flushRun(ctx);
+        return ctx.runs;
     },
 
     /**
-     * @private Собирает СОБСТВЕННЫЙ видимый текст капсулы (ссылки/сноски) в
-     * один пробег, помеченный capsuleText:true. Рекурсия транзитивно обходит
-     * вложенное inline-форматирование (b/i/span) — так же, как основной
-     * DFS снаружи капсулы; isCapsuleNode здесь НЕ проверяется, т.к. капсулы в
-     * этом кодовой базе не вкладываются друг в друга (§3 дев-гайда). Сегменты
-     * указывают на РЕАЛЬНЫЕ текстовые узлы капсулы (не синтетика) — чтобы
-     * _locate/_rangeFromRun работали без изменений. Пустая капсула (без
-     * видимого текста) → null, пробег не добавляется (симметрично flush()
-     * основного DFS, который тоже не пушит пустые пробеги).
+     * @private Добавляет текстовый узел в пробег: пропускает zero-width
+     * (guard/якорь/пустой), иначе пушит сегмент [start,end) на РЕАЛЬНЫЙ узел и
+     * доклеивает его текст. Единая точка склейки для ОБОИХ режимов обхода
+     * (снаружи капсулы и внутри неё) — правило «что считать текстом» живёт здесь.
+     * @param {{text:string, segments:Array}} run
+     * @param {Node} node текстовый узел
+     * @returns {boolean} был ли узел реально добавлен (false — zero-width/пустой)
+     */
+    _appendTextNodeToRun(run, node) {
+        if (isZeroWidthNode(node)) return false;
+        const text = node.data != null ? node.data : (node.textContent || '');
+        if (!text) return false;
+        const start = run.text.length;
+        run.segments.push({ node, start, end: start + text.length });
+        run.text += text;
+        return true;
+    },
+
+    /** @private Закрывает накопленный внешний пробег (пустой не пушится). */
+    _flushRun(ctx) {
+        if (ctx.current && ctx.current.text.length > 0) ctx.runs.push(ctx.current);
+        ctx.current = null;
+    },
+
+    /**
+     * @private Единый рекурсивный обходчик пробегов, параметризованный целевым
+     * пробегом капсулы. capsuleRun === null — ВЕРХНИЙ уровень: капсула-атом
+     * разрывает внешний пробег (_flushRun) и собирается ОТДЕЛЬНЫМ пробегом
+     * (рекурсия с этим свежим capsuleRun), <br>/<img> тоже разрывают, прочие
+     * элементы прозрачны. capsuleRun !== null — ВНУТРИ капсулы: границ нет
+     * (капсулы не вкладываются — §3 дев-гайда, void в подписи не встречается),
+     * любой элемент прозрачен, весь текст склеивается в capsuleRun. TreeWalker
+     * (SHOW_TEXT) сознательно не используется — разрыв пробега требует НАБЛЮДАТЬ
+     * граничные элементы, которых text-only-обходчик не видит; ручной DFS даёт
+     * точную семантику и тестируется на фейковом дереве без реального DOM.
+     * @param {Node} node
+     * @param {{runs:Array, current:object|null}} ctx
+     * @param {{text:string, segments:Array, capsuleText:true}|null} capsuleRun
+     */
+    _visitRuns(node, ctx, capsuleRun) {
+        for (let child = node.firstChild; child; child = child.nextSibling) {
+            if (child.nodeType === Node.TEXT_NODE) {
+                if (capsuleRun) {
+                    this._appendTextNodeToRun(capsuleRun, child);
+                } else {
+                    // Ленивое создание внешнего пробега: только если узел реально
+                    // добавлен (zero-width/пустой не порождает пустой пробег).
+                    const run = ctx.current || { text: '', segments: [] };
+                    if (this._appendTextNodeToRun(run, child)) ctx.current = run;
+                }
+            } else if (child.nodeType === Node.ELEMENT_NODE) {
+                if (capsuleRun) {
+                    this._visitRuns(child, ctx, capsuleRun); // прозрачно внутри капсулы
+                } else if (isCapsuleNode(child)) {
+                    this._flushRun(ctx); // капсула-атом рвёт ОКРУЖАЮЩИЙ пробег
+                    // Собственный текст капсулы — тем же обходчиком, ЕДИНАЯ точка
+                    // сбора (_collectCapsuleTextRun), пушится по месту (порядок документа).
+                    const capRun = this._collectCapsuleTextRun(child);
+                    if (capRun) ctx.runs.push(capRun);
+                } else if (child.tagName === 'BR' || child.tagName === 'IMG') {
+                    this._flushRun(ctx); // void-атом: пробег не должен его пересекать
+                } else {
+                    this._visitRuns(child, ctx, null); // прозрачный inline/блок
+                }
+            }
+        }
+    },
+
+    /**
+     * @private Собирает СОБСТВЕННЫЙ видимый текст капсулы (ссылки/сноски) в один
+     * пробег, помеченный capsuleText:true, — тем же обходчиком _visitRuns (режим
+     * «внутри капсулы»). ЕДИНАЯ точка сбора текста капсулы: зовётся из _visitRuns
+     * (ветка isCapsuleNode) и напрямую (тесты). Сегменты указывают на РЕАЛЬНЫЕ
+     * текстовые узлы капсулы (не синтетика) — _locate/_rangeFromRun и replaceRange
+     * работают по ним без изменений. Пустая капсула (без видимого текста) → null
+     * (симметрично _flushRun, не пушащему пустой пробег).
      * @param {Node} capsuleNode
      * @returns {{text:string, segments:Array<{node:Node,start:number,end:number}>, capsuleText:true}|null}
      */
     _collectCapsuleTextRun(capsuleNode) {
         const run = { text: '', segments: [], capsuleText: true };
-        const walk = (node) => {
-            for (let child = node.firstChild; child; child = child.nextSibling) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    if (isZeroWidthNode(child)) continue;
-                    const text = child.data != null ? child.data : (child.textContent || '');
-                    if (!text) continue;
-                    const start = run.text.length;
-                    run.segments.push({ node: child, start, end: start + text.length });
-                    run.text += text;
-                } else if (child.nodeType === Node.ELEMENT_NODE) {
-                    walk(child); // прозрачная рекурсия — форматирование внутри капсулы
-                }
-            }
-        };
-        walk(capsuleNode);
+        this._visitRuns(capsuleNode, { runs: [], current: null }, run);
         return run.text.length > 0 ? run : null;
     },
 
@@ -441,6 +470,27 @@ export const ActSearchEngine = {
     },
 
     /**
+     * @private Переносит пометки пробега на матч (единая точка — раньше эта пара
+     * `if`ов дублировалась в findInRuns/findInTarget/buildAllMatches). `source` —
+     * либо сам пробег (findInRuns/buildAllMatches), либо уже помеченный матч
+     * findInRuns (findInTarget): оба несут те же поля. capsuleText — «найдено в
+     * капсуле» (искать/заменять можно; вызывающий по ней решает, напр., пропуск
+     * опустошающей замены). footnoteBody+footnoteEl — тело сноски (range:null,
+     * замена сплайсом атрибута). На обычных матчах поля отсутствуют.
+     * @param {object} match
+     * @param {{capsuleText?:true, footnoteBody?:true, footnoteEl?:HTMLElement}} source
+     * @returns {object} тот же match (для цепочки)
+     */
+    _carryRunMeta(match, source) {
+        if (source.capsuleText) match.capsuleText = true;
+        if (source.footnoteBody) {
+            match.footnoteBody = true;
+            match.footnoteEl = source.footnoteEl;
+        }
+        return match;
+    },
+
+    /**
      * ЧИСТАЯ функция (без DOM): совпадения по массиву пробегов. Компилирует
      * матчер один раз; лимит — суммарный по всем пробегам. Если пробег помечен
      * capsuleText:true (текст капсулы, см. collectRuns) или footnoteBody:true
@@ -466,13 +516,7 @@ export const ActSearchEngine = {
             if (remaining <= 0) { capped = true; break; }
             const scan = this._scanWithRegex(runs[ri].text, built.regex, remaining);
             for (const mt of scan.matches) {
-                const match = { runIndex: ri, start: mt.start, end: mt.end };
-                if (runs[ri].capsuleText) match.capsuleText = true;
-                if (runs[ri].footnoteBody) {
-                    match.footnoteBody = true;
-                    match.footnoteEl = runs[ri].footnoteEl;
-                }
-                out.push(match);
+                out.push(this._carryRunMeta({ runIndex: ri, start: mt.start, end: mt.end }, runs[ri]));
             }
             if (scan.capped) { capped = true; break; }
         }
@@ -546,18 +590,12 @@ export const ActSearchEngine = {
         const matches = res.matches.map((m) => {
             const run = runs[m.runIndex];
             const hasSegments = Array.isArray(run.segments) && run.segments.length > 0;
-            const match = {
+            return this._carryRunMeta({
                 range: hasSegments ? this._rangeFromRun(run, m.start, m.end) : null,
                 runIndex: m.runIndex,
                 start: m.start,
                 end: m.end,
-            };
-            if (m.capsuleText) match.capsuleText = true;
-            if (m.footnoteBody) {
-                match.footnoteBody = true;
-                match.footnoteEl = m.footnoteEl;
-            }
-            return match;
+            }, m);
         });
         return { matches, capped: res.capped };
     },
@@ -593,7 +631,7 @@ export const ActSearchEngine = {
                 const hasSegments = Array.isArray(run.segments) && run.segments.length > 0;
                 const scan = this._scanWithRegex(run.text, built.regex, cap - out.length);
                 for (const mt of scan.matches) {
-                    const match = {
+                    out.push(this._carryRunMeta({
                         targetId: target.id,
                         // Пробег без DOM-сегментов (тело сноски) — Range физически
                         // не построить (нет текстового узла с этим содержимым
@@ -602,13 +640,7 @@ export const ActSearchEngine = {
                         runIndex: ri,
                         start: mt.start,
                         end: mt.end,
-                    };
-                    if (run.capsuleText) match.capsuleText = true;
-                    if (run.footnoteBody) {
-                        match.footnoteBody = true;
-                        match.footnoteEl = run.footnoteEl;
-                    }
-                    out.push(match);
+                    }, run));
                 }
                 if (scan.capped) { capped = true; break; }
             }
@@ -618,36 +650,60 @@ export const ActSearchEngine = {
     },
 
     /**
-     * @private Есть ли у узла (или он сам) предок-капсула? Защита от замены,
-     * пересекающей капсулу. Обход сознательно локален (движок «чистый, без UI» —
-     * не тянет editor-привязанный _capsuleAncestor), но предикат — общий
-     * isCapsuleNode (единый с textblock-core, чтобы «граница капсулы» не дрейфовала).
+     * @private Ближайший предок-капсула узла (или он сам), либо null. Заменил
+     * boolean-предикат _hasCapsuleAncestor: replaceRange сравнивает капсулу
+     * НАЧАЛА и КОНЦА диапазона (замена ВНУТРИ одной капсулы разрешена, ПЕРЕСЕКАЮЩАЯ
+     * границу — нет), а не просто «есть ли капсула». Обход локален (движок
+     * «чистый, без UI» — не тянет editor-привязанный _capsuleAncestor), предикат —
+     * общий isCapsuleNode (единый с textblock-core, «граница капсулы» не дрейфует).
      * @param {Node} node
-     * @returns {boolean}
+     * @returns {Element|null}
      */
-    _hasCapsuleAncestor(node) {
+    _capsuleAncestorOf(node) {
         let n = node;
         while (n) {
-            if (isCapsuleNode(n)) return true;
+            if (isCapsuleNode(n)) return n;
             n = n.parentNode;
         }
-        return false;
+        return null;
     },
 
     /**
-     * Безопасно заменяет текст диапазона. Defense-in-depth: если любая граница
-     * диапазона лежит ВНУТРИ капсулы — бросает (движок никогда не производит
-     * такие диапазоны, но публичный API может получить произвольный Range).
-     * Один текстовый узел → сплайс nodeValue; иначе deleteContents + insertNode
-     * текстового узла. Внутренности капсул не трогает. После серии замен
-     * вызывающий обязан вызвать persist()/finalizeEdit.
+     * Безопасно заменяет текст диапазона.
+     *  - Обе границы в ОДНОЙ капсуле (или обе вне капсул) — замена выполняется:
+     *    подпись ссылки / текст-якорь сноски — обычные узлы, мутируем их, span и
+     *    его data-*-атрибуты целы (см. модульный докстринг про целостность).
+     *  - Границы в РАЗНЫХ капсулах либо капсула+внешний текст — диапазон пересекает
+     *    границу капсулы: бросаем (deleteContents снёс бы капсулу/зацепил соседей).
+     *    Движок таких не строит — defense-in-depth для произвольного Range из API.
+     *  - Замена, ОПУСТОШАЮЩАЯ видимый текст капсулы (пустая/пробельная строка на
+     *    всю подпись), тоже бросает: вызывающий (find-bar.js) считает её
+     *    пропущенной, а не применяет — пустая подпись бесполезна. Проверка по
+     *    ЖИВОМУ DOM капсулы ловит и накопительное опустошение back-to-front.
+     * Один текстовый узел → replaceData; иначе deleteContents + insertNode. После
+     * серии замен вызывающий обязан вызвать persist()/finalizeEdit.
      * @param {Range} range
      * @param {string} replacement
      */
     replaceRange(range, replacement) {
-        if (this._hasCapsuleAncestor(range.startContainer)
-            || this._hasCapsuleAncestor(range.endContainer)) {
-            throw new Error('ActSearchEngine.replaceRange: диапазон пересекает капсулу — замена отклонена');
+        const startCap = this._capsuleAncestorOf(range.startContainer);
+        const endCap = this._capsuleAncestorOf(range.endContainer);
+        if (startCap !== endCap) {
+            throw new Error('ActSearchEngine.replaceRange: диапазон пересекает границу капсулы — замена отклонена');
+        }
+        if (startCap) {
+            // Останется ли у капсулы видимый текст после замены? (zero-width
+            // guard'ы/якоря не в счёт — снаружи span, но страхуемся стрипом.)
+            const zeroWidth = /[\uFEFF\u200B]/g;
+            const capsuleVisible = (startCap.textContent || '').replace(zeroWidth, '');
+            const matchedLen = range.toString().replace(zeroWidth, '').length;
+            // Стрипаем zero-width и из replacement: trim() их пробелами НЕ считает,
+            // и вставка одного U+200B на всю подпись прошла бы как «непустая»,
+            // оставив невидимую (и после reload — ненаходимую) капсулу.
+            if (capsuleVisible.length - matchedLen <= 0
+                && String(replacement).replace(zeroWidth, '').trim() === '') {
+                throw new Error('ActSearchEngine.replaceRange: замена опустошила бы видимый текст капсулы — пропущено');
+            }
         }
         const sc = range.startContainer;
         if (sc === range.endContainer && sc.nodeType === Node.TEXT_NODE) {

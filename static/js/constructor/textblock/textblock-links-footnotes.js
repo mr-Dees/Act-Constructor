@@ -460,7 +460,7 @@ Object.assign(TextBlockManager.prototype, {
 
     /**
      * Форсированный tooltip тела сноски для АКТИВНОГО совпадения поиска по
-     * data-footnote-text (invisible search target — FootnoteBodySearchTarget,
+     * data-footnote-text (невидимая в DOM поверхность поиска — FootnoteBodySearchTarget,
      * act-search-engine.js/§12.1 архитектурного дока): в отличие от showTooltip,
      * не зависит от hover — открывается/закрывается явно из find-bar.js при
      * навигации по совпадениям (prev/next/первый переход к совпадению) и
@@ -481,6 +481,9 @@ Object.assign(TextBlockManager.prototype, {
         const num = element.getAttribute('data-footnote-number');
 
         const tooltip = document.createElement('div');
+        // Помечаем как ФОРС-tooltip поиска: hideFootnoteSearchTooltip закрывает
+        // только его, не трогая обычный hover-tooltip на общем currentTooltip (#3).
+        tooltip._isSearchTooltip = true;
         if (num) {
             tooltip.appendChild(document.createTextNode(`Сноска ${num}: `));
         }
@@ -566,6 +569,20 @@ Object.assign(TextBlockManager.prototype, {
         if (this.tooltipTimeout) {
             clearTimeout(this.tooltipTimeout);
             this.tooltipTimeout = null;
+        }
+    },
+
+    /**
+     * Закрывает ТОЛЬКО форсированный search-tooltip (showFootnoteSearchTooltip),
+     * не трогая обычный hover-tooltip. Оба живут на общем currentTooltip, но
+     * hover-версия НЕ помечена _isSearchTooltip: если сейчас на экране она
+     * (пользователь навёлся на капсулу и читает её), НЕ закрываем — find-bar
+     * снимает свой tooltip, а не чужой (#3). Если currentTooltip пуст — делать
+     * нечего (наш tooltip уже вытеснен либо не открывался).
+     */
+    hideFootnoteSearchTooltip() {
+        if (this.currentTooltip && this.currentTooltip._isSearchTooltip) {
+            this.hideTooltip();
         }
     },
 

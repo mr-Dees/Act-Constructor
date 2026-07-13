@@ -47,6 +47,44 @@ function elem(tagName, children = [], className = '') {
 /** Капсула-ссылка (contenteditable=false-атом) с текстом внутри. */
 const capsule = (text) => elem('SPAN', [txt(text)], 'text-link');
 
+/** Мутируемый текстовый узел: поддерживает replaceData (путь замены в одном
+ *  узле). textContent/nodeValue следуют за data. */
+function mtxt(data) {
+  return {
+    nodeType: 3, data, nodeValue: data,
+    get textContent() { return this.data; },
+    replaceData(offset, count, s) {
+      this.data = this.data.slice(0, offset) + s + this.data.slice(offset + count);
+      this.nodeValue = this.data;
+    },
+    firstChild: null, nextSibling: null, parentNode: null,
+  };
+}
+
+/** Капсула с МУТИРУЕМЫМ текст-узлом + живым textContent (для replace-тестов:
+ *  empty-guard читает cap.textContent, замена — cap.firstChild.replaceData). */
+function mutableCapsule(text, className = 'text-link') {
+  const inner = mtxt(text);
+  const set = new Set(className.split(' '));
+  const cap = {
+    nodeType: 1, tagName: 'SPAN',
+    classList: { contains: (c) => set.has(c) },
+    firstChild: inner, nextSibling: null, parentNode: null,
+    get textContent() { return this.firstChild ? this.firstChild.data : ''; },
+  };
+  inner.parentNode = cap;
+  return cap;
+}
+
+/** Фейковый одноузловой Range с toString (нужен empty-guard'у replaceRange). */
+function fakeRange(node, startOffset, endOffset) {
+  return {
+    startContainer: node, endContainer: node, startOffset, endOffset,
+    toString: () => (node.data != null ? node.data.slice(startOffset, endOffset) : ''),
+    setStart() {}, setEnd() {},
+  };
+}
+
 /**
  * Фейковый span.text-footnote: РОВНО поля, что читает FootnoteBodySearchTarget
  * (getAttribute/setAttribute/closest) — не реальный DOM, без Range.
@@ -309,28 +347,26 @@ test('findInRuns: текст капсулы находится и помечен
 // replaceRange — защита от пересечения капсулы + сплайс в одном узле
 // ---------------------------------------------------------------------------
 
-test('_hasCapsuleAncestor: текст внутри капсулы → true; вне → false', () => {
+test('_capsuleAncestorOf: текст внутри капсулы → сама капсула; вне → null', () => {
   const cap = capsule('x');
-  assert.equal(ActSearchEngine._hasCapsuleAncestor(cap.firstChild), true); // txt('x') под капсулой
-  assert.equal(ActSearchEngine._hasCapsuleAncestor(txt('plain')), false);
+  assert.equal(ActSearchEngine._capsuleAncestorOf(cap.firstChild), cap); // txt('x') под капсулой
+  assert.equal(ActSearchEngine._capsuleAncestorOf(txt('plain')), null);
 });
 
-test('replaceRange: граница внутри капсулы → бросает (defense-in-depth)', () => {
-  const cap = capsule('x');
+test('replaceRange: обе границы в ОДНОЙ капсуле → replaceData по узлу внутри (подпись меняется, span цел)', () => {
+  // Фича: подпись ссылки/якорь сноски теперь ЗАМЕНЯЕМЫ. Обе границы под одной
+  // капсулой → мутируем её текст-узел, сам span не трогаем.
+  const cap = mutableCapsule('LinkText');
   const inner = cap.firstChild;
-  const range = {
-    startContainer: inner, endContainer: inner, startOffset: 0, endOffset: 1,
-    setStart() {}, setEnd() {},
-  };
-  assert.throws(() => ActSearchEngine.replaceRange(range, 'z'), /капсул/);
+  ActSearchEngine.replaceRange(fakeRange(inner, 0, 4), 'Web'); // "Link" → "Web"
+  assert.equal(inner.data, 'WebText');
+  assert.equal(cap.textContent, 'WebText');
 });
 
-test('replaceRange: Range, построенный из НОВОГО пробега capsuleText (через _locate, как в _rangeFromRun), всё равно бросает', () => {
-  // Регресс-проверка на новую фичу: текст капсулы теперь попадает в пробег и
-  // находится поиском, но replaceRange обязан отклонить его так же, как раньше
-  // отклонял прямой узел капсулы — _hasCapsuleAncestor не завязан на пометку
-  // пробега, работает по реальному DOM-предку.
-  const cap = capsule('LinkText');
+test('replaceRange: Range из пробега capsuleText теперь ЗАМЕНЯЕТ текст капсулы (была фича «неприкасаемости», снята)', () => {
+  // Тот же путь, что в UI: пробег capsuleText → _locate → replaceRange. Раньше
+  // бросал (_hasCapsuleAncestor), теперь заменяет — оставаясь помеченным capsuleText.
+  const cap = mutableCapsule('LinkText');
   const editor = elem('DIV', [txt('foo'), cap, txt('bar')]);
   const runs = ActSearchEngine.collectRuns(editor);
   const capRun = runs[1];
@@ -338,11 +374,42 @@ test('replaceRange: Range, построенный из НОВОГО пробег
   assert.equal(found.matches[0].capsuleText, true);
   const s = ActSearchEngine._locate(capRun, found.matches[0].start, false);
   const e = ActSearchEngine._locate(capRun, found.matches[0].end, true);
+  ActSearchEngine.replaceRange(fakeRange(cap.firstChild, s.offset, e.offset), 'Web');
+  assert.equal(cap.firstChild.data, 'WebText');
+});
+
+test('replaceRange: замена, ОПУСТОШАЮЩАЯ подпись капсулы, → бросает (вызывающий считает пропуском)', () => {
+  const cap = mutableCapsule('word');
+  const inner = cap.firstChild;
+  assert.throws(() => ActSearchEngine.replaceRange(fakeRange(inner, 0, 4), ''), /опустош/);
+  assert.equal(inner.data, 'word'); // не тронуто
+  // Пробельная замена на всю подпись — тоже опустошение.
+  assert.throws(() => ActSearchEngine.replaceRange(fakeRange(inner, 0, 4), '   '), /опустош/);
+  // Zero-width (U+200B) на всю подпись — тоже опустошение (trim его не ловит).
+  assert.throws(() => ActSearchEngine.replaceRange(fakeRange(inner, 0, 4), '\u200B'), /опустош/);
+  // Частичная замена (остаётся видимый текст) — проходит.
+  ActSearchEngine.replaceRange(fakeRange(inner, 0, 2), '');
+  assert.equal(inner.data, 'rd');
+});
+
+test('replaceRange: границы в РАЗНЫХ капсулах → бросает (пересечение границы)', () => {
+  const capA = mutableCapsule('aaa');
+  const capB = mutableCapsule('bbb');
   const range = {
-    startContainer: s.node, endContainer: e.node, startOffset: s.offset, endOffset: e.offset,
-    setStart() {}, setEnd() {},
+    startContainer: capA.firstChild, endContainer: capB.firstChild,
+    startOffset: 0, endOffset: 1, toString: () => 'a', setStart() {}, setEnd() {},
   };
-  assert.throws(() => ActSearchEngine.replaceRange(range, 'z'), /капсул/);
+  assert.throws(() => ActSearchEngine.replaceRange(range, 'z'), /границу капсулы/);
+});
+
+test('replaceRange: одна граница в капсуле, другая снаружи → бросает', () => {
+  const cap = mutableCapsule('xyz');
+  const outside = txt('plain');
+  const range = {
+    startContainer: cap.firstChild, endContainer: outside,
+    startOffset: 0, endOffset: 1, toString: () => 'x', setStart() {}, setEnd() {},
+  };
+  assert.throws(() => ActSearchEngine.replaceRange(range, 'z'), /границу капсулы/);
 });
 
 // ---------------------------------------------------------------------------

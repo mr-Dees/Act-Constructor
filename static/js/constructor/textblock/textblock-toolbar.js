@@ -122,8 +122,11 @@ Object.assign(TextBlockManager.prototype, {
                     // В отличие от прочих команд, панель поиска остаётся открытой и
                     // держит фокус на своём поле ввода — редактор НЕ перефокусируем
                     // (иначе activeEditor.focus() ниже тут же увёл бы фокус обратно).
+                    // Префилл из выделения снимаем ДО hideToolbar — так же, как
+                    // Ctrl+F: кнопка обещает «(Ctrl+F)», поведение должно совпадать (#9).
+                    const prefill = FindBar._selectionPrefill();
                     this.hideToolbar();
-                    FindBar.open();
+                    FindBar.open(prefill);
                     return;
                 }
 
