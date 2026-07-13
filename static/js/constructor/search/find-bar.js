@@ -7,6 +7,13 @@
  * Ключевые инварианты:
  *  - Подсветка — через CSS Custom Highlight API (никаких <mark>-обёрток вокруг
  *    текста → капсулы/сноски целы). Прокрутка к текущему — scrollIntoView.
+ *  - Тело сноски (data-footnote-text) — невидимая в DOM поверхность поиска
+ *    (FootnoteBodySearchTarget, act-search-engine.js): у её совпадений
+ *    range===null, подсветка их не видит (нет Range). Текущее такое совпадение
+ *    показывается иначе — скролл к самой капсуле-сноске + форсированный
+ *    tooltip с <mark> (textblock-links-footnotes.js::showFootnoteSearchTooltip,
+ *    см. _revealCurrentMatch); замена — сплайс строки атрибута
+ *    (_spliceFootnoteBodyText), не Range API.
  *  - mousedown/pointerdown→preventDefault на КНОПКАХ панели: клик по ним не
  *    ворует фокус у активного поля ввода и не схлопывает выделение редактора
  *    (по образцу #globalTextBlockToolbar). На ТЕКСТОВЫЕ поля не вешаем — им
@@ -64,6 +71,14 @@ export const FindBar = {
     _debounceTimer: 0,
     /** @private @type {(()=>void)|null} Unsubscribe из EscapeStack. */
     _escUnsub: null,
+    /**
+     * @private @type {HTMLElement|null} span.text-footnote, для которого сейчас
+     * форсированно открыт tooltip (текущее совпадение — footnoteBody, тело
+     * сноски). Отслеживаем сами (не через textBlockManager.currentTooltip —
+     * тот общий с обычным hover-tooltip'ом) — чтобы закрыть форс-tooltip именно
+     * при уходе С ЭТОГО совпадения, а не полагаться на побочные hover-события.
+     */
+    _activeFootnoteTooltipEl: null,
     /**
      * @private
      * @type {Map<string,{before:string,after:string}>|null}
@@ -140,13 +155,14 @@ export const FindBar = {
         }
     },
 
-    /** Закрывает панель: снимает подсветку и Esc-обработчик. */
+    /** Закрывает панель: снимает подсветку, форс-tooltip сноски и Esc-обработчик. */
     close() {
         if (this._debounceTimer) {
             clearTimeout(this._debounceTimer);
             this._debounceTimer = 0;
         }
         ActSearchHighlight.clear();
+        this._clearFootnoteTooltip();
         // Снимок undo живёт только пока панель открыта: после закрытия акт
         // могут править вне поиска, а старый снимок затёр бы эти правки.
         this._clearUndo();
@@ -176,7 +192,8 @@ export const FindBar = {
                     <button type="button" class="act-find-toggle" data-toggle="wholeWord"
                             aria-pressed="false" title="Слово целиком">Слово</button>
                     <button type="button" class="act-find-toggle" data-toggle="regex"
-                            aria-pressed="false" title="Регулярное выражение">.*</button>
+                            aria-pressed="false"
+                            title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
                 </div>
                 <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
                 <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
@@ -327,18 +344,21 @@ export const FindBar = {
     },
 
     /**
-     * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку.
-     * @param {boolean} [scroll] Прокрутить к текущему совпадению.
+     * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку/tooltip.
+     * @param {boolean} [scroll] Прокрутить к текущему совпадению (и, для
+     *   footnoteBody-совпадения, открыть форс-tooltip тела сноски) — гейтит
+     *   ТЕ ЖЕ вызовы, что раньше вызывались (initial landing, prev/next; см.
+     *   _runSearch/_go — ровно те же места, где раньше звался scrollToCurrent).
      * @param {boolean} [currentOnly] Обновить только подсветку ТЕКУЩЕГО совпадения
      *   ('act-find-current'), не пересобирая весь 'act-find' (для prev/next: набор
      *   совпадений тот же, сменился лишь индекс — экономит перестройку до 5000
      *   диапазонов на каждый шаг навигации).
      */
     _render(scroll, currentOnly) {
+        const cur = (this._currentIdx >= 0 && this._matches[this._currentIdx])
+            ? this._matches[this._currentIdx] : null;
         if (currentOnly) {
-            const cur = (this._currentIdx >= 0 && this._matches[this._currentIdx])
-                ? this._matches[this._currentIdx].range : null;
-            ActSearchHighlight.renderCurrent(cur);
+            ActSearchHighlight.renderCurrent(cur ? cur.range : null);
         } else {
             ActSearchHighlight.render(this._matches, this._currentIdx);
         }
@@ -346,9 +366,43 @@ export const FindBar = {
             this._els.counter.textContent = formatMatchCounter(
                 this._currentIdx, this._matches.length, this._capped, ActSearchEngine.MAX_MATCHES);
         }
-        if (scroll && this._currentIdx >= 0 && this._matches[this._currentIdx]) {
-            ActSearchHighlight.scrollToCurrent(this._matches[this._currentIdx].range);
+        if (scroll) {
+            this._revealCurrentMatch(cur);
         }
+    },
+
+    /**
+     * @private Показывает ТЕКУЩЕЕ совпадение пользователю. Обычное (с DOM-Range) —
+     * штатный scrollToCurrent (подсветка уже нарисована выше). footnoteBody
+     * (тело сноски — Range физически нет, act-search-engine.js) — своя пара:
+     * скролл к самому маркеру-капсуле + форсированный tooltip с подсветкой
+     * найденной подстроки (CSS Custom Highlight её не увидит — ожидаемо, у
+     * невидимого атрибута нет Range). Уход с footnoteBody-совпадения (переход
+     * на обычное/отсутствие совпадений) закрывает форс-tooltip.
+     * @param {object|null} match Текущий матч (buildAllMatches) либо null.
+     */
+    _revealCurrentMatch(match) {
+        if (match && match.footnoteBody && match.footnoteEl) {
+            if (typeof match.footnoteEl.scrollIntoView === 'function') {
+                match.footnoteEl.scrollIntoView({ block: 'center' });
+            }
+            if (typeof textBlockManager.showFootnoteSearchTooltip === 'function') {
+                textBlockManager.showFootnoteSearchTooltip(match.footnoteEl, match.start, match.end);
+            }
+            this._activeFootnoteTooltipEl = match.footnoteEl;
+            return;
+        }
+        this._clearFootnoteTooltip();
+        if (match && match.range) {
+            ActSearchHighlight.scrollToCurrent(match.range);
+        }
+    },
+
+    /** @private Закрывает форсированный tooltip тела сноски, если он открыт. */
+    _clearFootnoteTooltip() {
+        if (!this._activeFootnoteTooltipEl) return;
+        this._activeFootnoteTooltipEl = null;
+        if (typeof textBlockManager.hideTooltip === 'function') textBlockManager.hideTooltip();
     },
 
     /**
@@ -396,6 +450,22 @@ export const FindBar = {
         return map;
     },
 
+    /**
+     * @private Сплайсит подстроку [start,end) АТРИБУТА data-footnote-text (тело
+     * сноски — footnoteBody-совпадение, у него физически нет DOM Range, см.
+     * act-search-engine.js). Аналог replaceData на живом текстовом узле, но для
+     * строки-атрибута: вызывающий обязан сам вызвать target.persist() после.
+     * @param {HTMLElement} footnoteEl span.text-footnote
+     * @param {number} start
+     * @param {number} end
+     * @param {string} replacement
+     */
+    _spliceFootnoteBodyText(footnoteEl, start, end, replacement) {
+        const before = footnoteEl.getAttribute('data-footnote-text') || '';
+        const after = before.slice(0, start) + replacement + before.slice(end);
+        footnoteEl.setAttribute('data-footnote-text', after);
+    },
+
     /** @private Заменяет текущее совпадение и переходит к следующему. */
     _replaceCurrent() {
         if (AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly) return;
@@ -408,15 +478,20 @@ export const FindBar = {
         const target = this._targetsById().get(cur.targetId);
         if (!target) return;
 
-        try {
-            ActSearchEngine.replaceRange(cur.range, replacement);
-        } catch (err) {
-            // Диапазон пересёк капсулу (движок не должен такое порождать) —
-            // не падаем, сообщаем и пересобираем.
-            console.error('[FindBar] replaceRange:', err);
-            Notifications.error('Замену нельзя применить: совпадение затрагивает ссылку/сноску');
-            this._runSearch();
-            return;
+        if (cur.footnoteBody && cur.footnoteEl) {
+            // Тело сноски — сплайс строки атрибута, не Range API.
+            this._spliceFootnoteBodyText(cur.footnoteEl, cur.start, cur.end, replacement);
+        } else {
+            try {
+                ActSearchEngine.replaceRange(cur.range, replacement);
+            } catch (err) {
+                // Диапазон пересёк капсулу (движок не должен такое порождать) —
+                // не падаем, сообщаем и пересобираем.
+                console.error('[FindBar] replaceRange:', err);
+                Notifications.error('Замену нельзя применить: совпадение затрагивает ссылку/сноску');
+                this._runSearch();
+                return;
+            }
         }
         target.persist();
         // Контент изменён другим путём — снимок «Заменить всё» протух.
@@ -442,9 +517,21 @@ export const FindBar = {
         const replacement = this._els.replaceInput.value;
 
         const groups = groupMatchesByTarget(this._matches);
+        const targets = this._targetsById();
+        // Снимок/подтверждение считаются по ВЛАДЕЮЩЕМУ текстблоку (blockId), не
+        // по targetId группы: у FootnoteBodySearchTarget id — составной
+        // (см. act-search-engine.js), а content, в который реально персистится
+        // правка тела сноски, живёт в AppState.textBlocks[blockId] — ОДИН
+        // текстблок с N сносками не должен считаться N «блоками».
+        const blockIdsTouched = new Set();
+        for (const targetId of groups.keys()) {
+            const t = targets.get(targetId);
+            blockIdsTouched.add((t && t.blockId) ? t.blockId : targetId);
+        }
+
         const confirmed = await DialogManager.show({
             title: 'Замена',
-            message: buildReplaceAllConfirmMessage(this._matches.length, groups.size),
+            message: buildReplaceAllConfirmMessage(this._matches.length, blockIdsTouched.size),
             confirmText: 'Заменить всё',
             cancelText: 'Отмена',
             type: 'warning',
@@ -452,27 +539,45 @@ export const FindBar = {
         if (!confirmed) return;
 
         // Снимок ДО пакета — «before» для одношагового undo.
-        const before = snapshotTextBlockContents(groups.keys(), AppState.textBlocks);
+        const before = snapshotTextBlockContents(blockIdsTouched, AppState.textBlocks);
 
-        const targets = this._targetsById();
         let replaced = 0;
         let failed = 0;
+        // persist() = finalizeEdit(editor) владеющего блока — у TextBlockSearchTarget
+        // и у КАЖДОЙ FootnoteBodySearchTarget одного блока это ОДИН и тот же editor.
+        // Сначала применяем ВСЕ мутации (текст + все сноски блока), и только ПОТОМ
+        // зовём persist() один раз на blockId — иначе ранний persist() (finalizeEdit
+        // читает editor.innerHTML) зафиксировал бы блок ДО того, как в него попали
+        // более поздние по циклу правки его же сносок/текста (потерянная запись).
+        const blockTargets = new Map(); // blockId → любая цель этого блока (для persist())
         for (const [targetId, group] of groups) {
             const target = targets.get(targetId);
             if (!target) continue;
-            // Внутри цели — С КОНЦА: более ранние Range остаются валидны, т.к.
-            // правка позже по тексту не сдвигает предшествующие смещения.
-            for (let i = group.length - 1; i >= 0; i--) {
-                try {
-                    ActSearchEngine.replaceRange(group[i].range, replacement);
+            // Внутри цели — С КОНЦА: более ранние offset'ы/Range остаются
+            // валидны, т.к. правка позже по тексту не сдвигает предшествующие.
+            // Группа однородна по построению (targetId различает
+            // TextBlockSearchTarget/FootnoteBodySearchTarget) — либо ВСЕ
+            // footnoteBody (сплайс атрибута), либо ни одного (DOM Range).
+            if (group[0] && group[0].footnoteBody) {
+                for (let i = group.length - 1; i >= 0; i--) {
+                    this._spliceFootnoteBodyText(group[i].footnoteEl, group[i].start, group[i].end, replacement);
                     replaced++;
-                } catch (err) {
-                    console.error('[FindBar] replaceAll replaceRange:', err);
-                    failed++;
+                }
+            } else {
+                for (let i = group.length - 1; i >= 0; i--) {
+                    try {
+                        ActSearchEngine.replaceRange(group[i].range, replacement);
+                        replaced++;
+                    } catch (err) {
+                        console.error('[FindBar] replaceAll replaceRange:', err);
+                        failed++;
+                    }
                 }
             }
-            target.persist();
+            const blockId = target.blockId || targetId;
+            blockTargets.set(blockId, target);
         }
+        for (const target of blockTargets.values()) target.persist();
 
         // Единый глобальный проход по сноскам после всего пакета.
         if (typeof textBlockManager.renumberAllFootnotes === 'function') {

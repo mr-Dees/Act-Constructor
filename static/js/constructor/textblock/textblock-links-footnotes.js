@@ -454,8 +454,66 @@ Object.assign(TextBlockManager.prototype, {
         if (!content) return;
 
         const tooltip = document.createElement('div');
-        tooltip.className = 'link-footnote-tooltip';
         tooltip.textContent = content;
+        this._positionAndShowTooltip(tooltip, element);
+    },
+
+    /**
+     * Форсированный tooltip тела сноски для АКТИВНОГО совпадения поиска по
+     * data-footnote-text (invisible search target — FootnoteBodySearchTarget,
+     * act-search-engine.js/§12.1 архитектурного дока): в отличие от showTooltip,
+     * не зависит от hover — открывается/закрывается явно из find-bar.js при
+     * навигации по совпадениям (prev/next/первый переход к совпадению) и
+     * закрытии панели.
+     * Подсвечивает НАЙДЕННУЮ подстроку <mark>, собранным ТОЛЬКО через DOM API
+     * (createElement/createTextNode/appendChild) — тело сноски untrusted-контент
+     * пользователя, конкатенация в innerHTML была бы stored-XSS (§9.1 дев-гайда:
+     * тот же принцип «не строить HTML из недоверенной строки», здесь — для узла,
+     * который РЕАЛЬНО показывается пользователю, а не только парсится).
+     * @param {HTMLElement} element span.text-footnote
+     * @param {number} matchStart Смещение начала совпадения в data-footnote-text.
+     * @param {number} matchEnd Смещение конца совпадения.
+     */
+    showFootnoteSearchTooltip(element, matchStart, matchEnd) {
+        this.hideTooltip();
+
+        const text = element.getAttribute('data-footnote-text') || '';
+        const num = element.getAttribute('data-footnote-number');
+
+        const tooltip = document.createElement('div');
+        if (num) {
+            tooltip.appendChild(document.createTextNode(`Сноска ${num}: `));
+        }
+        // Смещения приходят из движка поиска по фактическому data-footnote-text —
+        // клампинг только defense-in-depth (рассинхрон был бы багом вызывающего).
+        const start = Math.max(0, Math.min(matchStart, text.length));
+        const end = Math.max(start, Math.min(matchEnd, text.length));
+        if (start > 0) {
+            tooltip.appendChild(document.createTextNode(text.slice(0, start)));
+        }
+        if (end > start) {
+            const mark = document.createElement('mark');
+            mark.textContent = text.slice(start, end);
+            tooltip.appendChild(mark);
+        }
+        if (end < text.length) {
+            tooltip.appendChild(document.createTextNode(text.slice(end)));
+        }
+
+        this._positionAndShowTooltip(tooltip, element);
+    },
+
+    /**
+     * @private Общая геометрия tooltip'а (позиционирование у элемента-якоря с
+     * клампингом по вьюпорту) — используется и обычным hover-tooltip (showTooltip),
+     * и форсированным search-tooltip (showFootnoteSearchTooltip), чтобы не
+     * дублировать расчёт. Собранный tooltip (className/style ещё не выставлены)
+     * вставляется в DOM здесь.
+     * @param {HTMLElement} tooltip Собранный, но ещё НЕ вставленный в DOM узел.
+     * @param {HTMLElement} element Элемент-якорь (капсула).
+     */
+    _positionAndShowTooltip(tooltip, element) {
+        tooltip.className = 'link-footnote-tooltip';
         tooltip.style.cssText = `
             position: fixed;
             background: rgba(0, 0, 0, 0.9);
