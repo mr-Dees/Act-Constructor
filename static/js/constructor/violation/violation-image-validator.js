@@ -19,8 +19,8 @@ import { CONTENT_TYPE_IMAGE } from './violation-content-item.js';
 
 /** Дефолтные лимиты — зеркало ImagesSettings (app/domains/acts/settings.py). */
 export const DEFAULT_IMAGE_LIMITS = {
-    maxFileSize: 10 * 1024 * 1024,
-    maxTotalSizePerAct: 30 * 1024 * 1024,
+    maxFileSize: 4 * 1024 * 1024,
+    maxTotalSizePerAct: 5 * 1024 * 1024,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 50,
     previewMaxHeightPercent: 40,

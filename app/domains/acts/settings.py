@@ -101,9 +101,15 @@ class ImagesSettings(BaseModel):
     константа VIOLATION_IMAGE_URL_MAX_LENGTH в schemas/act_content.py;
     она обязана быть заведомо выше max_file_size с учётом
     base64-оверхеда (×4/3 + префикс).
+
+    Пороги согласованы с SecuritySettings.max_request_size (общий с доменом
+    chat лимит тела HTTP-запроса, который сам НЕ поднимаем): дефолты — сырые
+    (pre-base64) байты, а на провод внутри JSON акта уходит base64 (+×4/3).
+    Инвариант — tests/domains/acts/test_acts_limits_api.py::
+    test_image_budgets_fit_in_http_request_size_limit.
     """
-    max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
-    max_total_size_per_act: int = Field(default=30 * 1024 * 1024, gt=0)
+    max_file_size: int = Field(default=4 * 1024 * 1024, gt=0)
+    max_total_size_per_act: int = Field(default=5 * 1024 * 1024, gt=0)
     # webp исключён сознательно: python-docx (без Pillow) не встраивает его
     # в DOCX — картинка молча расходилась бы между превью и экспортом.
     allowed_mime_types: list[str] = Field(

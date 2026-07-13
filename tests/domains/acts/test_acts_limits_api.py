@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.config import SecuritySettings
 from app.domains.acts.api import get_api_routers
 from app.domains.acts.deps import _get_acts_settings
 from app.domains.acts.schemas.act_content import (
@@ -43,8 +44,8 @@ class TestImagesSettingsDefaults:
 
     def test_defaults(self):
         s = ImagesSettings()
-        assert s.max_file_size == 10 * 1024 * 1024
-        assert s.max_total_size_per_act == 30 * 1024 * 1024
+        assert s.max_file_size == 4 * 1024 * 1024
+        assert s.max_total_size_per_act == 5 * 1024 * 1024
         assert s.allowed_mime_types == [
             "image/jpeg", "image/png", "image/gif",
         ]
@@ -54,7 +55,7 @@ class TestImagesSettingsDefaults:
     def test_acts_settings_includes_images(self):
         s = ActsSettings()
         assert isinstance(s.images, ImagesSettings)
-        assert s.images.max_file_size == 10 * 1024 * 1024
+        assert s.images.max_file_size == 4 * 1024 * 1024
 
     def test_url_max_length_covers_max_file_size_in_base64(self):
         """Инвариант согласованности лимитов (fce3e4e ↔ ImagesSettings).
@@ -68,6 +69,28 @@ class TestImagesSettingsDefaults:
         base64_len = (s.max_file_size + 2) // 3 * 4
         prefix_margin = 64  # запас на data:image/jpeg;base64, и подобные
         assert VIOLATION_IMAGE_URL_MAX_LENGTH > base64_len + prefix_margin
+
+    def test_image_budgets_fit_in_http_request_size_limit(self):
+        """Инвариант (#2, КРИТ): base64-раздутый бюджет картинок влезает в лимит запроса.
+
+        Бюджет картинок (ImagesSettings) считается в СЫРЫХ байтах, а на провод
+        внутри JSON акта уходит base64 (+×4/3). RequestSizeLimitMiddleware
+        режет тело запроса по SecuritySettings.max_request_size — если
+        base64-раздутая сумма его превышает, весь акт не сохраняется (413) и
+        правки пользователя теряются. max_request_size — общий с доменом
+        chat лимит, его НЕЛЬЗЯ поднимать под картинки; согласовываем в
+        обратную сторону — бюджет картинок должен быть заведомо меньше.
+
+        1_500_000 байт — резерв на data-URL-префиксы каждой картинки и
+        не-картиночное тело акта (дерево/таблицы/текстблоки).
+        """
+        images = ImagesSettings()
+        security = SecuritySettings()
+        assert (
+            images.max_total_size_per_act * 4 // 3 + 1_500_000
+            <= security.max_request_size
+        )
+        assert images.max_file_size * 4 // 3 <= security.max_request_size
 
     def test_mime_whitelist_matches_schema_url_whitelist(self):
         """MIME-whitelist настроек согласован с regex-whitelist'ом схемы url."""
@@ -144,8 +167,8 @@ class TestActsLimitsEndpoint:
         body = resp.json()
 
         assert body["images"] == {
-            "max_file_size": 10 * 1024 * 1024,
-            "max_total_size_per_act": 30 * 1024 * 1024,
+            "max_file_size": 4 * 1024 * 1024,
+            "max_total_size_per_act": 5 * 1024 * 1024,
             "allowed_mime_types": [
                 "image/jpeg", "image/png", "image/gif",
             ],

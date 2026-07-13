@@ -70,6 +70,22 @@ test('суммарный лимит впритык проходит', () => {
     assert.equal(res.ok, true);
 });
 
+test('интеграция: existingTotalBytes (estimateActImageBytes) и file.size — одна единица (raw bytes)', () => {
+    // base64-payload длиной 2667 символов оценивается в ~2000 сырых байт
+    // (2667 * 0.75 = 2000.25 → округление до 2000). Если бы existingTotalBytes
+    // считался в длине base64-строки, а не в сырых байтах, сумма с новым
+    // файлом (2667 + 900 = 3567) ложно превысила бы лимит акта (3000) —
+    // акт бы ошибочно отклонял валидную картинку (или наоборот, пропускал
+    // бы лишнее при обратной путанице единиц).
+    const url = `data:image/png;base64,${'A'.repeat(2667)}`;
+    const violations = { v1: { additionalContent: { items: [{ type: 'image', url }] } } };
+    const existingTotalBytes = estimateActImageBytes(violations);
+    assert.equal(existingTotalBytes, 2000);
+
+    const res = validateImageFile(file({ size: 900 }), { existingTotalBytes, limits: LIMITS });
+    assert.equal(res.ok, true);
+});
+
 test('достигнут лимит элементов на нарушение → отказ', () => {
     const res = validateImageFile(file(), { itemsCount: 3, limits: LIMITS });
     assert.equal(res.ok, false);
@@ -80,9 +96,9 @@ test('отсутствующий файл → отказ без исключен
     assert.equal(validateImageFile(null, { limits: LIMITS }).ok, false);
 });
 
-test('дефолтные лимиты зеркалят ACTS__IMAGES__* (10МБ/30МБ/50)', () => {
-    assert.equal(DEFAULT_IMAGE_LIMITS.maxFileSize, 10 * 1024 * 1024);
-    assert.equal(DEFAULT_IMAGE_LIMITS.maxTotalSizePerAct, 30 * 1024 * 1024);
+test('дефолтные лимиты зеркалят ACTS__IMAGES__* (4МБ/5МБ/50)', () => {
+    assert.equal(DEFAULT_IMAGE_LIMITS.maxFileSize, 4 * 1024 * 1024);
+    assert.equal(DEFAULT_IMAGE_LIMITS.maxTotalSizePerAct, 5 * 1024 * 1024);
     assert.equal(DEFAULT_IMAGE_LIMITS.maxItemsPerViolation, 50);
     assert.equal(DEFAULT_IMAGE_LIMITS.previewMaxHeightPercent, 40);
     assert.deepEqual(
