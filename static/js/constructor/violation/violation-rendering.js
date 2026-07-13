@@ -3,7 +3,6 @@
  * Создание DOM-элементов для кейсов, изображений и текста
  */
 
-import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -145,9 +144,8 @@ Object.assign(ViolationManager.prototype, {
         textarea.rows = 3;
 
         textarea.addEventListener('input', () => {
-            item.content = textarea.value;
             // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
+            this.setContentItemField(violation, item, 'content', textarea.value);
         });
 
         itemDiv.appendChild(textarea);
@@ -203,9 +201,8 @@ Object.assign(ViolationManager.prototype, {
         captionInput.value = item.caption;
 
         captionInput.addEventListener('input', () => {
-            item.caption = captionInput.value;
             // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
+            this.setContentItemField(violation, item, 'caption', captionInput.value);
         });
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
@@ -230,8 +227,7 @@ Object.assign(ViolationManager.prototype, {
         widthLabel.htmlFor = widthSelect.id = `${item.id}-width`;
 
         widthSelect.addEventListener('change', () => {
-            item.width = parseInt(widthSelect.value, 10) || 0;
-            PreviewManager.updateBlock('violation', violation.id);
+            this.setContentItemField(violation, item, 'width', parseInt(widthSelect.value, 10) || 0);
         });
 
         widthControl.appendChild(widthLabel);
@@ -274,9 +270,8 @@ Object.assign(ViolationManager.prototype, {
         textarea.rows = 4;
 
         textarea.addEventListener('input', () => {
-            item.content = textarea.value;
             // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
+            this.setContentItemField(violation, item, 'content', textarea.value);
         });
 
         itemDiv.appendChild(textarea);

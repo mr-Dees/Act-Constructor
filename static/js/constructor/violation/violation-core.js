@@ -138,11 +138,10 @@ export class ViolationManager {
         } else {
             // Настраиваем обработку клавиш для сохранения изменений
             this.setupTextareaHandlers(violatedTextarea, (value) => {
-                violation.violated = value;
+                this.setViolationField(violation, 'violated', value);
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
                 }
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -170,11 +169,10 @@ export class ViolationManager {
         } else {
             // Настраиваем обработку клавиш для сохранения изменений
             this.setupTextareaHandlers(establishedTextarea, (value) => {
-                violation.established = value;
+                this.setViolationField(violation, 'established', value);
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
                 }
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
             });
         }
 
@@ -281,9 +279,8 @@ export class ViolationManager {
         checkbox.checked = violation[fieldName].enabled;
 
         checkbox.addEventListener('change', () => {
-            violation[fieldName].enabled = checkbox.checked;
+            this.setViolationField(violation, `${fieldName}.enabled`, checkbox.checked);
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
-            PreviewManager.updateBlock('violation', violation.id);
         });
 
         const checkboxLabel = document.createElement('label');
@@ -310,9 +307,9 @@ export class ViolationManager {
             addButton.textContent = '+ Добавить пункт';
 
             addButton.addEventListener('click', () => {
-                violation[fieldName].items.push('');
-                this.renderList(listContainer, violation, fieldName);
-                PreviewManager.updateBlock('violation', violation.id);
+                if (this.addViolationListItem(violation)) {
+                    this.renderList(listContainer, violation, fieldName);
+                }
             });
 
             contentContainer.appendChild(addButton);
@@ -328,8 +325,7 @@ export class ViolationManager {
 
             // Настраиваем обработку клавиш
             this.setupTextareaHandlers(textarea, (value) => {
-                violation[fieldName].content = value;
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
+                this.setViolationField(violation, `${fieldName}.content`, value);
             });
 
             contentContainer.appendChild(textarea);
@@ -362,8 +358,7 @@ export class ViolationManager {
 
             // Обновляем массив при вводе
             input.addEventListener('input', () => {
-                violation[fieldName].items[index] = input.value;
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
+                this.setViolationListItem(violation, index, input.value);
             });
 
             // Обработка горячих клавиш для элементов списка
@@ -393,9 +388,9 @@ export class ViolationManager {
             deleteBtn.textContent = '×';
 
             deleteBtn.addEventListener('click', () => {
-                violation[fieldName].items.splice(index, 1);
-                this.renderList(container, violation, fieldName);
-                PreviewManager.updateBlock('violation', violation.id);
+                if (this.removeViolationListItem(violation, index)) {
+                    this.renderList(container, violation, fieldName);
+                }
             });
 
             itemContainer.appendChild(input);

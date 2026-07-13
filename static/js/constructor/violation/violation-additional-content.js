@@ -6,6 +6,7 @@
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
+import { ValidationCore } from '../validation/validation-core.js';
 import { Notifications } from '../../shared/notifications.js';
 import { AppState } from '../state/state-core.js';
 import {
@@ -44,15 +45,13 @@ Object.assign(ViolationManager.prototype, {
         checkbox.checked = violation.additionalContent.enabled;
 
         checkbox.addEventListener('change', () => {
-            violation.additionalContent.enabled = checkbox.checked;
+            this.setViolationField(violation, 'additionalContent.enabled', checkbox.checked);
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
 
             // Если выключаем - сбрасываем активный контейнер
             if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
                 this._resetActiveZone();
             }
-
-            PreviewManager.updateBlock('violation', violation.id);
         });
 
         const checkboxLabel = document.createElement('label');
@@ -228,6 +227,11 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} extraData - Дополнительные данные элемента
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
+        // Единая точка вставки (контекстное меню / paste / DnD). Guard закрывает
+        // и программные пути добавления в режиме просмотра (#1).
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return;
+
         // Фабрика создаёт только релевантные типу поля (violation-3):
         // кейс/текст — content; картинка — url/caption/filename/width.
         const newItem = createContentItem(type, insertIndex, extraData);
