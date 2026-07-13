@@ -471,7 +471,8 @@ class TestRestoreVersionPreSnapshot:
         Иначе несанитизированный HTML из текущего контента (записанного
         в обход save_content или до ужесточения) лёг бы в историю и при
         повторном restore такого снимка вернулся бы в БД (stored XSS).
-        Ячейки таблиц при этом НЕ трогаются (инвариант «всё на текст»).
+        Ячейки таблиц и plain-text поля нарушения при этом НЕ трогаются
+        (инвариант «всё на текст» / «нарушения хранятся дословно», #3).
         """
         svc, versions_repo = self._make_service()
         versions_repo.get_version.return_value = {
@@ -531,20 +532,15 @@ class TestRestoreVersionPreSnapshot:
         tb = pre["textblocks"]["tb1"]
         assert "<iframe" not in tb["content"]
         assert "<b>жирный</b>" in tb["content"]
-        # Нарушение: HTML-поля чищены, plain-поля без тегов, url не тронут
+        # Нарушение: plain-text поля хранятся дословно (не HTML — не чистятся)
         v = pre["violations"]["v1"]
-        assert "onerror" not in v["violated"]
-        assert "текст" in v["violated"]
-        assert "<script" not in v["descriptionList"]["items"][0]
-        assert "пункт" in v["descriptionList"]["items"][0]
+        assert v["violated"] == '<img src=x onerror="alert(1)">текст'
+        assert v["descriptionList"]["items"][0] == "<script>x</script>пункт"
         item = v["additionalContent"]["items"][0]
-        assert "<b>" not in item["caption"]
-        assert "подпись" in item["caption"]
-        assert "<script" not in item["filename"]
-        assert "имя.png" in item["filename"]
+        assert item["caption"] == "<b>подпись</b>"
+        assert item["filename"] == "<script>f</script>имя.png"
         assert item["url"] == "data:image/png;base64,AAAA"
-        assert "<svg" not in v["reasons"]["content"]
-        assert "причина" in v["reasons"]["content"]
+        assert v["reasons"]["content"] == "<svg onload=x></svg>причина"
         # Ячейки таблиц — дословно (инвариант B8)
         cell = pre["tables"]["t1"]["grid"][0][0]
         assert cell["content"] == "<script>в ячейке — дословно</script>"
