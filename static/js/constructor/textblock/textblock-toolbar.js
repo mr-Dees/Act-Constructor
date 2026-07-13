@@ -3,6 +3,7 @@
  */
 import { TextBlockManager } from './textblock-core.js';
 import { getStructureLimits } from '../violation/violation-image-validator.js';
+import { FindBar } from '../search/find-bar.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -77,10 +78,18 @@ Object.assign(TextBlockManager.prototype, {
             </div>
             
             <div class="toolbar-separator"></div>
-            
+
             <div class="toolbar-group">
                 <button class="toolbar-btn" data-command="removeFormat" title="Очистить форматирование">
                     ✕
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn" data-command="findReplace" title="Поиск и замена (Ctrl+F)">
+                    🔍
                 </button>
             </div>
         `;
@@ -108,6 +117,18 @@ Object.assign(TextBlockManager.prototype, {
                 e.preventDefault();
                 e.stopPropagation();
                 const command = btn.dataset.command;
+
+                if (command === 'findReplace') {
+                    // В отличие от прочих команд, панель поиска остаётся открытой и
+                    // держит фокус на своём поле ввода — редактор НЕ перефокусируем
+                    // (иначе activeEditor.focus() ниже тут же увёл бы фокус обратно).
+                    // Префилл из выделения снимаем ДО hideToolbar — так же, как
+                    // Ctrl+F: кнопка обещает «(Ctrl+F)», поведение должно совпадать (#9).
+                    const prefill = FindBar._selectionPrefill();
+                    this.hideToolbar();
+                    FindBar.open(prefill);
+                    return;
+                }
 
                 // Специальная обработка для ссылок и сносок
                 if (command === 'createLink') {
@@ -373,7 +394,8 @@ Object.assign(TextBlockManager.prototype, {
         this.globalToolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
             const command = btn.dataset.command;
 
-            if (command === 'createLink' || command === 'createFootnote' || command === 'removeFormat') {
+            if (command === 'createLink' || command === 'createFootnote' || command === 'removeFormat'
+                || command === 'findReplace') {
                 return; // Эти кнопки не имеют активного состояния
             }
 

@@ -7,6 +7,13 @@
  * Ключевые инварианты:
  *  - Подсветка — через CSS Custom Highlight API (никаких <mark>-обёрток вокруг
  *    текста → капсулы/сноски целы). Прокрутка к текущему — scrollIntoView.
+ *  - Тело сноски (data-footnote-text) — невидимая в DOM поверхность поиска
+ *    (FootnoteBodySearchTarget, act-search-engine.js): у её совпадений
+ *    range===null, подсветка их не видит (нет Range). Текущее такое совпадение
+ *    показывается иначе — скролл к самой капсуле-сноске + форсированный
+ *    tooltip с <mark> (textblock-links-footnotes.js::showFootnoteSearchTooltip,
+ *    см. _revealCurrentMatch); замена — сплайс строки атрибута
+ *    (_spliceFootnoteBodyText), не Range API.
  *  - mousedown/pointerdown→preventDefault на КНОПКАХ панели: клик по ним не
  *    ворует фокус у активного поля ввода и не схлопывает выделение редактора
  *    (по образцу #globalTextBlockToolbar). На ТЕКСТОВЫЕ поля не вешаем — им
@@ -65,6 +72,14 @@ export const FindBar = {
     /** @private @type {(()=>void)|null} Unsubscribe из EscapeStack. */
     _escUnsub: null,
     /**
+     * @private @type {HTMLElement|null} span.text-footnote, для которого сейчас
+     * форсированно открыт tooltip (текущее совпадение — footnoteBody, тело
+     * сноски). Отслеживаем сами (не через textBlockManager.currentTooltip —
+     * тот общий с обычным hover-tooltip'ом) — чтобы закрыть форс-tooltip именно
+     * при уходе С ЭТОГО совпадения, а не полагаться на побочные hover-события.
+     */
+    _activeFootnoteTooltipEl: null,
+    /**
      * @private
      * @type {Map<string,{before:string,after:string}>|null}
      * Снимок content'а затронутых блоков для одношагового undo: `before` — до
@@ -94,15 +109,25 @@ export const FindBar = {
             }
 
             // Префилл из выделения (снимаем ДО фокуса на поле поиска).
-            let prefill = '';
-            const sel = (typeof window.getSelection === 'function') ? window.getSelection() : null;
-            if (sel && !sel.isCollapsed) {
-                const t = sel.toString();
-                // Однострочное выделение — разумный запрос; многострочное игнорируем.
-                if (t && !t.includes('\n')) prefill = t;
-            }
-            this.open(prefill);
+            this.open(this._selectionPrefill());
         }, true);
+    },
+
+    /**
+     * @private Начальный запрос из ТЕКУЩЕГО выделения редактора: однострочное
+     * непустое → сам текст, иначе ''. Общий для Ctrl+F (installHotkey) и кнопки
+     * 🔍 всплывающего тулбара (textblock-toolbar.js) — обе точки открытия панели
+     * должны вести себя одинаково (подсказка кнопки обещает «(Ctrl+F)»). Снимать
+     * ДО фокуса на поле поиска: фокус схлопнул бы выделение редактора.
+     * @returns {string}
+     */
+    _selectionPrefill() {
+        const sel = (typeof window.getSelection === 'function') ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed) {
+            const t = sel.toString();
+            if (t && !t.includes('\n')) return t;   // многострочное игнорируем
+        }
+        return '';
     },
 
     /**
@@ -140,13 +165,14 @@ export const FindBar = {
         }
     },
 
-    /** Закрывает панель: снимает подсветку и Esc-обработчик. */
+    /** Закрывает панель: снимает подсветку, форс-tooltip сноски и Esc-обработчик. */
     close() {
         if (this._debounceTimer) {
             clearTimeout(this._debounceTimer);
             this._debounceTimer = 0;
         }
         ActSearchHighlight.clear();
+        this._clearFootnoteTooltip();
         // Снимок undo живёт только пока панель открыта: после закрытия акт
         // могут править вне поиска, а старый снимок затёр бы эти правки.
         this._clearUndo();
@@ -176,7 +202,8 @@ export const FindBar = {
                     <button type="button" class="act-find-toggle" data-toggle="wholeWord"
                             aria-pressed="false" title="Слово целиком">Слово</button>
                     <button type="button" class="act-find-toggle" data-toggle="regex"
-                            aria-pressed="false" title="Регулярное выражение">.*</button>
+                            aria-pressed="false"
+                            title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
                 </div>
                 <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
                 <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
@@ -327,18 +354,21 @@ export const FindBar = {
     },
 
     /**
-     * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку.
-     * @param {boolean} [scroll] Прокрутить к текущему совпадению.
+     * @private Перерисовывает подсветку, счётчик и (опц.) прокрутку/tooltip.
+     * @param {boolean} [scroll] Прокрутить к текущему совпадению (и, для
+     *   footnoteBody-совпадения, открыть форс-tooltip тела сноски) — гейтит
+     *   ТЕ ЖЕ вызовы, что раньше вызывались (initial landing, prev/next; см.
+     *   _runSearch/_go — ровно те же места, где раньше звался scrollToCurrent).
      * @param {boolean} [currentOnly] Обновить только подсветку ТЕКУЩЕГО совпадения
      *   ('act-find-current'), не пересобирая весь 'act-find' (для prev/next: набор
      *   совпадений тот же, сменился лишь индекс — экономит перестройку до 5000
      *   диапазонов на каждый шаг навигации).
      */
     _render(scroll, currentOnly) {
+        const cur = (this._currentIdx >= 0 && this._matches[this._currentIdx])
+            ? this._matches[this._currentIdx] : null;
         if (currentOnly) {
-            const cur = (this._currentIdx >= 0 && this._matches[this._currentIdx])
-                ? this._matches[this._currentIdx].range : null;
-            ActSearchHighlight.renderCurrent(cur);
+            ActSearchHighlight.renderCurrent(cur ? cur.range : null);
         } else {
             ActSearchHighlight.render(this._matches, this._currentIdx);
         }
@@ -346,8 +376,48 @@ export const FindBar = {
             this._els.counter.textContent = formatMatchCounter(
                 this._currentIdx, this._matches.length, this._capped, ActSearchEngine.MAX_MATCHES);
         }
-        if (scroll && this._currentIdx >= 0 && this._matches[this._currentIdx]) {
-            ActSearchHighlight.scrollToCurrent(this._matches[this._currentIdx].range);
+        if (scroll) {
+            this._revealCurrentMatch(cur);
+        }
+    },
+
+    /**
+     * @private Показывает ТЕКУЩЕЕ совпадение пользователю. Обычное (с DOM-Range) —
+     * штатный scrollToCurrent (подсветка уже нарисована выше). footnoteBody
+     * (тело сноски — Range физически нет, act-search-engine.js) — своя пара:
+     * скролл к самому маркеру-капсуле + форсированный tooltip с подсветкой
+     * найденной подстроки (CSS Custom Highlight её не увидит — ожидаемо, у
+     * невидимого атрибута нет Range). Уход с footnoteBody-совпадения (переход
+     * на обычное/отсутствие совпадений) закрывает форс-tooltip.
+     * @param {object|null} match Текущий матч (buildAllMatches) либо null.
+     */
+    _revealCurrentMatch(match) {
+        if (match && match.footnoteBody && match.footnoteEl) {
+            if (typeof match.footnoteEl.scrollIntoView === 'function') {
+                match.footnoteEl.scrollIntoView({ block: 'center' });
+            }
+            if (typeof textBlockManager.showFootnoteSearchTooltip === 'function') {
+                textBlockManager.showFootnoteSearchTooltip(match.footnoteEl, match.start, match.end);
+            }
+            this._activeFootnoteTooltipEl = match.footnoteEl;
+            return;
+        }
+        this._clearFootnoteTooltip();
+        if (match && match.range) {
+            ActSearchHighlight.scrollToCurrent(match.range);
+        }
+    },
+
+    /** @private Закрывает форсированный tooltip тела сноски, если он открыт. */
+    _clearFootnoteTooltip() {
+        if (!this._activeFootnoteTooltipEl) return;
+        this._activeFootnoteTooltipEl = null;
+        // Закрываем ТОЛЬКО собственный форс-tooltip поиска. Если общий currentTooltip
+        // сейчас — обычный hover-tooltip (пользователь навёлся на другую капсулу и
+        // читает его), не трогаем его: hideFootnoteSearchTooltip проверяет владельца
+        // (textblock-links-footnotes.js), а слепой hideTooltip закрыл бы чужой (#3).
+        if (typeof textBlockManager.hideFootnoteSearchTooltip === 'function') {
+            textBlockManager.hideFootnoteSearchTooltip();
         }
     },
 
@@ -396,6 +466,81 @@ export const FindBar = {
         return map;
     },
 
+    /**
+     * @private Сплайсит подстроку [start,end) АТРИБУТА data-footnote-text (тело
+     * сноски — footnoteBody-совпадение, у него физически нет DOM Range, см.
+     * act-search-engine.js). Аналог replaceData на живом текстовом узле, но для
+     * строки-атрибута: вызывающий обязан сам вызвать target.persist() после.
+     *  - Смещения КЛАМПИМ в границы текущего значения: тело сноски могли
+     *    поменять другим путём (двойной клик по маркеру) между поиском и заменой,
+     *    и «протухшие» start/end иначе вырезали бы не тот кусок (та же защита, что
+     *    в textblock-links-footnotes.js::showFootnoteSearchTooltip).
+     *  - Пустое (в т.ч. пробельное) тело НЕ пишем: validateAndRepairCapsules
+     *    развернул бы сноску в plain-text по пустому АТРИБУТУ и рассинхронил живой
+     *    DOM с сохранённым content'ом — замену ПРОПУСКАЕМ (возвращаем false).
+     * @param {HTMLElement} footnoteEl span.text-footnote
+     * @param {number} start
+     * @param {number} end
+     * @param {string} replacement
+     * @returns {boolean} применена ли замена (false — пропущена как опустошающая)
+     */
+    _spliceFootnoteBodyText(footnoteEl, start, end, replacement) {
+        const before = footnoteEl.getAttribute('data-footnote-text') || '';
+        const s = Math.max(0, Math.min(start, before.length));
+        const e = Math.max(s, Math.min(end, before.length));
+        const after = before.slice(0, s) + replacement + before.slice(e);
+        if (!after.trim()) return false;
+        footnoteEl.setAttribute('data-footnote-text', after);
+        return true;
+    },
+
+    /**
+     * @private Применяет замену к ОДНОМУ совпадению, диспетчеризуя по его виду
+     * (единая точка — раньше проверка footnoteBody/range дублировалась в
+     * _replaceCurrent и _replaceAll):
+     *  - тело сноски (footnoteBody, range===null) — сплайс строки-атрибута;
+     *  - обычное/капсульное (DOM Range) — ActSearchEngine.replaceRange, который
+     *    сам мутирует текст-узлы (в т.ч. ВНУТРИ подписи ссылки/якоря сноски).
+     * Мутирует DOM/атрибут; persist()/finalizeEdit — на вызывающем.
+     * @param {object} match совпадение из buildAllMatches
+     * @param {string} replacement
+     * @returns {'replaced'|'skipped'} skipped — замена опустошила бы тело/подпись
+     *   сноски/ссылки либо диапазон пересёк границу капсулы (движок такого не
+     *   порождает) → не применяется.
+     */
+    _applyReplacementTo(match, replacement) {
+        if (match.footnoteBody && match.footnoteEl) {
+            return this._spliceFootnoteBodyText(match.footnoteEl, match.start, match.end, replacement)
+                ? 'replaced' : 'skipped';
+        }
+        try {
+            ActSearchEngine.replaceRange(match.range, replacement);
+            return 'replaced';
+        } catch (err) {
+            // Диапазон опустошил бы/пересёк капсулу — пропуск (не падение).
+            return 'skipped';
+        }
+    },
+
+    /**
+     * @private Множество blockId (владеющих текстблоков) для набора совпадений.
+     * У FootnoteBodySearchTarget id составной (blockId:footnote:fnId), а content
+     * персистится в AppState.textBlocks[blockId] — ОДИН блок с N сносками не
+     * должен считаться N «блоками» в тексте диалога/снимке undo.
+     * @param {Array} matches
+     * @returns {Set<string>}
+     */
+    _blockIdsFor(matches) {
+        const groups = groupMatchesByTarget(matches);
+        const targets = this._targetsById();
+        const ids = new Set();
+        for (const targetId of groups.keys()) {
+            const t = targets.get(targetId);
+            ids.add((t && t.blockId) ? t.blockId : targetId);
+        }
+        return ids;
+    },
+
     /** @private Заменяет текущее совпадение и переходит к следующему. */
     _replaceCurrent() {
         if (AppConfig.readOnlyMode && AppConfig.readOnlyMode.isReadOnly) return;
@@ -408,14 +553,12 @@ export const FindBar = {
         const target = this._targetsById().get(cur.targetId);
         if (!target) return;
 
-        try {
-            ActSearchEngine.replaceRange(cur.range, replacement);
-        } catch (err) {
-            // Диапазон пересёк капсулу (движок не должен такое порождать) —
-            // не падаем, сообщаем и пересобираем.
-            console.error('[FindBar] replaceRange:', err);
-            Notifications.error('Замену нельзя применить: совпадение затрагивает ссылку/сноску');
-            this._runSearch();
+        if (this._applyReplacementTo(cur, replacement) === 'skipped') {
+            // Замена опустошила бы подпись/тело ссылки/сноски — пропущена, DOM не
+            // тронут. keepIdx: НЕ сбрасываем курсор на первое совпадение (набор не
+            // изменился) — пользователь остаётся на текущей позиции (#6).
+            Notifications.warning('Замена пропущена: она опустошила бы ссылку/сноску');
+            this._runSearch({ keepIdx: true });
             return;
         }
         target.persist();
@@ -441,38 +584,56 @@ export const FindBar = {
         this._clearUndo();
         const replacement = this._els.replaceInput.value;
 
-        const groups = groupMatchesByTarget(this._matches);
+        // Число затронутых блоков — для ТЕКСТА диалога (read-only, до подтверждения).
+        const blocksForMessage = this._blockIdsFor(this._matches);
         const confirmed = await DialogManager.show({
             title: 'Замена',
-            message: buildReplaceAllConfirmMessage(this._matches.length, groups.size),
+            message: buildReplaceAllConfirmMessage(this._matches.length, blocksForMessage.size),
             confirmText: 'Заменить всё',
             cancelText: 'Отмена',
             type: 'warning',
         });
         if (!confirmed) return;
 
-        // Снимок ДО пакета — «before» для одношагового undo.
-        const before = snapshotTextBlockContents(groups.keys(), AppState.textBlocks);
-
+        // Цели/группы для РЕАЛЬНОЙ мутации собираем ПОСЛЕ подтверждения: показ
+        // диалога асинхронен, между ним и «Заменить» состояние могло измениться —
+        // резолвим цели на свежем DOM (раньше здесь была регрессия: цели строились
+        // ДО диалога). blockId — по ВЛАДЕЮЩЕМУ текстблоку, не по составному
+        // targetId сноски (см. _blockIdsFor).
+        const groups = groupMatchesByTarget(this._matches);
         const targets = this._targetsById();
+        const blockIdsTouched = new Set();
+        for (const targetId of groups.keys()) {
+            const t = targets.get(targetId);
+            blockIdsTouched.add((t && t.blockId) ? t.blockId : targetId);
+        }
+
+        // Снимок ДО пакета — «before» для одношагового undo.
+        const before = snapshotTextBlockContents(blockIdsTouched, AppState.textBlocks);
+
         let replaced = 0;
-        let failed = 0;
+        let skipped = 0;
+        // persist() = finalizeEdit(editor) владеющего блока — у TextBlockSearchTarget
+        // и у КАЖДОЙ FootnoteBodySearchTarget одного блока это ОДИН и тот же editor.
+        // Сначала применяем ВСЕ мутации (текст + все сноски блока), и только ПОТОМ
+        // зовём persist() один раз на blockId — иначе ранний persist() (finalizeEdit
+        // читает editor.innerHTML) зафиксировал бы блок ДО того, как в него попали
+        // более поздние по циклу правки его же сносок/текста (потерянная запись).
+        const blockTargets = new Map(); // blockId → любая цель этого блока (для persist())
         for (const [targetId, group] of groups) {
             const target = targets.get(targetId);
             if (!target) continue;
-            // Внутри цели — С КОНЦА: более ранние Range остаются валидны, т.к.
-            // правка позже по тексту не сдвигает предшествующие смещения.
+            // Внутри цели — С КОНЦА: более ранние offset'ы/Range остаются валидны,
+            // т.к. правка позже по тексту не сдвигает предшествующие. Диспетчеризация
+            // «тело сноски / DOM Range» — в _applyReplacementTo (единая точка).
             for (let i = group.length - 1; i >= 0; i--) {
-                try {
-                    ActSearchEngine.replaceRange(group[i].range, replacement);
-                    replaced++;
-                } catch (err) {
-                    console.error('[FindBar] replaceAll replaceRange:', err);
-                    failed++;
-                }
+                if (this._applyReplacementTo(group[i], replacement) === 'replaced') replaced++;
+                else skipped++;
             }
-            target.persist();
+            const blockId = target.blockId || targetId;
+            blockTargets.set(blockId, target);
         }
+        for (const target of blockTargets.values()) target.persist();
 
         // Единый глобальный проход по сноскам после всего пакета.
         if (typeof textBlockManager.renumberAllFootnotes === 'function') {
@@ -492,11 +653,10 @@ export const FindBar = {
             this._els.undoBtn.classList.remove('hidden');
         }
 
-        if (failed > 0) {
-            const matchWord = pluralRu(failed, ['совпадение', 'совпадения', 'совпадений']);
-            const verbWord = pluralRu(failed, ['затрагивало', 'затрагивали', 'затрагивало']);
+        if (skipped > 0) {
+            const matchWord = pluralRu(skipped, ['совпадение', 'совпадения', 'совпадений']);
             Notifications.warning(
-                `Заменено ${replaced}, пропущено ${failed} (${matchWord} ${verbWord} ссылку/сноску)`);
+                `Заменено ${replaced}, пропущено ${skipped} (${matchWord} опустошило бы ссылку/сноску)`);
         } else {
             Notifications.success(`Заменено ${replaced}`);
         }
@@ -532,6 +692,15 @@ export const FindBar = {
                 textBlockManager.saveContent(id, tb.content);
             }
         });
+        // #7: паритет с «Заменить всё» (та тоже перенумеровывает после пакета).
+        // Прямой триггер — опустевшая сноска, менявшая сквозной счёт — снят
+        // защитой от опустошения (#1), но откат обязан быть точным инверсом:
+        // если число «действующих» сносок как-то изменилось, номера в НЕтронутых
+        // блоках без сквозного прохода останутся сбитыми (нумерация — сквозная
+        // по всему акту, не по одному блоку).
+        if (typeof textBlockManager.renumberAllFootnotes === 'function') {
+            textBlockManager.renumberAllFootnotes();
+        }
         this._clearUndo();
 
         const blockWord = pluralRu(reverted, ['блок', 'блока', 'блоков']);
