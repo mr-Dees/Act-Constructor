@@ -137,10 +137,14 @@ Object.assign(ViolationManager.prototype, {
                         message = 'Текст добавлен из буфера обмена';
                     }
 
-                    // Добавляем элемент в определенную позицию
-                    this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
+                    // Добавляем элемент в определенную позицию. Единый гейт лимита
+                    // (#4) уже мог отказать (Notifications.warning показан внутри) —
+                    // тогда false, и updateBlock/success не зовём, чтобы не
+                    // подтверждать вставку, которой не произошло.
+                    const added = this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
                         content: content
                     });
+                    if (!added) return;
 
                     PreviewManager.updateBlock('violation', violation.id);
                     Notifications.success(message);

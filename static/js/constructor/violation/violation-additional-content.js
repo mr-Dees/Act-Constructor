@@ -11,6 +11,7 @@ import { Notifications } from '../../shared/notifications.js';
 import { AppState } from '../state/state-core.js';
 import {
     estimateActImageBytes,
+    getImageLimits,
     loadImageLimits,
     validateImageFile,
 } from './violation-image-validator.js';
@@ -233,12 +234,25 @@ Object.assign(ViolationManager.prototype, {
      * @param {HTMLElement} container - Контейнер содержимого
      * @param {number} insertIndex - Позиция для вставки
      * @param {Object} extraData - Дополнительные данные элемента
+     * @returns {boolean} true при успешной вставке, false при отказе
+     *          (режим просмотра или достигнут лимит элементов, #4)
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
         // Единая точка вставки (контекстное меню / paste / DnD). Guard закрывает
         // и программные пути добавления в режиме просмотра (#1).
         const guard = ValidationCore.requireWrite('cannotAddContent');
-        if (guard) return;
+        if (guard) return false;
+
+        // Единый гейт лимита числа элементов для ЛЮБОГО типа контента (#4):
+        // раньше лимит проверялся только для картинок, кейсы/текст добавлялись
+        // без счёта, и бэкенд резал >50 элементов сразу на весь акт (422).
+        const maxItems = getImageLimits().maxItemsPerViolation;
+        if (violation.additionalContent.items.length >= maxItems) {
+            Notifications.warning(
+                `Достигнут лимит элементов дополнительного контента на нарушение (${maxItems}).`,
+            );
+            return false;
+        }
 
         // Фабрика создаёт только релевантные типу поля (violation-3):
         // кейс/текст — content; картинка — url/caption/filename/width.
@@ -265,6 +279,7 @@ Object.assign(ViolationManager.prototype, {
         }
 
         PreviewManager.updateBlock('violation', violation.id);
+        return true;
     },
 
     /**
@@ -323,7 +338,7 @@ Object.assign(ViolationManager.prototype, {
                 continue;
             }
 
-            this.addContentItemAtPosition(
+            const added = this.addContentItemAtPosition(
                 violation,
                 CONTENT_TYPE_IMAGE,
                 container,
@@ -333,6 +348,10 @@ Object.assign(ViolationManager.prototype, {
                     filename: result.file.name,
                 },
             );
+            // Гейт лимита (#4) отказал — причина не исчезнет для оставшихся
+            // файлов пачки, дальше вставлять некуда: останавливаем цикл, не
+            // завышая addedCount (иначе success-тост соврёт про число вставленных).
+            if (!added) break;
             addedCount++;
         }
 
