@@ -19,8 +19,8 @@ import {
 } from '../../static/js/constructor/violation/violation-fields.js';
 
 const EXPECTED_FIELDS = [
-  { key: 'violated', label: 'Нарушено', order: 0, kind: 'pair', small: false, showLabelInPreview: true },
-  { key: 'established', label: 'Установлено', order: 1, kind: 'pair', small: false, showLabelInPreview: true },
+  { key: 'violated', label: 'Нарушено', order: 0, kind: 'pair', small: true, showLabelInPreview: true },
+  { key: 'established', label: 'Установлено', order: 1, kind: 'pair', small: true, showLabelInPreview: true },
   { key: 'descriptionList', label: '', order: 2, kind: 'list', small: true, showLabelInPreview: false },
   { key: 'additionalContent', label: '', order: 3, kind: 'additional', small: true, showLabelInPreview: false },
   { key: 'reasons', label: 'Причины', order: 4, kind: 'optional_text', small: false, showLabelInPreview: true },

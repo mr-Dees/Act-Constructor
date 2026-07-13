@@ -75,8 +75,8 @@ class TestKindSmallAndPreviewFlags:
 
     def test_kind_small_show_label_in_preview(self):
         expected = {
-            "violated": ("pair", False, True),
-            "established": ("pair", False, True),
+            "violated": ("pair", True, True),
+            "established": ("pair", True, True),
             "descriptionList": ("list", True, False),
             "additionalContent": ("additional", True, False),
             "reasons": ("optional_text", False, True),

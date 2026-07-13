@@ -19,12 +19,14 @@ Python. Соответствие пиннится двумя тест-страж
 ``tests/domains/acts/test_violation_fields_guard.py`` (бэк) и
 ``tests/js/violation-fields.test.mjs`` (фронт, точные строки меток).
 
-`small`: сверено с ``app/domains/acts/formatters/docx/builders/violation.py``
-(`build_violation`) — bullet-пункты `descriptionList` и все ветки
-`additionalContent` (case/image-caption/freeText) явно передают
-`size_pt=Sizes.violation_pt` (9pt), поэтому `small=True`. `reasons` /
-`consequences` / `responsible` / `recommendations` рендерятся без `size_pt`
-(дефолт `Sizes.body_pt`, 12pt) → `small=False`.
+`small`: контракт ОПИСЫВАЕТ текущий рендер (позже DOCX/превью будут читать
+размер отсюда). Сверено с ``formatters/docx/builders/violation.py``
+(`build_violation`) и ``formatters/docx/styles.py``: 9pt-группа
+(`Sizes.violation_pt`) — `violated` / `established` / `descriptionList` /
+`additionalContent` (все ветки case/image-caption/freeText) → `small=True`.
+`reasons` / `consequences` / `responsible` / `recommendations` рендерятся без
+`size_pt` (дефолт `Sizes.body_pt`, 12pt; закреплено
+`test_reasons_block_stays_12pt_non_italic`) → `small=False`.
 """
 from __future__ import annotations
 
@@ -46,11 +48,11 @@ class ViolationFieldDescriptor:
 VIOLATION_FIELDS: tuple[ViolationFieldDescriptor, ...] = (
     ViolationFieldDescriptor(
         key="violated", label="Нарушено", order=0, kind="pair",
-        small=False, show_label_in_preview=True,
+        small=True, show_label_in_preview=True,
     ),
     ViolationFieldDescriptor(
         key="established", label="Установлено", order=1, kind="pair",
-        small=False, show_label_in_preview=True,
+        small=True, show_label_in_preview=True,
     ),
     ViolationFieldDescriptor(
         # Заголовок убран (решение #12) — список описаний идёт без подписи.
