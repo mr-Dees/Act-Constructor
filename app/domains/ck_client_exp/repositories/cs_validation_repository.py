@@ -19,13 +19,38 @@ from app.domains.ck_client_exp.settings import CkClientExpSettings
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 
 # Колонки представления v_db_oarb_ck_cs_validation, разрешённые для серверной
-# фильтрации (ILIKE) и сортировки (ORDER BY). Источник истины — поля схемы
+# фильтрации и сортировки (ORDER BY). Источник истины — поля схемы
 # CSValidationView; whitelist защищает от инъекций в имена колонок/ORDER BY.
 ALLOWED_COLUMNS: set[str] = set(CSValidationView.model_fields.keys())
 
 # Разрешённые типы приведения для range-фильтра. cast валидируется по этому
 # allowlist — сырое значение cast НЕ интерполируется в SQL напрямую.
 _CAST_SQL = {"date": "DATE", "numeric": "NUMERIC"}
+
+
+def _escape_like(value: str) -> str:
+    """Экранирует спецсимволы шаблона LIKE/ILIKE (\\, %, _).
+
+    Иначе пользовательская фраза «100%» матчила бы и «1000 рублей»
+    (дефолтный escape-символ LIKE — обратный слэш)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _coerce_range_bound(cast: str | None, value):
+    """Готовит границу range-фильтра к бинду.
+
+    Для cast=date нужен объект date: temporal-кодеки asyncpg бинарные, строка
+    в DATE-параметре роняет запрос DataError (numeric-кодек, напротив, сам
+    приводит str → Decimal — числа не трогаем). Пустое или некорректное
+    значение → None (граница пропускается, как и прочий мусор в фильтрах)."""
+    if value is None or str(value).strip() == "":
+        return None
+    if cast == "date":
+        try:
+            return date.fromisoformat(str(value).strip()[:10])
+        except ValueError:
+            return None
+    return value
 
 _DATE_FIELDS = {"dt_sz"}
 _NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id", "reestr_metric_id"}
@@ -97,15 +122,22 @@ class CSValidationRepository(BaseRepository):
         bind-параметрами, ``cast`` валидируется по allowlist (никакой
         интерполяции сырого cast). Семантика по ``op`` — канон СЫРОЕ значение:
 
-        - ``contains``: ``CAST(col AS TEXT) ILIKE $i`` c параметром ``%value%``;
-          пустой ``value`` → фильтр пропускается;
+        - ``contains``: ``CAST(col AS TEXT) ILIKE $i`` c параметром ``%value%``
+          (спецсимволы LIKE экранируются); пустой ``value`` → фильтр
+          пропускается;
         - ``eq``: ``CAST(col AS TEXT) = $i`` c параметром ``value``; пустой
           ``value`` → фильтр пропускается;
-        - ``in``: ``col IN ($i, ...)`` по сырым ``values``; пустой список →
+        - ``in``: ``CAST(col AS TEXT) IN ($i, ...)`` по ``values`` (текстовое
+          равенство, как множественный ``eq``: сырой ``col IN`` ронял бы
+          бинарные кодеки asyncpg на нетекстовых колонках); пустой список →
           ``1=0`` («совпадений нет»);
         - ``range``: ``cast`` обязателен (date→DATE, numeric→NUMERIC), иначе
           фильтр пропускается; условия собираются по наличию границ
-          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``.
+          ``CAST(col AS T) >= $i`` и/или ``CAST(col AS T) <= $j``; границы
+          cast=date приводятся к date-объектам (_coerce_range_bound);
+        - ``contains_any``: ``(CAST(col AS TEXT) ILIKE $i OR ...)`` по каждой
+          непустой фразе из values; пустой/пробельный список → пропуск (в
+          отличие от ``in``, не ``1=0``).
 
         CAST в TEXT нужен, т.к. ILIKE/= по тексту не определены для numeric/
         date/bool без приведения. Совместимо с PG 9.4 / GP 6.x.
@@ -123,7 +155,7 @@ class CSValidationRepository(BaseRepository):
                 if value is None or str(value).strip() == "":
                     continue
                 conditions.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
-                params.append(f"%{value}%")
+                params.append(f"%{_escape_like(str(value))}%")
                 idx += 1
             elif op == "eq":
                 value = spec.value
@@ -138,22 +170,33 @@ class CSValidationRepository(BaseRepository):
                     conditions.append("1=0")
                     continue
                 placeholders = ", ".join(f"${idx + i}" for i in range(len(values)))
-                conditions.append(f"{column} IN ({placeholders})")
+                conditions.append(f"CAST({column} AS TEXT) IN ({placeholders})")
                 params.extend(values)
                 idx += len(values)
             elif op == "range":
                 cast_sql = _CAST_SQL.get(spec.cast) if spec.cast else None
                 if cast_sql is None:
                     continue
-                lo, hi = spec.from_, spec.to
-                if lo is not None and str(lo).strip() != "":
+                lo = _coerce_range_bound(spec.cast, spec.from_)
+                hi = _coerce_range_bound(spec.cast, spec.to)
+                if lo is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) >= ${idx}")
                     params.append(lo)
                     idx += 1
-                if hi is not None and str(hi).strip() != "":
+                if hi is not None:
                     conditions.append(f"CAST({column} AS {cast_sql}) <= ${idx}")
                     params.append(hi)
                     idx += 1
+            elif op == "contains_any":
+                values = [v for v in (spec.values or []) if v is not None and str(v).strip() != ""]
+                if not values:
+                    continue  # нет фраз = фильтр не задан (в отличие от in: пустой in → 1=0)
+                ors = []
+                for v in values:
+                    ors.append(f"CAST({column} AS TEXT) ILIKE ${idx}")
+                    params.append(f"%{_escape_like(str(v))}%")
+                    idx += 1
+                conditions.append("(" + " OR ".join(ors) + ")")
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         return where, params, idx
 
@@ -169,7 +212,11 @@ class CSValidationRepository(BaseRepository):
     ) -> tuple[list[dict], int]:
         """Поиск записей по колоночным фильтрам с сортировкой и подсчётом total.
 
-        - Фильтры — ILIKE по whitelisted-колонкам (значения — bind-параметры).
+        - Фильтры по whitelisted-колонкам (значения — bind-параметры): ``contains``/
+          ``contains_any`` — ILIKE (одна фраза / любая из нескольких через OR);
+          ``eq`` — точное равенство; ``in`` — членство в списке; ``range`` —
+          типизированные границы (DATE/NUMERIC). Экранирование ILIKE-метасимволов —
+          через ``_escape_like``.
         - Сортировка: ``sort`` — упорядоченный список (колонка, направление) для
           многоколоночного ORDER BY; если не задан — одиночные ``sort_by``/
           ``sort_dir``. Каждая колонка валидируется против ALLOWED_COLUMNS (иначе

@@ -144,11 +144,17 @@ INSERT INTO t_db_oarb_ua_departments (tb_id, gosb_id, vsp_id, subsidiary_id) VAL
 ON CONFLICT DO NOTHING;
 
 -- СПРАВОЧНИК МЕТРИК НАРУШЕНИЙ
+-- has_npl — метрика с показателем «NPL 90+»: единый источник истины для
+-- правила NPL в FR-валидации (бэкенд) и активности поля NPL (фронтенд).
+-- На уже развёрнутых БД колонку добавить вручную:
+--   ALTER TABLE t_db_oarb_ua_violation_metric_dict ADD COLUMN has_npl BOOLEAN NOT NULL DEFAULT false;
+--   UPDATE t_db_oarb_ua_violation_metric_dict SET has_npl = true WHERE code = '602';
 CREATE TABLE IF NOT EXISTS t_db_oarb_ua_violation_metric_dict (
     id SERIAL PRIMARY KEY,
     code TEXT NOT NULL UNIQUE,
     metric_name TEXT NOT NULL,
     metric_group VARCHAR(10),
+    has_npl BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP, created_by TEXT DEFAULT 'system',
     updated_by TEXT, deleted_at TIMESTAMP,
@@ -171,6 +177,10 @@ INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group)
     ('5001', 'Нарушение методологии расчета',                 'МКР'),
     ('5002', 'Некорректная калибровка модели',                'МКР'),
     ('9001', 'Прочие нарушения без категории',                NULL)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group, has_npl) VALUES
+    ('602',  'NPL 90+ (просроченная задолженность свыше 90 дней)', NULL, true)
 ON CONFLICT DO NOTHING;
 
 -- СПРАВОЧНИК ТИПОВ РИСКА (для CK Фин.Рез.)

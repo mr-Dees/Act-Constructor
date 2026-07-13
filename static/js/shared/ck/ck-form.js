@@ -17,6 +17,7 @@ export class CkForm {
      * @param {Object} config.dictionaries - справочники {metrics: [...], terbanks: [...], ...}
      * @param {HTMLElement} config.containerEl - контейнер формы
      * @param {Function} [config.onProcessPick] - callback для открытия picker-а процесса
+     * @param {Function} [config.onBreakdownEdit] - callback для открытия модалки развёртки суммы по ТБ
      */
     static init(config) {
         this._config = config;
@@ -68,7 +69,12 @@ export class CkForm {
                 data[field.key] = el.checked;
             } else if (field.type === 'number') {
                 const val = el.value.trim();
-                data[field.key] = val === '' ? 0 : Number(val);
+                // Опциональное число (opt-in через nullable: true в конфиге):
+                // пустое поле → null, не 0 — на бэке Optional[int]
+                // (например, «ИД поручения УВА»). Прочие числа — как раньше.
+                data[field.key] = val === ''
+                    ? (field.nullable === true ? null : 0)
+                    : Number(val);
             } else if (field.type === 'date') {
                 data[field.key] = el.value || null;
             } else if (field.type === 'process-picker') {
@@ -77,6 +83,8 @@ export class CkForm {
                     data[field.paired] = el.dataset.pairedValue || '';
                 }
                 // paired_extras не отправляются — они вычисляются на бэке через JOIN
+            } else if (field.type === 'amount-breakdown') {
+                data[field.key] = this.getBreakdownValue(field.key);
             } else if (field.type === 'readonly-text') {
                 // Пустое значение опускаем — пусть {...record, ...data} сохранит исходное
                 // (важно для Optional[int]-полей вроде reestr_metric_id: '' не парсится в int)
@@ -102,6 +110,8 @@ export class CkForm {
             let isEmpty = false;
             if (field.type === 'process-picker') {
                 isEmpty = !el.dataset.value;
+            } else if (field.type === 'amount-breakdown') {
+                isEmpty = !this.getBreakdownValue(field.key).length;
             } else if (field.type === 'readonly-text') {
                 isEmpty = !(el.dataset.value || '').trim();
             } else if (field.type === 'checkbox') {
@@ -288,6 +298,19 @@ export class CkForm {
             label.appendChild(trigger);
         }
 
+        // Trigger для amount-breakdown
+        if (field.type === 'amount-breakdown') {
+            const trigger = document.createElement('span');
+            trigger.className = 'ck-form__picker-trigger';
+            trigger.textContent = 'изменить ▸';
+            trigger.addEventListener('click', () => {
+                if (this._config.onBreakdownEdit) {
+                    this._config.onBreakdownEdit(field);
+                }
+            });
+            label.appendChild(trigger);
+        }
+
         wrapper.appendChild(label);
 
         // Input element
@@ -340,7 +363,7 @@ export class CkForm {
                 emptyOpt.value = '';
                 emptyOpt.textContent = '— выберите —';
                 input.appendChild(emptyOpt);
-                const items = this._getDictItems(field.dict);
+                const items = this._getDictItems(field);
                 for (const item of items) {
                     const opt = document.createElement('option');
                     opt.value = item.value;
@@ -381,6 +404,14 @@ export class CkForm {
                 input.textContent = field.placeholder || '—';
                 break;
 
+            case 'amount-breakdown':
+                // Развертка суммы по ТБ: readonly-итог + триггер модалки распределения
+                input = document.createElement('div');
+                input.className = 'ck-form__readonly ck-form__breakdown';
+                input.dataset.value = '[]';
+                input.textContent = '— не распределено —';
+                break;
+
             default:
                 input = document.createElement('input');
                 input.type = 'text';
@@ -392,10 +423,20 @@ export class CkForm {
         return wrapper;
     }
 
-    static _getDictItems(dictName) {
+    /**
+     * @param {Object} field - конфиг поля (нужен field.dict и опциональный
+     *   field.dictItemsFormat для словарей со специфичной для домена формой
+     *   строки — metrics/terbanks общие для обоих ЦК-доменов и разобраны
+     *   встроенно, остальное разбирает сам домен через dictItemsFormat).
+     */
+    static _getDictItems(field) {
+        const dictName = field.dict;
         const dicts = this._config.dictionaries || {};
         const items = dicts[dictName] || [];
 
+        if (typeof field.dictItemsFormat === 'function') {
+            return items.map(field.dictItemsFormat);
+        }
         if (dictName === 'metrics') {
             return items.map(m => ({
                 value: m.code,
@@ -407,9 +448,6 @@ export class CkForm {
                 value: String(t.tb_id),
                 label: `${t.tb_id} — ${t.short_name}`
             }));
-        }
-        if (dictName === 'risk_types') {
-            return items.map(r => ({ value: r.risk, label: r.risk }));
         }
         // Дефолтный формат
         return items.map(i => ({
@@ -443,6 +481,9 @@ export class CkForm {
                         extraEl.textContent = extraVal || (extra.placeholder || '—');
                     }
                 }
+            } else if (f.type === 'amount-breakdown') {
+                const breakdown = Array.isArray(record[f.key]) ? record[f.key] : [];
+                CkForm.setBreakdownValue(f.key, breakdown);
             } else if (f.type === 'readonly-text') {
                 const v = val || '';
                 el.dataset.value = v;
@@ -495,6 +536,67 @@ export class CkForm {
                 extraEl.textContent = v || (extra.placeholder || '—');
             }
         }
+    }
+
+    /**
+     * Записывает развертку по элементам в поле формы и обновляет readonly-итог.
+     * Какое числовое поле суммировать и как подписать счётчик элементов —
+     * задаёт сам домен через field.sumKey/field.countLabel (дефолты ниже
+     * соответствуют единственному текущему потребителю — развёртке по ТБ).
+     */
+    static setBreakdownValue(fieldKey, breakdown) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return;
+        const list = Array.isArray(breakdown) ? breakdown : [];
+        el.dataset.value = JSON.stringify(list);
+        const cfg = this._findFieldConfig(fieldKey) || {};
+        const sumKey = cfg.sumKey || 'metric_amount_rubles';
+        const countLabel = cfg.countLabel || 'записей';
+        const totalKop = list.reduce((s, b) => s + Math.round(Number(b[sumKey] || 0) * 100), 0);
+        el.textContent = list.length
+            ? `${(totalKop / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽ · ${countLabel}: ${list.length}`
+            : '— не распределено —';
+        el.classList.remove('ck-form__input--error');
+    }
+
+    static getBreakdownValue(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return [];
+        try { return JSON.parse(el.dataset.value || '[]'); } catch { return []; }
+    }
+
+    /** DOM-id контрола поля — контракт для делегированных слушателей страницы. */
+    static fieldId(fieldKey) {
+        return `ck-field-${fieldKey}`;
+    }
+
+    /** Значение простого контрола поля (input/select). Нет поля → ''. */
+    static getFieldValue(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        return el ? String(el.value ?? '') : '';
+    }
+
+    /** Состояние чекбокс-поля. Нет поля → false. */
+    static getFieldChecked(fieldKey) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        return !!(el && el.checked);
+    }
+
+    static setFieldChecked(fieldKey, checked) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (el) el.checked = !!checked;
+    }
+
+    /**
+     * Приглушает поле (модификатор ck-form__field--disabled на обёртке):
+     * страницы управляют активностью полей через этот API, а не через
+     * прямые обращения к внутренним id/классам формы. Нет поля → no-op.
+     */
+    static setFieldDisabled(fieldKey, disabled) {
+        const el = document.getElementById(`ck-field-${fieldKey}`);
+        if (!el) return;
+        const wrap = el.closest('.ck-form__field') || el.parentElement;
+        if (wrap) wrap.classList.toggle('ck-form__field--disabled', !!disabled);
     }
 
     /**

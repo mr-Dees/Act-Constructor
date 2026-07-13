@@ -14,7 +14,7 @@
 /** Дефолтные ширины (px) по типу колонки. */
 export const DEFAULT_WIDTHS = {
   id: 70, number: 110, date: 110, dictionary: 90, checkbox: 80,
-  text: 160, textarea: 240, 'readonly-text': 160, 'process-picker': 200,
+  text: 160, textarea: 240, 'readonly-text': 160, 'process-picker': 200, 'amount-breakdown': 220,
 };
 
 function alignFor(type) {
@@ -35,7 +35,7 @@ function toNum(width, type) {
 
 function toColumn(field) {
   const type = field.type || 'text';
-  return {
+  const col = {
     key: field.key,
     label: field.label,
     type,
@@ -44,23 +44,46 @@ function toColumn(field) {
     longText: type === 'textarea',
     description: field.description, // полное описание для tooltip (undefined — нет)
   };
+  // Булевы читаемы по умолчанию: «Да»/«Нет», пусто для null — сырые true/false
+  // в ячейку не попадают. Явный format/render в extra/overrides перекрывает.
+  if (type === 'checkbox') col.format = (v) => (v == null ? '' : (v ? 'Да' : 'Нет'));
+  return col;
+}
+
+/**
+ * Единый обходчик конфига полей: секции (в т.ч. вложенные), row-группы, поля.
+ * `visit(field, sectionName)` вызывается для каждого листового поля с именем
+ * ближайшей объемлющей секции. Одна точка знания о форме конфига —
+ * flattenFields и sectionByKey построены на нём и разойтись не могут
+ * (раздельные обходчики уже успели разъехаться на вложенных секциях).
+ */
+function walkFields(fields, visit, section = null) {
+  for (const item of fields || []) {
+    if (!item) continue;
+    if (Array.isArray(item.fields)) walkFields(item.fields, visit, item.section ?? section);
+    else if (Array.isArray(item.row)) walkFields(item.row, visit, section);
+    else if (item.key) visit(item, section);
+  }
 }
 
 /**
  * Раскрывает конфиг полей в плоский список (учитывает секции и row-группы).
  * Элемент может быть секцией `{section, fields:[...]}`, строкой `{row:[...]}`
- * или самим полем `{key,...}`. Секции — только верхний уровень (без вложения).
+ * или самим полем `{key,...}`.
  */
 export function flattenFields(fields) {
   const flat = [];
-  const collect = (item) => {
-    if (!item) return;
-    if (Array.isArray(item.fields)) item.fields.forEach(collect); // секция
-    else if (Array.isArray(item.row)) flat.push(...item.row);
-    else if (item.key) flat.push(item);
-  };
-  for (const item of fields) collect(item);
+  walkFields(fields, (f) => flat.push(f));
   return flat;
+}
+
+/** Карта key→section: имя секции формы становится группой панели видимости. */
+function sectionByKey(fields) {
+  const map = {};
+  walkFields(fields, (f, section) => {
+    if (section) map[f.key] = section;
+  });
+  return map;
 }
 
 /**
@@ -79,6 +102,9 @@ export function buildColumns(fields, opts = {}) {
 
   const extraCols = (opts.extra || []).map(e => ({ ...toColumn(e), ...e }));
   let cols = [...extraCols, ...flat.map(toColumn)];
+
+  const sections = sectionByKey(fields);
+  cols = cols.map(c => (c.group == null && sections[c.key] ? { ...c, group: sections[c.key] } : c));
 
   const overrides = opts.overrides || {};
   cols = cols.map(c => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c));

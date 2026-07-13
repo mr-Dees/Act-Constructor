@@ -7,6 +7,8 @@
 
 import logging
 
+import asyncpg
+
 from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
 from app.domains.ua_data.settings import UaDataSettings
@@ -58,15 +60,37 @@ class DictionaryRepository(BaseRepository):
         return [dict(r) for r in rows]
 
     async def get_metric_codes(self) -> list[dict]:
-        """Возвращает список актуальных метрик нарушений."""
-        rows = await self.conn.fetch(
-            f"""
-            SELECT id, code, metric_name, metric_group
-            FROM {self.violation_metric_dict}
-            WHERE is_actual = true
-            ORDER BY code
-            """
-        )
+        """Возвращает список актуальных метрик нарушений.
+
+        has_npl — флаг «метрика с показателем NPL 90+»: источник истины для
+        NPL-правила FR-валидации и активности поля NPL на фронте. На БД без
+        колонки (развёрнута до её появления, ALTER ещё не выполнен) — фолбэк
+        на выборку без флага: по отсутствию ключа has_npl потребители
+        понимают, что словарь его ещё не отдаёт.
+        """
+        try:
+            rows = await self.conn.fetch(
+                f"""
+                SELECT id, code, metric_name, metric_group, has_npl
+                FROM {self.violation_metric_dict}
+                WHERE is_actual = true
+                ORDER BY code
+                """
+            )
+        except asyncpg.UndefinedColumnError:
+            logger.warning(
+                "Словарь метрик %s без колонки has_npl — выборка без флага; "
+                "выполните ALTER TABLE ... ADD COLUMN has_npl BOOLEAN NOT NULL DEFAULT false",
+                self.violation_metric_dict,
+            )
+            rows = await self.conn.fetch(
+                f"""
+                SELECT id, code, metric_name, metric_group
+                FROM {self.violation_metric_dict}
+                WHERE is_actual = true
+                ORDER BY code
+                """
+            )
         return [dict(r) for r in rows]
 
     async def get_departments(self) -> list[dict]:

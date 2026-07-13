@@ -22,7 +22,10 @@ class IDictionaryRepository(Protocol):
         ...
 
     async def get_metric_codes(self) -> list[dict]:
-        """Возвращает список актуальных метрик нарушений."""
+        """Возвращает список актуальных метрик нарушений.
+
+        Строки несут флаг ``has_npl`` (метрика с показателем «NPL 90+»);
+        на БД без колонки ключ отсутствует (см. DictionaryRepository)."""
         ...
 
     async def get_departments(self) -> list[dict]:

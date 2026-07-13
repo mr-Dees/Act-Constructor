@@ -10,20 +10,41 @@ export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Финансовый Результат';
-    static storageKey = 'ck:ck-fin-res:view:v2';
-    static sectionStateKey = 'ck:ck-fin-res:form-sections:v2';
+    static storageKey = 'ck:ck-fin-res:view:v3';
+    static sectionStateKey = 'ck:ck-fin-res:form-sections:v3';
     static workingSetCap = 1000;
+
+    /**
+     * Метрики с показателем «NPL 90+» — статический фолбэк до загрузки словаря.
+     * Источник истины — словарь метрик (флаг has_npl): страница после загрузки
+     * словарей подставляет живой набор через nplCodesFromMetrics; тот же флаг
+     * читает бэкенд (fr_validation_service), ручная синхронизация не нужна.
+     */
+    static NPL_METRIC_CODES = new Set(['602']);
+
+    /**
+     * Набор NPL-метрик из строк словаря метрик (флаг has_npl).
+     * null — словарь ещё не отдаёт флаг (БД без колонки has_npl):
+     * остаётся статический фолбэк NPL_METRIC_CODES.
+     */
+    static nplCodesFromMetrics(metrics) {
+        const rows = Array.isArray(metrics) ? metrics.filter(Boolean) : [];
+        if (!rows.some(m => 'has_npl' in m)) return null;
+        return new Set(rows.filter(m => m.has_npl).map(m => String(m.code)));
+    }
 
     static formatDate(val) {
         if (!val) return '';
-        const d = new Date(val);
+        const s = String(val);
+        // ISO-строка разбирается по частям: new Date('YYYY-MM-DD') трактует
+        // дату-only как UTC-полночь и западнее Гринвича показывала бы
+        // вчерашний день; у timestamp'ов бэка (без зоны) дата-часть строки
+        // и есть местный день.
+        const m = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(s);
+        if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+        const d = new Date(s);
         if (isNaN(d)) return '';
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    }
-
-    static formatNumber(val) {
-        if (val == null || val === '') return '';
-        return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     static formatTerbank(val, dicts) {
@@ -32,31 +53,255 @@ export class CkFinResConfig {
         return t ? t.short_name : String(val);
     }
 
+    /** Пастельная палитра ТБ (фиксирована за tb_id; см. спеку §2 п.10). */
+    static TB_PALETTE = {
+        '1': '#8fade5', '4': '#e5a97c', '5': '#82c9a6', '7': '#e39494',
+        '8': '#a89ade', '9': '#ddc27f', '10': '#7fbeda', '11': '#97ca97',
+        '12': '#dda2c2', '13': '#cf9f6d', '16': '#bf9edd', '14': '#b9c17c',
+    };
+    static TB_FALLBACK_COLOR = '#9aa3b5';
+    static TB_ABBR = {
+        '1': 'ББ', '4': 'ВВБ', '5': 'ДВБ', '7': 'МБ', '8': 'ПБ', '9': 'СЗБ',
+        '10': 'СибБ', '11': 'СРБ', '12': 'УБ', '13': 'ЦЧБ', '16': 'ЮЗБ', '14': 'ЦА',
+    };
+    /**
+     * Полные названия ТБ — тот же фиксированный набор id, что TB_PALETTE/TB_ABBR.
+     * Источник filterOptions чекбокс-фильтров tb_breakdown и npl_breakdown
+     * (см. columns ниже) — но только исходное значение: `columns` — геттер
+     * без параметров, ему
+     * неоткуда принять dicts, поэтому изначально берётся статика отсюда.
+     * После загрузки словарей страница подставляет живой список через
+     * tbFilterOptions(dicts) (см. ниже).
+     */
+    static TB_NAMES = {
+        '1': 'Байкальский банк', '4': 'Волго-Вятский банк', '5': 'Дальневосточный банк',
+        '7': 'Московский банк', '8': 'Поволжский банк', '9': 'Северо-Западный банк',
+        '10': 'Сибирский банк', '11': 'Среднерусский банк', '12': 'Уральский банк',
+        '13': 'Центрально-Чернозёмный банк', '16': 'Юго-Западный банк', '14': 'Центральный аппарат',
+    };
+
+    static tbColor(id) { return this.TB_PALETTE[String(id)] || this.TB_FALLBACK_COLOR; }
+
+    static tbAbbr(id, dicts) {
+        const a = this.TB_ABBR[String(id)];
+        if (a) return a;
+        const t = ((dicts && dicts.terbanks) || []).find(t => String(t.tb_id) === String(id));
+        return t ? t.short_name : String(id);
+    }
+
+    static fmtMoney(v) {
+        return Number(v || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /** Ячейка «итого»: число + мини-бар композиции по ТБ (общая для суммы и NPL).
+     * list — развёртка показателя ({neg_finder_tb_id, metric_amount_rubles} — у
+     * NPL значение тоже лежит в ключе metric_amount_rubles, см. extractNplBreakdown);
+     * hasValue — есть ли распределение (текст пустого состояния различается). */
+    static renderAmountTotal(raw, list, { hasValue, emptyText }) {
+        const wrap = document.createElement('div');
+        const num = document.createElement('div');
+        num.className = 'frb-cell-total';
+        num.textContent = hasValue ? `${this.fmtMoney(raw)} ₽` : emptyText;
+        wrap.appendChild(num);
+        const items = list || [];
+        const total = items.reduce((s, b) => s + Number(b.metric_amount_rubles || 0), 0);
+        if (total > 0) {
+            const bar = document.createElement('div');
+            bar.className = 'frb-cell-minibar';
+            for (const b of items) {
+                const seg = document.createElement('span');
+                seg.style.width = `${(Number(b.metric_amount_rubles || 0) / total) * 100}%`;
+                seg.style.background = this.tbColor(b.neg_finder_tb_id);
+                seg.title = `${this.tbAbbr(b.neg_finder_tb_id)} — ${this.fmtMoney(b.metric_amount_rubles)} ₽`;
+                bar.appendChild(seg);
+            }
+            wrap.appendChild(bar);
+        }
+        return wrap;
+    }
+
+    /** Ячейка чипов ТБ с суммами (общая для tb_breakdown и npl_breakdown). */
+    static renderBreakdownChips(list, dicts) {
+        const wrap = document.createElement('div');
+        wrap.className = 'frb-cell-chips';
+        if (!list || !list.length) { wrap.textContent = '—'; return wrap; }
+        for (const b of list) {
+            const chip = document.createElement('span');
+            chip.className = 'frb-chip';
+            chip.title = `${this.tbAbbr(b.neg_finder_tb_id, dicts)} — ${this.fmtMoney(b.metric_amount_rubles)} ₽`;
+            const dot = document.createElement('span');
+            dot.className = 'frb-chip-dot';
+            dot.style.background = this.tbColor(b.neg_finder_tb_id);
+            chip.appendChild(dot);
+            chip.appendChild(document.createTextNode(
+                `${this.tbAbbr(b.neg_finder_tb_id, dicts)} · ${this.fmtMoney(b.metric_amount_rubles)}`,
+            ));
+            wrap.appendChild(chip);
+        }
+        return wrap;
+    }
+
+    /** Кеш индексов развертки по массиву-развертке (WeakMap — не мутирует
+     * записи: лишний ключ в record попал бы в common при сохранении). */
+    static _breakdownIndex = new WeakMap();
+
+    /** Строка развертки по tb_id — O(1) после первой ячейки строки. */
+    static _breakdownItem(list, id) {
+        let byId = this._breakdownIndex.get(list);
+        if (!byId) {
+            byId = new Map(list.map(x => [String(x.neg_finder_tb_id), x]));
+            this._breakdownIndex.set(list, byId);
+        }
+        return byId.get(id);
+    }
+
+    /** Pivot-колонки по ТБ словаря: для суммы (piv:) и NPL (pivnpl:) — одна фабрика. */
+    static tbPivotColumns(dicts, { keyPrefix = 'piv', breakdownField = 'tb_breakdown', labelSuffix = '' } = {}) {
+        return ((dicts && dicts.terbanks) || []).map(t => {
+            const id = String(t.tb_id);
+            return {
+                key: `${keyPrefix}:${id}`,
+                label: `${this.tbAbbr(id, dicts)}${labelSuffix}`,
+                type: 'number', align: 'right', width: 120, hidden: true, noFilter: true, noSort: true,
+                description: `${t.full_name || t.short_name || ''}${labelSuffix ? ' — NPL 90+' : ''}`,
+                render: (raw, record) => {
+                    const span = document.createElement('span');
+                    const b = record[breakdownField]
+                        ? this._breakdownItem(record[breakdownField], id)
+                        : undefined;
+                    span.textContent = b ? this.fmtMoney(b.metric_amount_rubles) : '—';
+                    if (!b) span.className = 'frb-cell-zero';
+                    return span;
+                },
+            };
+        });
+    }
+
+    /**
+     * Опции чекбокс-фильтров tb_breakdown и npl_breakdown из живого словаря
+     * dicts.terbanks — страница подставляет их взамен статических (см.
+     * TB_NAMES выше) после загрузки словарей. Порядок — как в словаре. При
+     * отсутствии/пустоте словаря — фолбэк на статику (TB_ABBR/TB_NAMES).
+     */
+    static tbFilterOptions(dicts) {
+        const terbanks = (dicts && dicts.terbanks) || [];
+        if (!terbanks.length) {
+            return Object.keys(this.TB_ABBR).map((id) => ({
+                value: id,
+                label: `${this.TB_ABBR[id]} — ${this.TB_NAMES[id]}`,
+                short: this.TB_ABBR[id],
+            }));
+        }
+        return terbanks.map((t) => {
+            const id = String(t.tb_id);
+            const short = t.short_name || this.tbAbbr(id, dicts);
+            const full = t.full_name || short;
+            return { value: id, label: `${short} — ${full}`, short };
+        });
+    }
+
     /**
      * Колонки таблицы выводятся из `fields` (один источник правды) + read-only
      * display-колонки. Заголовки/форматтеры/выравнивание уточняются overrides.
+     *
+     * Групповая модель (Task 10): строка таблицы — логическая группа (пункт ×
+     * метрика), а не физическая строка ТБ. `total_amount`/`tb_count`/
+     * `total_counts`/`total_npl_amount` — чистые read-only display-колонки
+     * (extra, поля в форме нет). `tb_breakdown`/`npl_breakdown` — ЕСТЬ как
+     * поля формы (тип `amount-breakdown`, секция «Метрика»), поэтому их
+     * табличное представление (чипы ТБ, словарный фильтр по ТБ, noSort, своя
+     * ширина) задаётся через `overrides`, а не `extra` — иначе `buildColumns`
+     * собрал бы ДВЕ колонки с одним и тем же ключом (одну — из `extra`,
+     * другую — автовыведенную из `fields`).
      */
     static get columns() {
         return buildColumns(this.fields, {
             extra: [
                 // Служебные колонки скрыты по умолчанию (hidden) — включаются из панели видимости.
-                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true },
-                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
-                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v) },
-                { key: 'metric_name', label: 'Метрика', type: 'text' },
-                { key: 'act_sub_number', label: '№ суб-акта', type: 'text' },
+                // group — вручную (не выведена из fields, т.к. это extra-колонки): без него
+                // они выпадали бы между секционными группами и рвали бы заголовки в панели ⚙.
+                // id группы — синтетическая строка «suba|КМ|пункт|метрика»: числовая
+                // сортировка/фильтр по ней не осмыслены и в client/server-режимах
+                // вели себя по-разному — обе возможности сняты.
+                { key: 'id', label: 'ID', type: 'id', width: 60, hidden: true, noSort: true, noFilter: true, group: 'Системное' },
+                { key: 'created_at', label: 'Создано', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
+                { key: 'updated_at', label: 'Изменено', type: 'date', hidden: true, format: (v) => CkFinResConfig.formatDate(v), group: 'Системное' },
+                { key: 'metric_name', label: 'Метрика', type: 'text', group: 'Метрика' },
+                { key: 'act_sub_number', label: '№ суб-акта', type: 'text', group: 'Идентификация' },
+                { key: 'total_amount', label: 'Сумма — итого, ₽', type: 'number', align: 'right', width: 200, filterPicker: 'numrange', group: 'Метрика', render: (raw, record) => CkFinResConfig.renderAmountTotal(raw, record.tb_breakdown || [], { hasValue: !!record.tb_count, emptyText: 'не распределено' }) },
+                // total_npl_amount — чистый read-only агрегат (как total_amount): бэк уже
+                // отдаёт его в группе и знает и в AGG_FILTER_EXPR (диапазон-фильтр), и в
+                // AGG_SORT_EXPR (сортировка) — noSort намеренно не ставим, сортировка
+                // включена тем же способом, что у total_amount (по умолчанию).
+                {
+                    key: 'total_npl_amount',
+                    label: 'NPL 90+, руб.',
+                    description: 'Итог по группе. Заполняется только для метрик с флагом «NPL 90+» в словаре метрик',
+                    type: 'number',
+                    align: 'right',
+                    width: 140,
+                    filterPicker: 'numrange',
+                    group: 'Метрика',
+                    // hasValue — по наличию развертки, не по raw>0 (симметрично total_amount):
+                    // «—» вместо «не распределено» — NPL законно пуст у метрик ≠ 602.
+                    render: (raw, record) => {
+                        const list = record.npl_breakdown || [];
+                        return CkFinResConfig.renderAmountTotal(raw, list, { hasValue: list.length > 0, emptyText: '—' });
+                    },
+                },
+                // noFilter: ключа tb_count нет в ALLOWED_COLUMNS бэка — фильтр молча игнорировался бы; сортировка (COUNT(*)) поддержана.
+                { key: 'tb_count', label: 'Кол-во ТБ', type: 'number', align: 'right', width: 90, hidden: true, noFilter: true, group: 'Метрика' },
+                { key: 'total_counts', label: 'Кол-во — итого (шт.)', type: 'number', align: 'right', width: 120, hidden: true, group: 'Метрика' },
             ],
             overrides: {
                 metric_code: { label: 'Код метрики', type: 'text' },
-                neg_finder_tb_id: {
-                    label: 'ТБ',
+                tb_leader: {
+                    label: 'ТБ-рук. проверки',
                     format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts),
-                    // Словарный резолвер для F1-фильтра: имя ТБ → массив сырых tb_id.
+                    // Резолвер словарного фильтра: введённое имя ТБ → массив сырых tb_id.
                     filterResolve: (q, dicts) => (dicts.terbanks || [])
                         .filter(t => String(t.short_name).toLowerCase().includes(String(q).toLowerCase()))
                         .map(t => String(t.tb_id)),
                 },
-                metric_amount_rubles: { align: 'right', format: (v) => CkFinResConfig.formatNumber(v) },
+                // Автовыведенная из fields (type: 'amount-breakdown') колонка
+                // переопределяется целиком под чипы ТБ — см. комментарий выше.
+                tb_breakdown: {
+                    label: 'ТБ, выявившие отклонение',
+                    // Тип словаря оставлен для совместимости (align/width не зависят от
+                    // него); текстовый filterResolve, ради которого он был нужен, снят —
+                    // фильтр теперь чекбокс-пикер (filterPicker) и от col.type не зависит.
+                    type: 'dictionary',
+                    width: 320,
+                    noSort: true,
+                    filterPicker: 'checkbox',
+                    // Опции попапа — статический фолбэк tbFilterOptions() (без словарей);
+                    // после загрузки словарей страница подставляет живой список.
+                    // Спек op=in уходит на бэк под ключом tb_breakdown — membership-алиас
+                    // «группа содержит такой ТБ» (HAVING, итоги группы не искажаются).
+                    filterOptions: CkFinResConfig.tbFilterOptions(),
+                    // Сырое значение для client-mode фильтрации (маленькие наборы, включая
+                    // демо): record.tb_breakdown — массив ОБЪЕКТОВ, specMatches сравнил бы
+                    // его как строку и никогда не совпал бы. filterValue отдаёт массив
+                    // голых tb_id — по нему уже работает массивная семантика specMatches.
+                    filterValue: (record) => (record.tb_breakdown || []).map(b => String(b.neg_finder_tb_id)),
+                    render: (raw, record, dicts) => CkFinResConfig.renderBreakdownChips(record.tb_breakdown || [], dicts),
+                },
+                // Автовыведенная из fields колонка npl_breakdown переопределяется в чипы —
+                // полная симметрия с tb_breakdown (спека 2026-07-10 §2). Ключ npl_breakdown —
+                // membership-алиас бэка («группа содержит выбранный ТБ со строкой NPL>0»).
+                npl_breakdown: {
+                    label: 'NPL 90+ по ТБ',
+                    type: 'dictionary',
+                    width: 260,
+                    noSort: true,
+                    filterPicker: 'checkbox',
+                    filterOptions: CkFinResConfig.tbFilterOptions(),
+                    // extractNplBreakdown уже отдаёт только строки с NPL>0.
+                    filterValue: (record) => (record.npl_breakdown || []).map(b => String(b.neg_finder_tb_id)),
+                    render: (raw, record, dicts) => CkFinResConfig.renderBreakdownChips(record.npl_breakdown || [], dicts),
+                },
+                real_loss: { label: 'Реальные потери' },
+                is_sent_to_top_brass: { label: 'На НС', description: 'На наблюдательный совет' },
                 dt_sz: { format: (v) => CkFinResConfig.formatDate(v), dateFilter: 'single' }, // Дата СЗ — одна конкретная дата, не диапазон
                 rev_start_dt: { format: (v) => CkFinResConfig.formatDate(v) },
                 rev_end_dt: { format: (v) => CkFinResConfig.formatDate(v) },
@@ -64,15 +309,15 @@ export class CkFinResConfig {
             },
             // Порядок колонок повторяет порядок секций формы (без группировки в
             // самой таблице): идентификация → процесс → отклонение → метрика
-            // (код метрики вплотную к названию) → поручения → системное.
+            // (код метрики вплотную к названию, сумма-итог/развертка/счётчики
+            // ТБ рядом) → поручения → системное.
             order: [
-                'id',
-                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'neg_finder_tb_id',
+                'km_id', 'act_sub_number', 'num_sz', 'dt_sz', 'inspection_name', 'pocket', 'rev_start_dt', 'rev_end_dt', 'tb_leader',
                 'process_number', 'block_owner', 'department_owner',
                 'act_item_number', 'deviation_description', 'deviation_reason', 'deviation_consequence', 'risk', 'used_pm_lib',
-                'metric_code', 'metric_name', 'metric_element_counts', 'metric_amount_rubles', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
+                'metric_code', 'metric_name', 'total_amount', 'total_npl_amount', 'tb_breakdown', 'npl_breakdown', 'total_counts', 'tb_count', 'real_loss', 'is_sent_to_top_brass', 'ck_comment',
                 'sberdocs_ctrl_assgn_number', 'assigment_id', 'assigment_format', 'assigment_recommendation', 'execution_deadline',
-                'reestr_metric_id', 'created_at', 'updated_at',
+                'reestr_metric_id', 'id', 'created_at', 'updated_at',
             ],
         });
     }
@@ -94,7 +339,7 @@ export class CkFinResConfig {
                 { key: 'rev_start_dt', label: 'Начало ревизуемого периода', type: 'date' },
                 { key: 'rev_end_dt', label: 'Конец ревизуемого периода', type: 'date' },
             ]},
-            { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
+            { key: 'tb_leader', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         ]},
         // 2. Процесс и владельцы — без «Кармана» и «Вида риска».
         { section: 'Процесс и владельцы', key: 'process', fields: [
@@ -114,21 +359,23 @@ export class CkFinResConfig {
             { key: 'deviation_reason', label: 'Причина отклонения', type: 'textarea', rows: 2 },
             { key: 'deviation_consequence', label: 'Последствия отклонения', type: 'textarea', rows: 2 },
             { row: [
-                { key: 'risk', label: 'Вид риска', type: 'dictionary', dict: 'risk_types' },
+                { key: 'risk', label: 'Вид риска', type: 'dictionary', dict: 'risk_types',
+                  dictItemsFormat: (r) => ({ value: r.risk, label: r.risk }) },
                 { key: 'used_pm_lib', label: 'Использование PM', type: 'dictionary', dict: 'used_pm_options' },
             ]},
         ]},
-        // 4. Метрика — показатели + код метрики и её название.
+        // 4. Метрика — код метрики и развертка суммы по ТБ.
         { section: 'Метрика', key: 'metric', fields: [
             { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-            { row: [
-                { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
-                { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0,
-                  description: 'Сумма выявленных возможностей финансового результата банка' },
-            ]},
+            { key: 'tb_breakdown', label: 'Сумма по ТБ (руб.)', type: 'amount-breakdown', required: true,
+              sumKey: 'metric_amount_rubles', countLabel: 'ТБ',
+              description: 'Сумма выявленных возможностей финансового результата банка — итог и развертка по ТБ' },
+            { key: 'npl_breakdown', label: 'NPL 90+, руб.', type: 'amount-breakdown', required: false,
+              sumKey: 'metric_amount_rubles', countLabel: 'ТБ',
+              description: 'Заполняется только для метрик с флагом «NPL 90+» в словаре метрик' },
             { row: [
                 { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },
-                { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox' },
+                { key: 'is_sent_to_top_brass', label: 'На наблюдательный совет', type: 'checkbox' },
             ]},
             { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
         ]},
@@ -136,7 +383,8 @@ export class CkFinResConfig {
         { section: 'Поручения', key: 'assignment', fields: [
             { key: 'sberdocs_ctrl_assgn_number', label: '№ контр. поручения SberDocs', type: 'text' },
             { row: [
-                { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number' },
+                // nullable: пустое поле уходит как null (Optional[int] на бэке), а не 0
+                { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number', nullable: true },
                 { key: 'assigment_format', label: 'Формат поручения', type: 'dictionary', dict: 'assignment_formats' },
             ]},
             { key: 'assigment_recommendation', label: 'Формулировка поручения', type: 'textarea', rows: 2 },

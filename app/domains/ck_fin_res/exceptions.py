@@ -17,3 +17,13 @@ class FRValidationError(AppError):
 
     status_code = 400
     code: ClassVar[str] = "ck-fin-res-validation"
+
+
+class FRGroupConflictError(AppError):
+    """409-конфликт группы ЦКФР: параллельное изменение существующей группы
+    (набор актуальных строк не совпал с ожидаемым), попытка создать или
+    переименовать группу под уже занятый ключ (пункт+метрика), либо гонка
+    при создании дублирующих строк ТБ, разрешаемая post-commit проверкой."""
+
+    status_code = 409
+    code: ClassVar[str] = "ck-fin-res-group-conflict"

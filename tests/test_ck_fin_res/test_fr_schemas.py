@@ -24,6 +24,7 @@ class TestFRValidationCreate:
         assert record.metric_code == "FR-001"
         assert record.metric_element_counts == 0
         assert record.metric_amount_rubles == Decimal("0")
+        assert record.npl_amount_rubles == Decimal("0")
         assert record.is_sent_to_top_brass is False
         assert record.dt_sz is None
         assert record.act_sub_number_id is None
@@ -45,6 +46,7 @@ class TestFRValidationCreate:
             metric_name="Нарушение порядка переводов",
             metric_element_counts=5,
             metric_amount_rubles=Decimal("123456.78"),
+            npl_amount_rubles=Decimal("50.00"),
             is_sent_to_top_brass=True,
             km_id="КМ-09-12345",
             num_sz="Text/2025",
@@ -75,6 +77,7 @@ class TestFRValidationCreate:
             applied_into_ua=True,
         )
         assert record.metric_amount_rubles == Decimal("123456.78")
+        assert record.npl_amount_rubles == Decimal("50.00")
         assert record.is_sent_to_top_brass is True
         assert record.dt_sz == date(2025, 6, 15)
         assert record.real_loss is True

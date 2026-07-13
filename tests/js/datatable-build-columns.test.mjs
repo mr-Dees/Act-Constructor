@@ -86,3 +86,74 @@ test('#2 filterResolve пробрасывается на extra-колонке', 
   const cols = buildColumns(fields, { extra: [{ key: 'id', label: 'ID', type: 'id', filterResolve: resolve }] });
   assert.equal(typeof cols.find(c => c.key === 'id').filterResolve, 'function');
 });
+
+test('checkbox без override → дефолтный format «Да»/«Нет», пусто для null', () => {
+  const cols = buildColumns([{ key: 'flag', label: 'Флаг', type: 'checkbox' }]);
+  const c = cols.find(x => x.key === 'flag');
+  assert.equal(typeof c.format, 'function');
+  assert.equal(c.format(true), 'Да');
+  assert.equal(c.format(false), 'Нет');
+  assert.equal(c.format(null), '');
+});
+
+test('checkbox с явным format в overrides → используется явный', () => {
+  const fmt = () => 'кастом';
+  const cols = buildColumns(
+    [{ key: 'flag', label: 'Флаг', type: 'checkbox' }],
+    { overrides: { flag: { format: fmt } } },
+  );
+  assert.equal(cols.find(c => c.key === 'flag').format, fmt);
+});
+
+// ── Группы колонок из секций формы (Задача 5) ───────────────────────────────
+
+const sectionedFields = [
+  { section: 'Метрика', key: 'metric', fields: [
+    { key: 'metric_code', label: 'Метрика', type: 'dictionary' },
+  ] },
+  { section: 'Прочее', key: 'misc', fields: [
+    { key: 'deviation_description', label: 'Описание', type: 'textarea' },
+  ] },
+];
+
+test('колонка из секции формы получает group = имя секции', () => {
+  const cols = buildColumns(sectionedFields);
+  assert.equal(cols.find(c => c.key === 'metric_code').group, 'Метрика');
+  assert.equal(cols.find(c => c.key === 'deviation_description').group, 'Прочее');
+});
+
+test('плоский конфиг без секций — group не выставляется ни одной колонке', () => {
+  const cols = buildColumns(fields); // fields сверху файла — без секций
+  assert.ok(cols.every(c => c.group === undefined));
+});
+
+test('вложенная секция: flattenFields и sectionByKey идут одним обходчиком — group у всех листьев', () => {
+  const nested = [
+    { section: 'Внешняя', key: 's1', fields: [
+      { key: 'a', label: 'A', type: 'text' },
+      { section: 'Вложенная', key: 's2', fields: [
+        { key: 'b', label: 'B', type: 'text' },
+        { row: [{ key: 'c', label: 'C', type: 'text' }] },
+      ] },
+    ] },
+  ];
+  const cols = buildColumns(nested);
+  assert.equal(cols.find(c => c.key === 'a').group, 'Внешняя');
+  assert.equal(cols.find(c => c.key === 'b').group, 'Вложенная'); // раньше сюда group не долетал
+  assert.equal(cols.find(c => c.key === 'c').group, 'Вложенная');
+  assert.deepEqual(cols.map(c => c.key), ['a', 'b', 'c']); // и flattenFields видит все листья
+});
+
+test('extra-колонка с явным group сохраняет его (секции его не перекрывают)', () => {
+  const cols = buildColumns(sectionedFields, {
+    extra: [{ key: 'id', label: 'ID', type: 'id', group: 'Служебные' }],
+  });
+  assert.equal(cols.find(c => c.key === 'id').group, 'Служебные');
+});
+
+test('override с group перекрывает секционный', () => {
+  const cols = buildColumns(sectionedFields, {
+    overrides: { metric_code: { group: 'Другая группа' } },
+  });
+  assert.equal(cols.find(c => c.key === 'metric_code').group, 'Другая группа');
+});

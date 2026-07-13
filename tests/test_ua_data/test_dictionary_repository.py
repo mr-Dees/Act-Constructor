@@ -4,6 +4,7 @@
 не «мок вернул то, что в него положили», а РЕАЛЬНУЮ логику: текст SQL-запроса
 (фильтр `is_actual = true`, сортировка, JOIN'ы/LIMIT) и корректную распаковку строк.
 """
+import asyncpg
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -72,6 +73,23 @@ class TestGetMetricCodes:
         assert "is_actual = true" in sql
         assert "ORDER BY code" in sql
         assert "metric_name" in sql and "metric_group" in sql
+
+    async def test_selects_has_npl_flag(self, repo, mock_conn):
+        """has_npl — источник истины NPL-правила: входит в выборку словаря."""
+        mock_conn.fetch.return_value = [{"code": "602", "has_npl": True}]
+        rows = await repo.get_metric_codes()
+        assert "has_npl" in _sql(mock_conn)
+        assert rows[0]["has_npl"] is True
+
+    async def test_falls_back_without_has_npl_column(self, repo, mock_conn):
+        """БД без колонки has_npl: повторная выборка без флага, а не 500."""
+        mock_conn.fetch.side_effect = [
+            asyncpg.UndefinedColumnError('column "has_npl" does not exist'),
+            [{"code": "602"}],
+        ]
+        rows = await repo.get_metric_codes()
+        assert rows == [{"code": "602"}]
+        assert "has_npl" not in mock_conn.fetch.call_args_list[1].args[0]
 
 
 class TestGetDepartments:

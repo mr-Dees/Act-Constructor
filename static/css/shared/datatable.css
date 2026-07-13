@@ -10,6 +10,7 @@
     flex: 1;
     overflow: auto;
     min-height: 0;
+    scrollbar-gutter: stable; /* скроллбар не отбирает ширину при фильтрации — иначе горизонтальный скролл «уезжает» */
 }
 
 .dt-table {
@@ -104,6 +105,18 @@
     transform: translateY(0);
 }
 
+/* Подпись noFilter-колонки (шапка без фильтр-контрола): занимает место поля и
+   ужимается с ellipsis — иначе длинная подпись вытолкнула бы кнопку сортировки
+   за обрезанный край ячейки. Шрифт/цвет наследуются от .dt-head-row th. */
+.dt-th-label {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 0; /* та же вертикальная метрика, что у .dt-th-filter — ровная шапка */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .dt-th-filter {
     flex: 1;
     min-width: 0;
@@ -148,7 +161,8 @@
     min-width: 0;
 }
 
-.dt-th-datebtn {
+.dt-th-datebtn,
+.dt-th-popbtn {
     width: 100%;
     text-align: left;
     cursor: pointer;
@@ -157,9 +171,10 @@
     text-overflow: ellipsis;
 }
 
-.dt-th-datebtn--empty {
+.dt-th-datebtn--empty,
+.dt-th-popbtn--empty {
     color: var(--text-secondary);
-    font-weight: 600; /* имя колонки читается как заголовок, пока фильтр пуст */
+    font-weight: 600; /* имя колонки (или «—» для чекбокс-фильтра) читается как заголовок, пока фильтр пуст */
 }
 
 /* Попап дат — оверлей на body (position:fixed выставляется из JS под триггером). */
@@ -214,10 +229,65 @@
     padding: 2px 4px;
 }
 
+/* Попап чекбокс-мультивыбора (filterPicker: 'checkbox') — по образцу
+   .dt-date-popover, плюс прокрутка при длинных списках опций. */
+.dt-check-popover {
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 190px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.dt-check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 2px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+/* Попап диапазона чисел (filterPicker: 'numrange') — по образцу
+   .dt-date-popover; строки «от»/«до» переиспользуют .dt-date-row/.dt-date-input. */
+.dt-num-popover {
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 190px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
 /* Select-фильтр для checkbox-колонки (Все/Да/Нет). */
 .dt-th-select {
     cursor: pointer;
 }
+
+/* Чипы накопленных фраз текстового фильтра (под инпутом в шапке) */
+.dt-th-chipswrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dt-th-chips { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.dt-th-chips[hidden] { display: none; }
+.dt-th-chip {
+    display: inline-flex; align-items: center; gap: 2px; max-width: 100%;
+    padding: 0 4px; border-radius: 8px; background: var(--bg-tertiary);
+    font-size: 11px; line-height: 16px;
+}
+.dt-th-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.dt-th-chip-x { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-secondary); font-size: 12px; line-height: 1; }
+.dt-th-chip-x:hover { color: var(--text-primary); }
 
 .dt-th-sort,
 .dt-th-clear {
@@ -332,12 +402,30 @@
     display: none;
 }
 
+.dt-colvis-group {
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
 .dt-colvis-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(130px, 1fr));
     gap: 4px 12px;
     max-height: 320px;
     overflow: auto;
+}
+
+/* Заголовок группы колонок в панели ⚙ (типографика — как группы сайдбара) */
+.dt-colvis-grouplabel {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    padding: 8px 0 4px;
+    white-space: nowrap;
+    overflow: hidden;
 }
 
 .dt-colvis-item {

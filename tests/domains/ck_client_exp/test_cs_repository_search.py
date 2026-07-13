@@ -5,6 +5,8 @@
 ORDER BY/LIMIT/COUNT и отклонение инъекции в имя колонки сортировки.
 """
 
+from datetime import date
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -134,7 +136,9 @@ class TestFilterOps:
         assert "WHERE" not in sql
 
     async def test_in_builds_membership_with_bound_values(self, repo, mock_conn):
-        """in → col IN ($i, ...), параметры — сырые значения (для словарей)."""
+        """in → CAST(col AS TEXT) IN ($i, ...) — текстовое равенство, как
+        множественный eq (сырой col IN ронял бы бинарные кодеки asyncpg
+        на нетекстовых колонках)."""
         mock_conn.fetch.return_value = []
         mock_conn.fetchval.return_value = 0
 
@@ -144,7 +148,7 @@ class TestFilterOps:
         )
 
         sql = mock_conn.fetch.call_args[0][0]
-        assert "neg_finder_tb_id IN ($1, $2)" in sql
+        assert "CAST(neg_finder_tb_id AS TEXT) IN ($1, $2)" in sql
         assert mock_conn.fetch.call_args[0][1:] == ("1", "14", 10, 0)
 
     async def test_in_empty_values_yields_no_match(self, repo, mock_conn):
@@ -178,8 +182,10 @@ class TestFilterOps:
         sql = mock_conn.fetch.call_args[0][0]
         assert "CAST(dt_sz AS DATE) >= $1" in sql
         assert "CAST(dt_sz AS DATE) <= $2" in sql
+        # Границы — date-объекты: temporal-кодеки asyncpg бинарные,
+        # строка в DATE-параметре роняла бы запрос DataError.
         assert mock_conn.fetch.call_args[0][1:] == (
-            "2025-01-01", "2025-06-30", 10, 0,
+            date(2025, 1, 1), date(2025, 6, 30), 10, 0,
         )
 
     async def test_range_numeric_only_lower_bound(self, repo, mock_conn):
@@ -243,6 +249,33 @@ class TestFilterOps:
 
         sql = mock_conn.fetch.call_args[0][0]
         assert "CAST(metric_amount_rubles AS TEXT) ILIKE" in sql
+
+    async def test_contains_any_builds_or_ilike(self, repo, mock_conn):
+        """contains_any → OR по CAST(col AS TEXT) ILIKE, параметр %фраза% на каждую фразу."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"ck_comment": FilterSpec(op="contains_any", values=["риск", "просрочк"])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "(CAST(ck_comment AS TEXT) ILIKE $1 OR CAST(ck_comment AS TEXT) ILIKE $2)" in sql
+        assert mock_conn.fetch.call_args[0][1:] == ("%риск%", "%просрочк%", 10, 0)
+
+    async def test_contains_any_skips_blank_values(self, repo, mock_conn):
+        """contains_any с пустым/пробельным списком → фильтр пропускается (не 1=0, в отличие от in)."""
+        mock_conn.fetch.return_value = []
+        mock_conn.fetchval.return_value = 0
+
+        await repo.search_filtered(
+            filters={"ck_comment": FilterSpec(op="contains_any", values=["", "  "])},
+            limit=10, offset=0,
+        )
+
+        sql = mock_conn.fetch.call_args[0][0]
+        assert "WHERE" not in sql
 
 
 # -------------------------------------------------------------------------

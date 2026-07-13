@@ -14,33 +14,21 @@ from app.domains.ck_fin_res.schemas.requests import (
 # -------------------------------------------------------------------------
 
 
-def test_filters_and_sort_defaults():
-    """По умолчанию: filters пустой, sort_by нет, sort_dir = asc."""
+def test_filters_default_empty():
+    """По умолчанию filters пустой."""
     r = ValidationSearchRequest()
     assert r.filters == {}
-    assert r.sort_by is None
-    assert r.sort_dir == "asc"
 
 
 def test_filters_parsed_as_filterspec():
     """filters — dict[str, FilterSpec]; словарь распознаётся как FilterSpec."""
     r = ValidationSearchRequest(
         filters={"metric_code": {"op": "contains", "value": "ФР001"}},
-        sort_by="metric_code",
-        sort_dir="desc",
     )
     spec = r.filters["metric_code"]
     assert isinstance(spec, FilterSpec)
     assert spec.op == "contains"
     assert spec.value == "ФР001"
-    assert r.sort_by == "metric_code"
-    assert r.sort_dir == "desc"
-
-
-def test_bad_sort_dir_rejected():
-    """Недопустимое значение sort_dir отклоняется валидацией."""
-    with pytest.raises(ValidationError):
-        ValidationSearchRequest(sort_dir="sideways")
 
 
 def test_sort_list_default_empty():

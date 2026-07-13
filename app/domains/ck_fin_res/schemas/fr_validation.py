@@ -18,6 +18,7 @@ class FRValidationCreate(BaseModel):
     metric_name: str = Field(default="", max_length=500)
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")
+    npl_amount_rubles: Decimal = Decimal("0")
     is_sent_to_top_brass: bool = False
     km_id: str = Field(default="", max_length=200)
     num_sz: str = Field(default="", max_length=200)
@@ -43,15 +44,10 @@ class FRValidationCreate(BaseModel):
     assigment_recommendation: str = Field(default="", max_length=10000)
     execution_deadline: Optional[datetime] = None
     used_pm_lib: str = Field(default="", max_length=200)
+    tb_leader: str = Field(default="", max_length=200)
     etl_loading_id: Optional[int] = None
     row_hash: str = Field(default="", max_length=500)
     applied_into_ua: bool = False
-
-
-class FRValidationBatchItem(FRValidationCreate):
-    """Элемент пакетного обновления FR-валидации (id обязателен)."""
-
-    id: int
 
 
 class FRValidationRecord(FRValidationCreate):
