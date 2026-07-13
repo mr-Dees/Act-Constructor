@@ -377,8 +377,8 @@ test('КП-5: вставка отклонена при превышении ли
     const src = addItem('4', 'С картинкой');
     assert.ok(AppState.addViolationToNode(src.id).valid);
     const violationId = src.children.find(c => c.violationId)?.violationId;
-    // Большая картинка (~25 МБ base64-payload).
-    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(34 * 1024 * 1024);
+    // Картинка ~3 МБ (влезает в 5 МБ-лимит акта для ОДНОЙ; дубль при вставке → >5 МБ).
+    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
         items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
@@ -399,9 +399,9 @@ test('КП-5: copyNode отклоняет фрагмент с картинкам
     const src = addItem('4', 'С большой картинкой');
     assert.ok(AppState.addViolationToNode(src.id).valid);
     const violationId = src.children.find(c => c.violationId)?.violationId;
-    // Лимит акта по умолчанию — 30 МБ. estimateDataUrlBytes ≈ длина*0.75,
-    // поэтому base64-payload 42 МБ символов ≈ 31.5 МБ байт > лимита.
-    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(42 * 1024 * 1024);
+    // Лимит акта по умолчанию — 5 МБ. estimateDataUrlBytes ≈ длина*0.75,
+    // поэтому base64-payload 8 МБ символов ≈ 6 МБ байт > лимита.
+    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(8 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
         items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
