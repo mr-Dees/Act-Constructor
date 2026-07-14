@@ -14,6 +14,7 @@ import { formatValidationDetail } from './api-errors.js';
 import { sanitizeActContent } from '../constructor/state/act-content-sanitizer.js';
 import { shouldOfferRestore } from '../constructor/state/draft-restore.js';
 import { normalizePinnedOrder, reconcileTableKind } from '../constructor/table/table-kind.js';
+import { ViolationAudit } from '../constructor/violation/violation-audit.js';
 
 // Constructor-зона: lazy-доступ через window.
 // Прямые import'ы из ../constructor/* тянули весь constructor граф
@@ -571,6 +572,13 @@ export class APIClient {
                     window.AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
             }
+
+            // #17: эталонный снимок нарушений для diff-аудита правок при
+            // сохранении. Берётся ПОСЛЕ присвоения AppState.violations в обеих
+            // ветках (пустой акт / загруженный контент). Снимок не клонирует
+            // base64-байты картинок (см. ViolationAudit). Новый load
+            // переустанавливает эталон целиком → корректен при switch'е акта.
+            ViolationAudit.snapshot(AppState.violations);
 
             // Обновляем интерфейс
             if (typeof treeManager !== 'undefined') {

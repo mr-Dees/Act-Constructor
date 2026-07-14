@@ -15,6 +15,8 @@ import './violation-additional-content.js';
 import './violation-rendering.js';
 import './violation-drag-drop.js';
 import './violation-file-upload.js';
+// diff-аудит правок нарушений (#17): регистрирует pre-flush hook в ChangelogTracker.
+import './violation-audit.js';
 
 // Создаем глобальный экземпляр менеджера нарушений
 export const violationManager = new ViolationManager();
