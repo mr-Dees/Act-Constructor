@@ -131,6 +131,23 @@ class TablesSettings(BaseModel):
     max_rows: int = Field(default=64, gt=0)
     max_cols: int = Field(default=16, gt=0)
     min_col_width_px: int = Field(default=80, gt=0)
+    # Максимальное число таблиц-детей одного узла дерева (#7). Фронт ограничивает
+    # добавление таблиц узлу, но paste/drag/undo и прямой API проверку обходили —
+    # серверный гейт в ActContentService._validate_tree. Считаются ВСЕ таблицы,
+    # включая закреплённые metrics/risk (паритет с фронт-гейтом добавления).
+    # Отдаётся через GET /acts/limits (tables.per_node).
+    per_node: int = Field(default=10, gt=0)
+
+
+class ViolationsSettings(BaseModel):
+    """
+    Лимит нарушений-детей одного узла дерева (#7).
+
+    Фронт ограничивает добавление нарушений узлу, но paste/drag/undo и прямой
+    API проверку обходили — серверный гейт в ActContentService._validate_tree.
+    Отдаётся через GET /acts/limits (violations.per_node).
+    """
+    per_node: int = Field(default=10, gt=0)
 
 
 class TextblocksSettings(BaseModel):
@@ -193,6 +210,7 @@ class ActsSettings(BaseModel):
     images: ImagesSettings = ImagesSettings()
     tables: TablesSettings = TablesSettings()
     textblocks: TextblocksSettings = TextblocksSettings()
+    violations: ViolationsSettings = ViolationsSettings()
     sanitizer: SanitizerSettings = SanitizerSettings()
     # Kill-switch телеметрии здоровья редактора (§6.8). Выключено → эндпоинт
     # /acts/editor-telemetry отвечает 204 без записи, а фронт (получив флаг

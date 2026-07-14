@@ -245,6 +245,50 @@ async def test_textblocks_per_node_limit_raises_validation_error():
     assert exc_info.value.status_code == 400
 
 
+async def test_violations_per_node_limit_raises_validation_error():
+    """#7: сервер отклоняет узел с N+1 нарушениями (paste/drag/undo обходили
+    фронт-гейт). Симметрия текстблочному лимиту B-13."""
+    svc, _saved = _svc()
+    svc.acts_settings.violations.per_node = 2
+    sections = _base_sections()
+    sections[0]["children"] = [
+        {"id": f"v{i}", "label": "Нарушение", "type": "violation",
+         "violationId": f"v{i}", "children": []}
+        for i in range(3)
+    ]
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        saveType="manual",
+    )
+    with pytest.raises(ActValidationError, match="нарушений") as exc_info:
+        await svc.save_content(act_id=1, data=data, username="12345")
+    assert exc_info.value.status_code == 400
+
+
+async def test_tables_per_node_limit_raises_validation_error():
+    """#7: сервер отклоняет узел с N+1 таблицами. Считаются ВСЕ таблицы, включая
+    закреплённые metrics/risk (паритет с фронт-гейтом добавления)."""
+    svc, _saved = _svc()
+    svc.acts_settings.tables.per_node = 2
+    sections = _base_sections()
+    # Одна из таблиц — закреплённая metrics: её тоже нужно учитывать.
+    sections[0]["children"] = [
+        {"id": "tbl0", "label": "Таблица", "type": "table",
+         "tableId": "tbl0", "kind": "metrics", "children": []},
+        {"id": "tbl1", "label": "Таблица", "type": "table",
+         "tableId": "tbl1", "children": []},
+        {"id": "tbl2", "label": "Таблица", "type": "table",
+         "tableId": "tbl2", "children": []},
+    ]
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        saveType="manual",
+    )
+    with pytest.raises(ActValidationError, match="таблиц") as exc_info:
+        await svc.save_content(act_id=1, data=data, username="12345")
+    assert exc_info.value.status_code == 400
+
+
 async def test_warning_act_manual_save_does_not_notify():
     """Статус warning (только пустые таблицы) портальное уведомление НЕ шлёт —
     даже при ручном сохранении: warning не критичен (решение пользователя)."""

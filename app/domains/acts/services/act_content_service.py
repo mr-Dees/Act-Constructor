@@ -9,7 +9,11 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
-from app.domains.acts.block_types import NODE_TYPE_TEXTBLOCK
+from app.domains.acts.block_types import (
+    NODE_TYPE_TABLE,
+    NODE_TYPE_TEXTBLOCK,
+    NODE_TYPE_VIOLATION,
+)
 from app.domains.acts.exceptions import AccessDeniedError, ActValidationError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
@@ -274,17 +278,26 @@ class ActContentService:
         if not tree.get('id'):
             raise ActValidationError("Дерево должно иметь корневой узел с id")
 
-        # Лимит числа текстблоков-детей одного узла (B-13). Фронт ограничивает
-        # добавление блоков узлу, но прямой API эту проверку обходил. Считаем
-        # детей type='textblock' у каждого узла дерева.
+        # Лимит числа блоков-детей одного узла (B-13 текстблоки, #7 нарушения
+        # и таблицы). Фронт ограничивает добавление блоков узлу, но paste/drag/
+        # undo и прямой API эти проверки обходили. Считаем детей нужного type
+        # у каждого узла дерева — паритет с фронт-гейтами вставки.
         self._validate_textblocks_per_node(tree)
+        self._validate_violations_per_node(tree)
+        self._validate_tables_per_node(tree)
 
-    def _validate_textblocks_per_node(self, tree: dict) -> None:
-        """Проверяет, что число текстблоков-детей узла не превышает per_node (B-13)."""
-        max_per_node = self.acts_settings.textblocks.per_node
+    def _validate_children_per_node(
+        self, tree: dict, node_type: str, max_per_node: int, item_label: str
+    ) -> None:
+        """Проверяет, что число детей заданного type у узла не превышает лимит.
+
+        Общее ядро для текстблоков (B-13), нарушений и таблиц (#7). Для таблиц
+        считаются ВСЕ table-дети, включая закреплённые metrics/risk — паритет с
+        фронт-гейтом добавления (_validateContentLimits).
+        """
         if not isinstance(max_per_node, int):
             # Настройки не сконфигурированы (или замоканы в тестах) — лимит не
-            # применяем. В проде per_node всегда int из ACTS__TEXTBLOCKS__PER_NODE.
+            # применяем. В проде per_node всегда int из ACTS__*__PER_NODE.
             return
         stack = [tree]
         while stack:
@@ -292,13 +305,38 @@ class ActContentService:
             children = node.get("children")
             if not isinstance(children, list):
                 continue
-            textblock_count = sum(
+            count = sum(
                 1 for child in children
-                if isinstance(child, dict) and child.get("type") == NODE_TYPE_TEXTBLOCK
+                if isinstance(child, dict) and child.get("type") == node_type
             )
-            if textblock_count > max_per_node:
+            if count > max_per_node:
                 raise ActValidationError(
-                    f"Узел содержит слишком много текстовых блоков "
-                    f"({textblock_count}), максимум — {max_per_node}"
+                    f"Узел содержит слишком много {item_label} "
+                    f"({count}), максимум — {max_per_node}"
                 )
             stack.extend(children)
+
+    def _validate_textblocks_per_node(self, tree: dict) -> None:
+        """Проверяет, что число текстблоков-детей узла не превышает per_node (B-13)."""
+        self._validate_children_per_node(
+            tree, NODE_TYPE_TEXTBLOCK,
+            self.acts_settings.textblocks.per_node, "текстовых блоков",
+        )
+
+    def _validate_violations_per_node(self, tree: dict) -> None:
+        """Проверяет, что число нарушений-детей узла не превышает per_node (#7)."""
+        self._validate_children_per_node(
+            tree, NODE_TYPE_VIOLATION,
+            self.acts_settings.violations.per_node, "нарушений",
+        )
+
+    def _validate_tables_per_node(self, tree: dict) -> None:
+        """Проверяет, что число таблиц-детей узла не превышает per_node (#7).
+
+        Считаются ВСЕ таблицы, включая закреплённые metrics/risk (паритет с
+        фронт-гейтом добавления).
+        """
+        self._validate_children_per_node(
+            tree, NODE_TYPE_TABLE,
+            self.acts_settings.tables.per_node, "таблиц",
+        )
