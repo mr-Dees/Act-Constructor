@@ -159,6 +159,12 @@ class ActContentService:
 
             # Создаём снэпшот версии только для manual/periodic
             if data.saveType in ("manual", "periodic"):
+                # Фактуры в снимок берём из БД (act_invoices уже синхронизированы
+                # save_content выше через _sync_invoices) как {node_id: реквизиты}
+                # — та же форма, что поле invoices в GET /acts/{id}/content, чтобы
+                # обе стороны диффа версий были структурно одинаковыми.
+                invoices_list = await self._invoice.get_invoices_for_act(act_id)
+                invoices_snapshot = {inv["node_id"]: inv for inv in invoices_list}
                 await self._versions.create_version(
                     act_id=act_id,
                     username=username,
@@ -167,6 +173,7 @@ class ActContentService:
                     tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
                     textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
                     violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
+                    invoices=invoices_snapshot,
                     max_versions=self.acts_settings.audit_log.max_content_versions,
                 )
 

@@ -258,6 +258,8 @@ def _svc():
     svc._audit.compute_field_diffs = AsyncMock(return_value=None)
     svc._versions = MagicMock()
     svc._versions.create_version = AsyncMock(return_value=1)
+    svc._invoice = MagicMock()
+    svc._invoice.get_invoices_for_act = AsyncMock(return_value=[])
     svc._crud = MagicMock()
     svc._crud.get_act_by_id = AsyncMock(return_value=MagicMock(km_number="КМ-01-00001"))
     return svc, saved

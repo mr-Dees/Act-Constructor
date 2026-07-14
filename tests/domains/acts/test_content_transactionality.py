@@ -98,6 +98,9 @@ def _make_content_service(call_log: list[str]):
     svc._audit.compute_field_diffs = AsyncMock(return_value=None)
     svc._versions = MagicMock()
     svc._versions.create_version = AsyncMock(side_effect=_create_version)
+    # manual/periodic-снимок тянет фактуры акта для блоба invoices_data
+    svc._invoice = MagicMock()
+    svc._invoice.get_invoices_for_act = AsyncMock(return_value=[])
 
     return svc, conn, tx
 

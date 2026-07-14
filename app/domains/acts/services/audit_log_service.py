@@ -62,11 +62,15 @@ class AuditLogService:
 
         async with self.conn.transaction():
             # Pre-snapshot текущего содержимого ДО перезаписи.
-            # get_content вернёт dict {tree, tables, textBlocks, violations, ...};
-            # сохраняем как auto-снимок — это не пользовательский save,
-            # значения manual/periodic зарезервированы за явными действиями
+            # get_content вернёт dict {tree, tables, textBlocks, violations,
+            # invoices, ...}; сохраняем как auto-снимок — это не пользовательский
+            # save, значения manual/periodic зарезервированы за явными действиями
             # редактора (см. saveType в ActDataSchema).
             current = await content_repo.get_content(act_id)
+            # Фактуры restore не меняет (_sync_invoices пропускает пустой
+            # invoiceNodeIds), поэтому одна и та же привязка node_id → реквизиты
+            # уходит и в pre-, и в post-снимок.
+            current_invoices = current.get("invoices", {}) if current else {}
             if current:
                 # pbe-6: pre-snapshot симметричен post-snapshot'у — HTML-поля
                 # чистятся той же санитизацией (dict-форма), иначе restore
@@ -80,6 +84,7 @@ class AuditLogService:
                     tables=current.get("tables", {}),
                     textblocks=current.get("textBlocks", {}),
                     violations=current.get("violations", {}),
+                    invoices=current_invoices,
                 )
 
             # Пересчитываем состояние валидации из ВОССТАНОВЛЕННОГО содержимого
@@ -112,6 +117,7 @@ class AuditLogService:
                 tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
                 textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
                 violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
+                invoices=current_invoices,
             )
 
         logger.info(

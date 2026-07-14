@@ -34,4 +34,6 @@ class ContentVersionDetail(BaseModel):
     tables_data: dict
     textblocks_data: dict
     violations_data: dict
+    # Снимки, созданные до миграции invoices_data, блоба не несут → дефолт {}.
+    invoices_data: dict = Field(default_factory=dict)
     created_at: datetime
