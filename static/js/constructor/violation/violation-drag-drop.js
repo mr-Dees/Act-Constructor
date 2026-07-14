@@ -10,6 +10,7 @@ import {
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
+import { computeAdditionalContentNumbers } from './violation-numbering.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -62,8 +63,8 @@ Object.assign(ViolationManager.prototype, {
         let icon = '';
 
         if (item.type === CONTENT_TYPE_CASE) {
-            const caseNumbers = this.calculateCaseNumbers(allItems);
-            const caseNumber = caseNumbers[index];
+            const caseNumbers = computeAdditionalContentNumbers(allItems);
+            const caseNumber = caseNumbers[index]?.number;
             icon = '📋';
             label = `Кейс ${caseNumber}`;
         } else if (item.type === CONTENT_TYPE_IMAGE) {

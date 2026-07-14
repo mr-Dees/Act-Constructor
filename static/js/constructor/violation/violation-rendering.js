@@ -12,6 +12,7 @@ import {
     CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
 import { renderImageWithFallback } from './violation-image-render.js';
+import { computeAdditionalContentNumbers } from './violation-numbering.js';
 
 /**
  * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
@@ -37,13 +38,13 @@ Object.assign(ViolationManager.prototype, {
         container.innerHTML = '';
 
         // Вычисляем нумерацию для последовательных кейсов
-        const itemsWithNumbers = this.calculateCaseNumbers(violation.additionalContent.items);
+        const itemsWithNumbers = computeAdditionalContentNumbers(violation.additionalContent.items);
 
         violation.additionalContent.items.forEach((item, index) => {
             let itemElement;
 
             if (item.type === CONTENT_TYPE_CASE) {
-                const caseNumber = itemsWithNumbers[index];
+                const caseNumber = itemsWithNumbers[index]?.number;
                 itemElement = this.createCaseElement(violation, item, index, caseNumber, isReadOnly);
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_IMAGE, index);
@@ -94,28 +95,6 @@ Object.assign(ViolationManager.prototype, {
             }
         }
         return count;
-    },
-
-    /**
-     * Вычисляет номера для кейсов (сброс нумерации при прерывании)
-     * @param {Array} items - Массив элементов
-     * @returns {Array} Массив с номерами кейсов
-     */
-    calculateCaseNumbers(items) {
-        const numbers = new Array(items.length).fill(null);
-        let currentCaseNumber = 1;
-
-        items.forEach((item, index) => {
-            if (item.type === CONTENT_TYPE_CASE) {
-                numbers[index] = currentCaseNumber;
-                currentCaseNumber++;
-            } else {
-                // Сбрасываем нумерацию при встрече не-кейса
-                currentCaseNumber = 1;
-            }
-        });
-
-        return numbers;
     },
 
     /**

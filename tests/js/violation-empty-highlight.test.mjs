@@ -2,8 +2,8 @@
  * Не блокирующая подсветка пустых элементов в форме нарушения (#9-Г, Wave 2).
  *
  * Только визуальный класс + toggle на input — данные/сериализация не
- * затрагиваются (нумерация формы calculateCaseNumbers/getTypeSequentialNumber
- * остаётся эталоном и здесь не трогается). Покрывает:
+ * затрагиваются (нумерация формы computeAdditionalContentNumbers/
+ * getTypeSequentialNumber остаётся эталоном и здесь не трогается). Покрывает:
  *  - createCaseElement/createFreeTextElement (violation-rendering.js) —
  *    класс content-item-wrapper--empty на обёртке;
  *  - renderList для descriptionList (violation-core.js) — класс
