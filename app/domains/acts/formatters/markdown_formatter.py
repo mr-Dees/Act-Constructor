@@ -122,8 +122,10 @@ class MarkdownFormatter(BaseFormatter):
         """
         lines = []
 
-        self._add_labeled_section(lines, "Нарушено", violation_data.get('violated', ''))
-        self._add_labeled_section(lines, "Установлено", violation_data.get('established', ''))
+        # #14: обязательные поля — метка выводится всегда, даже при пустом
+        # content (паритет с DOCX-эталоном «метка + пустое тело»).
+        self._add_required_pair(lines, "Нарушено", violation_data.get('violated', ''))
+        self._add_required_pair(lines, "Установлено", violation_data.get('established', ''))
         self._add_description_list(lines, violation_data.get('descriptionList', {}))
         self._add_additional_content(lines, violation_data.get('additionalContent', {}))
         self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
@@ -133,21 +135,32 @@ class MarkdownFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _add_labeled_section(self, lines: list[str], label: str, data):
+    def _add_required_pair(self, lines: list[str], label: str, content: str):
         """
-        Добавляет секцию с жирной меткой.
+        Добавляет обязательное поле (Нарушено/Установлено): метка выводится
+        всегда, даже при пустом content (#14).
 
         Args:
             lines: Список строк для добавления
             label: Текст метки
-            data: Данные секции (dict с enabled/content или строка)
+            content: Текст поля (может быть пустым)
         """
-        if isinstance(data, dict):
-            if not data.get('enabled', False):
-                return
-            content = data.get('content', '')
-        else:
-            content = data
+        lines.append(f"**{label}:** {content}".rstrip())
+        lines.append("")
+
+    def _add_labeled_section(self, lines: list[str], label: str, data: dict):
+        """
+        Добавляет опциональную секцию с жирной меткой (Причины/Последствия/
+        Ответственные/Рекомендации) — только при enabled и непустом content.
+
+        Args:
+            lines: Список строк для добавления
+            label: Текст метки
+            data: Данные секции (dict с enabled/content)
+        """
+        if not data.get('enabled', False):
+            return
+        content = data.get('content', '')
 
         if content:
             lines.append(f"**{label}:** {content}")
@@ -168,7 +181,7 @@ class MarkdownFormatter(BaseFormatter):
         if not items:
             return
 
-        lines.append("**Описание:**")
+        # #12: заголовок «Описание» убран — только маркированный список.
         for item in items:
             if item.strip():
                 lines.append(f"- {item}")
@@ -212,16 +225,21 @@ class MarkdownFormatter(BaseFormatter):
         Returns:
             Следующий номер кейса
         """
+        # #9/Q1: нумеруются ВСЕ кейсы, включая пустые (метка + пустое тело);
+        # счётчик всегда двигается вперёд.
         content = item.get('content', '')
-        if content:
-            lines.append(f"**Кейс {case_number}:** {content}")
-            lines.append("")
-            return case_number + 1
-        return case_number
+        lines.append(f"**Кейс {case_number}:** {content}".rstrip())
+        lines.append("")
+        return case_number + 1
 
     def _add_image(self, lines: list[str], item: dict):
         """
-        Добавляет ссылку на изображение.
+        Встраивает картинку (#16).
+
+        При непустом url — markdown-изображение `![alt](url "filename")`:
+        alt = подпись или имя файла, имя файла сохраняется в title (чтобы не
+        теряться при непустом url). Пустой url (черновик) → текстовый
+        fallback `*filename*` (с подписью, если есть).
 
         Args:
             lines: Список строк для добавления
@@ -229,8 +247,12 @@ class MarkdownFormatter(BaseFormatter):
         """
         caption = item.get('caption', '')
         filename = item.get('filename', '')
+        url = item.get('url', '')
 
-        if caption:
+        if url:
+            alt = caption or filename
+            lines.append(f'![{alt}]({url} "{filename}")')
+        elif caption:
             lines.append(f"*{filename}* - {caption}")
         else:
             lines.append(f"*{filename}*")
