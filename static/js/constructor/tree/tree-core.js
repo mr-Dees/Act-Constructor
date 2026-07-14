@@ -454,29 +454,19 @@ export class TreeManager {
         let expandTargetId = null;
 
         if (key === 'ArrowUp') {
-            for (let i = idx - 1; i >= 0; i--) {
-                if (!TreeUtils.isPinnedTable(siblings[i])) {
-                    targetId = siblings[i].id;
-                    position = 'before';
-                    break;
-                }
+            const sibling = this._nearestNonPinnedSibling(siblings, idx, -1);
+            if (sibling) {
+                targetId = sibling.id;
+                position = 'before';
             }
         } else if (key === 'ArrowDown') {
-            for (let i = idx + 1; i < siblings.length; i++) {
-                if (!TreeUtils.isPinnedTable(siblings[i])) {
-                    targetId = siblings[i].id;
-                    position = 'after';
-                    break;
-                }
+            const sibling = this._nearestNonPinnedSibling(siblings, idx, 1);
+            if (sibling) {
+                targetId = sibling.id;
+                position = 'after';
             }
         } else if (key === 'ArrowRight') {
-            let prevSibling = null;
-            for (let i = idx - 1; i >= 0; i--) {
-                if (!TreeUtils.isPinnedTable(siblings[i])) {
-                    prevSibling = siblings[i];
-                    break;
-                }
-            }
+            const prevSibling = this._nearestNonPinnedSibling(siblings, idx, -1);
             if (prevSibling && this.dragDrop.canAcceptAsChild(prevSibling, node)) {
                 targetId = prevSibling.id;
                 position = 'child';
@@ -550,6 +540,21 @@ export class TreeManager {
         const list = this._allVisibleTreeItems();
         const idx = list.indexOf(li);
         return idx > 0 ? list[idx - 1] : null;
+    }
+
+    /**
+     * Ближайший не-закреплённый сосед в siblings от индекса idx в направлении step.
+     * @param {Array} siblings - Массив дочерних узлов
+     * @param {number} idx - Индекс исходного узла
+     * @param {number} step - Шаг направления: -1 (вверх/влево) или +1 (вниз)
+     * @returns {Object|null} Узел-сосед или null, если такого нет
+     * @private
+     */
+    _nearestNonPinnedSibling(siblings, idx, step) {
+        for (let i = idx + step; i >= 0 && i < siblings.length; i += step) {
+            if (!TreeUtils.isPinnedTable(siblings[i])) return siblings[i];
+        }
+        return null;
     }
 
     /**
