@@ -228,7 +228,10 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Добавляет элемент контента в указанную позицию
+     * Добавляет ОДИН элемент контента в указанную позицию (меню / текст-паста).
+     * Обёртка над _insertContentItemsBulk — единой точкой гейта лимита (#4)
+     * и read-only-guard'а (#1) для всех путей вставки.
+     *
      * @param {Object} violation - Объект нарушения
      * @param {string} type - Тип элемента ('case', 'image', 'freeText')
      * @param {HTMLElement} container - Контейнер содержимого
@@ -238,48 +241,73 @@ Object.assign(ViolationManager.prototype, {
      *          (режим просмотра или достигнут лимит элементов, #4)
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
-        // Единая точка вставки (контекстное меню / paste / DnD). Guard закрывает
-        // и программные пути добавления в режиме просмотра (#1).
+        // Фабрика создаёт только релевантные типу поля (violation-3):
+        // кейс/текст — content; картинка — url/caption/filename/width.
+        const newItem = createContentItem(type, insertIndex, extraData);
+        return this._insertContentItemsBulk(violation, container, insertIndex, [newItem]) > 0;
+    },
+
+    /**
+     * Вставляет пачку готовых элементов контента РАЗОМ: один splice, один
+     * renderContentItems, один updateBlock (#29). Единая точка гейтов для ВСЕХ
+     * путей приёма (меню / текст-паста / картинки paste/drop/upload):
+     *
+     * - read-only (#1): requireWrite-guard закрывает и программные пути;
+     * - лимит числа элементов (#4): вставляется ровно столько, сколько влезает
+     *   до maxItemsPerViolation; переполнение показывает ОДИН warning на всю
+     *   пачку, счётчик не завышается.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первого элемента
+     * @param {Object[]} items - Готовые элементы (createContentItem) в порядке вставки
+     * @returns {number} Сколько элементов реально вставлено (0 при отказе/лимите)
+     */
+    _insertContentItemsBulk(violation, container, insertIndex, items) {
+        // Guard закрывает и программные пути добавления в режиме просмотра (#1).
         const guard = ValidationCore.requireWrite('cannotAddContent');
-        if (guard) return false;
+        if (guard) return 0;
+
+        if (!items || items.length === 0) return 0;
 
         // Единый гейт лимита числа элементов для ЛЮБОГО типа контента (#4):
         // раньше лимит проверялся только для картинок, кейсы/текст добавлялись
         // без счёта, и бэкенд резал >50 элементов сразу на весь акт (422).
+        // Вставляем ровно столько, сколько влезает; переполнение — один warning.
         const maxItems = getImageLimits().maxItemsPerViolation;
-        if (violation.additionalContent.items.length >= maxItems) {
+        const available = Math.max(0, maxItems - violation.additionalContent.items.length);
+        const toInsert = available >= items.length ? items : items.slice(0, available);
+
+        if (toInsert.length < items.length) {
             Notifications.warning(
                 `Достигнут лимит элементов дополнительного контента на нарушение (${maxItems}).`,
             );
-            return false;
         }
 
-        // Фабрика создаёт только релевантные типу поля (violation-3):
-        // кейс/текст — content; картинка — url/caption/filename/width.
-        const newItem = createContentItem(type, insertIndex, extraData);
+        if (toInsert.length === 0) return 0;
 
-        // Вставляем элемент в нужную позицию
-        violation.additionalContent.items.splice(insertIndex, 0, newItem);
+        // Splice РАЗОМ на insertIndex — порядок элементов пачки сохраняется.
+        violation.additionalContent.items.splice(insertIndex, 0, ...toInsert);
 
-        // Обновляем порядок всех элементов
+        // Обновляем порядок всех элементов.
         violation.additionalContent.items.forEach((item, idx) => {
             item.order = idx;
         });
 
         const itemsContainer = container.querySelector('.additional-content-items');
 
-        // Сохраняем текущее состояние активности
+        // Сохраняем текущее состояние активности зоны.
         const wasActive = this.currentActiveContainer === container;
 
         this.renderContentItems(violation, itemsContainer);
 
-        // Восстанавливаем активность после перерисовки
+        // Восстанавливаем активность после перерисовки.
         if (wasActive) {
             this.currentActiveContainer = container;
         }
 
         PreviewManager.updateBlock('violation', violation.id);
-        return true;
+        return toInsert.length;
     },
 
     /**
@@ -330,30 +358,25 @@ Object.assign(ViolationManager.prototype, {
     async insertImageFilesInOrder(violation, container, insertIndex, files) {
         const results = await readFilesInOrder(files);
 
-        let addedCount = 0;
+        // Собираем элементы только из успешно прочитанных файлов, сохраняя
+        // порядок выбора (violation-4). Нечитаемые пропускаем с ошибкой.
+        const items = [];
         for (const result of results) {
             if (!result.ok) {
                 console.error('Ошибка при чтении файла:', result.file.name, result.error);
                 Notifications.error(`Ошибка при чтении ${result.file.name}`);
                 continue;
             }
-
-            const added = this.addContentItemAtPosition(
-                violation,
-                CONTENT_TYPE_IMAGE,
-                container,
-                insertIndex + addedCount,
-                {
-                    url: result.url,
-                    filename: result.file.name,
-                },
-            );
-            // Гейт лимита (#4) отказал — причина не исчезнет для оставшихся
-            // файлов пачки, дальше вставлять некуда: останавливаем цикл, не
-            // завышая addedCount (иначе success-тост соврёт про число вставленных).
-            if (!added) break;
-            addedCount++;
+            items.push(createContentItem(CONTENT_TYPE_IMAGE, insertIndex, {
+                url: result.url,
+                filename: result.file.name,
+            }));
         }
+
+        // Bulk-вставка (#29): один splice, один render, один updateBlock. Лимит
+        // (#4) и read-only (#1) — внутри _insertContentItemsBulk. addedCount
+        // отражает реально вставленное: при обрезке по лимиту тост не соврёт.
+        const addedCount = this._insertContentItemsBulk(violation, container, insertIndex, items);
 
         if (addedCount > 0) {
             const message = addedCount === 1

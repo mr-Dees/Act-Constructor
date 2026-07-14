@@ -3,14 +3,12 @@
  * Поддержка Ctrl+V для изображений и текста
  */
 
-import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
 import { AppConfig } from '../../shared/app-config.js';
 import {
     CONTENT_TYPE_CASE,
     CONTENT_TYPE_FREE_TEXT,
-    CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
 
 // Расширение ViolationManager
@@ -62,55 +60,36 @@ Object.assign(ViolationManager.prototype, {
                 ? this.cursorInsertPosition
                 : violation.additionalContent.items.length;
 
-            let hasImage = false;
-            let imageItem = null;
+            // Собираем ВСЕ картинки буфера (не только последнюю, #28) и
+            // отдельно наличие текста.
+            const imageFiles = [];
             let textItem = null;
 
-            // Сначала определяем, что есть в буфере
             for (let i = 0; i < items.length; i++) {
                 const item = items[i];
                 if (item.type.indexOf('image') !== -1) {
-                    hasImage = true;
-                    imageItem = item;
+                    const file = item.getAsFile();
+                    if (file) imageFiles.push(file);
                 } else if (item.type === 'text/plain') {
                     textItem = item;
                 }
             }
 
-            // Обрабатываем изображение если есть
-            if (hasImage && imageItem) {
+            // Картинки идут ТЕМ ЖЕ конвейером, что drop/upload (#28):
+            // filterAcceptedImageFiles → insertImageFilesInOrder (bulk, #29).
+            // Собственного FileReader и логики «только последняя картинка» больше нет.
+            if (imageFiles.length > 0) {
                 e.preventDefault();
-                const file = imageItem.getAsFile();
 
-                if (file) {
-                    // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
-                    const accepted = this.filterAcceptedImageFiles([file], violation);
-                    if (accepted.length === 0) return;
+                // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
+                const accepted = this.filterAcceptedImageFiles(imageFiles, violation);
+                if (accepted.length === 0) return;
 
-                    const reader = new FileReader();
-
-                    reader.onload = (event) => {
-                        const timestamp = Date.now();
-                        const extension = file.type.split('/')[1] || 'png';
-                        const filename = `pasted_image_${timestamp}.${extension}`;
-
-                        this.addContentItemAtPosition(violation, CONTENT_TYPE_IMAGE, targetContainer, insertIndex, {
-                            url: event.target.result,
-                            filename: filename
-                        });
-
-                        Notifications.success('Изображение добавлено из буфера обмена');
-                    };
-
-                    reader.onerror = (error) => {
-                        console.error('Error reading image:', error);
-                        Notifications.error('Ошибка при чтении изображения');
-                    };
-
-                    reader.readAsDataURL(file);
-                }
+                // insertIndex зафиксирован синхронно ДО async-чтения (приемлемо);
+                // тост об успехе с верным числом покажет insertImageFilesInOrder.
+                this.insertImageFilesInOrder(violation, targetContainer, insertIndex, accepted);
             }
-            // Обрабатываем текст только если нет изображения
+            // Текст обрабатываем только если картинок в буфере нет.
             else if (textItem) {
                 const textContent = e.clipboardData.getData('text/plain').trim();
 
@@ -137,16 +116,15 @@ Object.assign(ViolationManager.prototype, {
                         message = 'Текст добавлен из буфера обмена';
                     }
 
-                    // Добавляем элемент в определенную позицию. Единый гейт лимита
-                    // (#4) уже мог отказать (Notifications.warning показан внутри) —
-                    // тогда false, и updateBlock/success не зовём, чтобы не
-                    // подтверждать вставку, которой не произошло.
+                    // Единый гейт лимита (#4) уже мог отказать (Notifications.warning
+                    // показан внутри) — тогда false, и success не зовём, чтобы не
+                    // подтверждать вставку, которой не произошло. updateBlock делает
+                    // сама addContentItemAtPosition — без двойного апдейта (#29).
                     const added = this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
                         content: content
                     });
                     if (!added) return;
 
-                    PreviewManager.updateBlock('violation', violation.id);
                     Notifications.success(message);
                 }
             }
