@@ -2,7 +2,6 @@
  * Управление нарушениями в документе
  * Создает и обрабатывает интерактивные формы для ввода нарушений
  */
-import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -144,12 +143,11 @@ export class ViolationManager {
             violatedTextarea.readOnly = true;
             violatedTextarea.classList.add('read-only');
         } else {
-            // Настраиваем обработку клавиш для сохранения изменений
+            // Настраиваем обработку клавиш для сохранения изменений.
+            // Аудит правки фиксируется diff-ом при сохранении (violation-audit.js),
+            // а не per-keystroke — отдельная запись в журнал здесь не нужна.
             this.setupTextareaHandlers(violatedTextarea, (value) => {
                 this.setViolationField(violation, 'violated', value);
-                if (typeof ChangelogTracker !== 'undefined') {
-                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
-                }
             });
         }
 
@@ -175,12 +173,10 @@ export class ViolationManager {
             establishedTextarea.readOnly = true;
             establishedTextarea.classList.add('read-only');
         } else {
-            // Настраиваем обработку клавиш для сохранения изменений
+            // Настраиваем обработку клавиш для сохранения изменений.
+            // Аудит правки — diff при сохранении (violation-audit.js), не per-keystroke.
             this.setupTextareaHandlers(establishedTextarea, (value) => {
                 this.setViolationField(violation, 'established', value);
-                if (typeof ChangelogTracker !== 'undefined') {
-                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
-                }
             });
         }
 
