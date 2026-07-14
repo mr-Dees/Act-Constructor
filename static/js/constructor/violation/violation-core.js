@@ -86,6 +86,14 @@ export class ViolationManager {
             controller.abort();
             this._fileDropControllers.delete(violationId);
         }
+
+        // #23: активная зона вставки принадлежала удаляемому нарушению — сбрасываем
+        // её (иначе paste/ESC работали бы с зоной уже несуществующего нарушения).
+        const owner = this.currentActiveContainer?.querySelector?.('.additional-content-items')
+            ?.dataset?.violationId;
+        if (owner === violationId) {
+            this._resetActiveZone();
+        }
     }
 
     /**

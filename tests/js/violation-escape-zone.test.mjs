@@ -84,3 +84,44 @@ test('destroy() снимает хэндлер зоны со стека', () => {
     assert.equal(EscapeStack.size(), 0);
     assert.equal(vm.currentActiveContainer, null);
 });
+
+// ── removeViolation: сброс активной зоны при удалении нарушения (#23) ──────────
+
+/** Контейнер с рабочим querySelector('.additional-content-items').dataset.violationId. */
+function makeZone(violationId) {
+    const itemsContainer = { dataset: { violationId } };
+    return { querySelector: (s) => (s === '.additional-content-items' ? itemsContainer : null) };
+}
+
+test('#23: removeViolation сбрасывает активную зону, если она принадлежала удаляемому нарушению', () => {
+    drainStack();
+    const vm = new ViolationManager();
+    vm._setActiveZone(makeZone('v1'));
+    assert.equal(EscapeStack.size(), 1);
+
+    vm.removeViolation('v1');
+
+    assert.equal(vm.currentActiveContainer, null, 'активная зона сброшена');
+    assert.equal(vm.cursorInsertPosition, null);
+    assert.equal(EscapeStack.size(), 0, 'ESC-хэндлер снят со стека');
+});
+
+test('#23: removeViolation ЧУЖОГО нарушения не трогает активную зону текущего', () => {
+    drainStack();
+    const vm = new ViolationManager();
+    const zone = makeZone('v1');
+    vm._setActiveZone(zone);
+
+    vm.removeViolation('v2');
+
+    assert.equal(vm.currentActiveContainer, zone, 'зона другого нарушения не сброшена');
+    assert.equal(EscapeStack.size(), 1);
+});
+
+test('#23: removeViolation без активной зоны не падает', () => {
+    drainStack();
+    const vm = new ViolationManager();
+
+    assert.doesNotThrow(() => vm.removeViolation('v1'));
+    assert.equal(vm.currentActiveContainer, null);
+});
