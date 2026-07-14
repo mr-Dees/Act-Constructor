@@ -10,7 +10,7 @@ from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
 from .tree_walker import WalkContext, collect_blocks, walk
-from .utils import HTMLUtils, TableUtils
+from .utils import HTMLUtils, MarkdownUtils, TableUtils
 
 
 class MarkdownFormatter(BaseFormatter):
@@ -243,9 +243,9 @@ class MarkdownFormatter(BaseFormatter):
         fallback `*filename*` (с подписью, если есть).
 
         filename/caption хранятся дословно (без bleach, T4) — экранируем их
-        под MD-синтаксис картинки, иначе `"` в filename разрывает title, а
-        `]`/перевод строки в alt ломает разметку: `"` → `\"`, `]` → `\]`,
-        переводы строк → пробел (однострочный MD-синтаксис).
+        через MarkdownUtils.escape_inline (backslash экранируется первым,
+        иначе `\]`/`\"` в тексте пользователя гасят экранирование и позволяют
+        «впрыснуть» поддельную ссылку/картинку в экспорт, #7).
 
         Args:
             lines: Список строк для добавления
@@ -256,13 +256,16 @@ class MarkdownFormatter(BaseFormatter):
         url = item.get('url', '')
 
         if url:
-            alt = (caption or filename).replace('\r', ' ').replace('\n', ' ').replace(']', '\\]')
-            title = filename.replace('\r', ' ').replace('\n', ' ').replace('"', '\\"')
+            alt = MarkdownUtils.escape_inline(caption or filename, '[]')
+            title = MarkdownUtils.escape_inline(filename, '"')
             lines.append(f'![{alt}]({url} "{title}")')
         elif caption:
-            lines.append(f"*{filename}* - {caption}")
+            caption_esc = MarkdownUtils.escape_inline(caption, '*[]')
+            filename_esc = MarkdownUtils.escape_inline(filename, '*[]')
+            lines.append(f"*{filename_esc}* - {caption_esc}")
         else:
-            lines.append(f"*{filename}*")
+            filename_esc = MarkdownUtils.escape_inline(filename, '*[]')
+            lines.append(f"*{filename_esc}*")
         lines.append("")
 
     def _add_free_text(self, lines: list[str], item: dict):
