@@ -2,7 +2,6 @@
  * Обработчик контекстного меню для нарушений
  */
 import { ContextMenuManager } from './context-menu-core.js';
-import { PreviewManager } from '../preview/preview.js';
 import {
     CONTENT_TYPE_CASE,
     CONTENT_TYPE_FREE_TEXT,
@@ -173,20 +172,9 @@ export class ViolationContextMenu {
     handleDelete(violation, itemId, contentContainer) {
         if (!violation || !itemId || !contentContainer) return;
 
-        const itemIndex = violation.additionalContent.items.findIndex(
-            item => item.id === itemId
-        );
-
-        if (itemIndex === -1) return;
-
-        violation.additionalContent.items.splice(itemIndex, 1);
-
-        const itemsContainer = contentContainer.querySelector('.additional-content-items');
-        if (itemsContainer && violationManager?.renderContentItems) {
-            violationManager.renderContentItems(violation, itemsContainer);
-        }
-
-        PreviewManager?.update?.();
+        // Гейт read-only (#11) — внутри removeContentItem, тем же
+        // guard'ом, что и остальные мутации нарушения.
+        violationManager?.removeContentItem?.(violation, itemId, contentContainer);
     }
 
     removeExistingMenu() {

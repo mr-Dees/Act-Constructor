@@ -314,6 +314,39 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
+     * Удаляет ОДИН элемент дополнительного контента (меню «Удалить», #11).
+     * Раньше сплайс в context-menu-violation.js шёл БЕЗ read-only-guard'а:
+     * безопасно было только потому, что пункт меню не рендерится в режиме
+     * просмотра. Теперь гейт есть здесь — defense-in-depth для программных
+     * путей, как у остальных мутаций нарушения.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {string} itemId - id удаляемого элемента (additionalContent.items[].id)
+     * @param {HTMLElement} container - Контейнер содержимого (contentContainer)
+     * @returns {boolean} true — удалено; false — заблокировано read-only
+     *          либо элемент с таким id не найден
+     */
+    removeContentItem(violation, itemId, container) {
+        const guard = ValidationCore.requireWrite('cannotEdit');
+        if (guard) return false;
+
+        const itemIndex = violation.additionalContent.items.findIndex(
+            item => item.id === itemId
+        );
+        if (itemIndex === -1) return false;
+
+        violation.additionalContent.items.splice(itemIndex, 1);
+
+        const itemsContainer = container.querySelector('.additional-content-items');
+        if (itemsContainer) {
+            this.renderContentItems(violation, itemsContainer);
+        }
+
+        PreviewManager.updateBlock('violation', violation.id);
+        return true;
+    },
+
+    /**
      * Валидирует ТИП пачки файлов ДО чтения (H6/#26).
      *
      * Общая точка для всех трёх способов приёма (выбор файлов, drag&drop,
