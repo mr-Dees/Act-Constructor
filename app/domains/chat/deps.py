@@ -92,6 +92,15 @@ def get_chat_settings() -> ChatDomainSettings:
     return get_domain_settings("chat", ChatDomainSettings)
 
 
+def get_text_corrector_service():
+    """DI-фабрика корректора (Фича «Корректор»). БД не требуется — чистый LLM-вызов."""
+    from app.domains.chat.services.text_actions.corrector_service import (
+        TextCorrectorService,
+    )
+
+    return TextCorrectorService(get_chat_settings())
+
+
 def get_rate_limiter() -> UserRateLimiter:
     """Возвращает singleton UserRateLimiter с лимитом из текущих настроек.
 

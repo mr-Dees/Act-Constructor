@@ -99,3 +99,9 @@ class ChatRateLimitError(AppError):
         super().__init__(message)
         self.retry_after_sec = retry_after_sec
         self.extra = {"retry_after_sec": retry_after_sec}
+
+
+class TextActionValidationError(AppError):
+    """Текст для text-action не проходит валидацию (пустой или слишком длинный)."""
+    status_code = 422
+    code: ClassVar[str] = "text-action-validation"
