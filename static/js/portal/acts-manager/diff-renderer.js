@@ -4,7 +4,7 @@
  */
 import { SafeHTML, renderActContent } from '../../shared/sanitize.js';
 import { iterateVisibleCells } from '../../constructor/table/grid-merges.js';
-import { CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../../constructor/violation/violation-fields.js';
+import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../../constructor/violation/violation-fields.js';
 import { computeAdditionalContentNumbers } from '../../constructor/violation/violation-numbering.js';
 import { CONTENT_TYPE_CASE, CONTENT_TYPE_IMAGE } from '../../constructor/violation/violation-content-item.js';
 import { renderImageWithFallback, buildImagePlaceholder } from '../../constructor/violation/violation-image-render.js';
@@ -338,12 +338,6 @@ export class DiffRenderer {
         const div = document.createElement('div');
         div.className = `diff-violation diff-${violDiff.status}`;
 
-        const fieldLabels = {
-            violated: 'Нарушено', established: 'Установлено',
-            reasons: 'Причины', consequences: 'Последствия',
-            responsible: 'Ответственные', recommendations: 'Рекомендации',
-        };
-
         const data = violDiff.newData || violDiff.oldData;
         if (!data) return;
 
@@ -357,7 +351,7 @@ export class DiffRenderer {
             fieldDiv.className = 'diff-violation-field';
 
             const labelEl = document.createElement('strong');
-            labelEl.textContent = `${fieldLabels[field] || field}: `;
+            labelEl.textContent = `${VIOLATION_LABELS[field] || field}: `;
             fieldDiv.appendChild(labelEl);
 
             if (violDiff.fieldDiffs?.[field]?.changed) {

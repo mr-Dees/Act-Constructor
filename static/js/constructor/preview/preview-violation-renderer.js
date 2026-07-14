@@ -7,7 +7,10 @@
  * responsible и шаблоны кейс/свободный-текст берутся из контракта
  * violation-fields.js (Task 1); остальные подписи-ярлыки — превью-стилем.
  * Q1: пустые поля рендерятся как «метка + пустое тело», без «—» и без
- * фильтрации по trim() (ядро/кейсы/свободный текст/пункты списка).
+ * фильтрации по trim() (ядро/кейсы/пункты списка — у них есть метка/маркер).
+ * Исключение — свободный текст (freeText): у него нет метки, поэтому пустой
+ * freeText — буквально нечего рендерить; паритет с DOCX/MD/TXT, которые его
+ * пропускают (см. collectViolationLines).
  */
 import { getImageLimits } from '../violation/violation-image-validator.js';
 import {
@@ -19,8 +22,19 @@ import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../viola
 import { computeAdditionalContentNumbers } from '../violation/violation-numbering.js';
 import { buildImagePlaceholder, renderImageWithFallback } from '../violation/violation-image-render.js';
 
-/** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
+/** Высота листа A4 в мм (Б-1.6). */
 const SHEET_HEIGHT_MM = 297;
+/**
+ * Поля листа сверху/снизу в мм — как в preview-page.css (.preview-sheet
+ * padding: 10mm ...) и в DOCX (styles.Margins.top/bottom = 567 твипов ≈ 10мм).
+ */
+const PAGE_MARGIN_VERTICAL_MM = 10;
+/**
+ * Полезная высота листа (без полей) — база для image_max_height_percent (#13).
+ * Паритет с DOCX _USABLE_HEIGHT_TWIPS (docx/builders/violation.py): тот же
+ * процент должен давать ту же физическую высоту картинки в превью и в Word.
+ */
+const USABLE_HEIGHT_MM = SHEET_HEIGHT_MM - 2 * PAGE_MARGIN_VERTICAL_MM;
 
 /**
  * Чистая модель строк нарушения — полные тексты, как в DOCX.
@@ -59,7 +73,11 @@ export function collectViolationLines(violation) {
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 lines.push({ type: 'image', item });
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
-                lines.push({ type: 'line', label: FREE_TEXT_LABEL, text: item.content || '', small: true });
+                // Пустой freeText не имеет метки — у него нет что рендерить
+                // (паритет с DOCX/MD/TXT, которые пустой freeText пропускают).
+                if (item.content?.trim()) {
+                    lines.push({ type: 'line', label: FREE_TEXT_LABEL, text: item.content, small: true });
+                }
             }
         });
     }
@@ -89,7 +107,7 @@ export function collectViolationLines(violation) {
  */
 export function imagePresentationStyle(item, imageMaxHeightPercent) {
     const width = item && item.width > 0 ? `${item.width}%` : '';
-    const heightMm = SHEET_HEIGHT_MM * (imageMaxHeightPercent || 40) / 100;
+    const heightMm = USABLE_HEIGHT_MM * (imageMaxHeightPercent || 40) / 100;
     // Округление до 0.1 мм, без хвоста «.0».
     const maxHeight = `${parseFloat(heightMm.toFixed(1))}mm`;
     return { width, maxHeight };

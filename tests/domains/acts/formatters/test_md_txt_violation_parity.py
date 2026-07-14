@@ -148,6 +148,30 @@ def test_markdown_image_empty_url_falls_back_to_filename():
     assert "![" not in out
 
 
+def test_markdown_image_filename_with_quote_escaped_in_title():
+    """Дословный (без bleach, T4) filename с `"` не должен разрывать title."""
+    v = _violation_with_items([{
+        "type": "image",
+        "url": "data:image/png;base64,AAAA",
+        "caption": "Подпись",
+        "filename": 'pic "one".png',
+    }])
+    out = _md()._format_violation(v)
+    assert '![Подпись](data:image/png;base64,AAAA "pic \\"one\\".png")' in out
+
+
+def test_markdown_image_caption_with_bracket_escaped_in_alt():
+    """Дословная caption с `]` не должна преждевременно закрывать alt-текст."""
+    v = _violation_with_items([{
+        "type": "image",
+        "url": "data:image/png;base64,AAAA",
+        "caption": "рост] на 10%",
+        "filename": "pic.png",
+    }])
+    out = _md()._format_violation(v)
+    assert '![рост\\] на 10%](data:image/png;base64,AAAA "pic.png")' in out
+
+
 # --- TXT: те же правила #9/#14 (картинка #16 в TXT не трогается) ---
 
 

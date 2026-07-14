@@ -234,13 +234,18 @@ class MarkdownFormatter(BaseFormatter):
         return case_number + 1
 
     def _add_image(self, lines: list[str], item: dict):
-        """
+        r"""
         Встраивает картинку (#16).
 
         При непустом url — markdown-изображение `![alt](url "filename")`:
         alt = подпись или имя файла, имя файла сохраняется в title (чтобы не
         теряться при непустом url). Пустой url (черновик) → текстовый
         fallback `*filename*` (с подписью, если есть).
+
+        filename/caption хранятся дословно (без bleach, T4) — экранируем их
+        под MD-синтаксис картинки, иначе `"` в filename разрывает title, а
+        `]`/перевод строки в alt ломает разметку: `"` → `\"`, `]` → `\]`,
+        переводы строк → пробел (однострочный MD-синтаксис).
 
         Args:
             lines: Список строк для добавления
@@ -251,8 +256,9 @@ class MarkdownFormatter(BaseFormatter):
         url = item.get('url', '')
 
         if url:
-            alt = caption or filename
-            lines.append(f'![{alt}]({url} "{filename}")')
+            alt = (caption or filename).replace('\r', ' ').replace('\n', ' ').replace(']', '\\]')
+            title = filename.replace('\r', ' ').replace('\n', ' ').replace('"', '\\"')
+            lines.append(f'![{alt}]({url} "{title}")')
         elif caption:
             lines.append(f"*{filename}* - {caption}")
         else:
