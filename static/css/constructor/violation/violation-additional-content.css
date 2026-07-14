@@ -245,6 +245,15 @@
     -webkit-user-drag: none;
 }
 
+/* Плейсхолдер битой картинки (#27) — заменяет .image-preview при onerror */
+.image-preview-placeholder {
+    color: var(--text-tertiary);
+    font-style: italic;
+    font-size: var(--font-size-sm);
+    text-align: center;
+    padding: var(--spacing-sm);
+}
+
 /* Имя файла изображения */
 .image-filename {
     font-size: var(--font-size-xs);

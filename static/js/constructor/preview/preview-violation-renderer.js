@@ -17,6 +17,7 @@ import {
 } from '../violation/violation-content-item.js';
 import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../violation/violation-fields.js';
 import { computeAdditionalContentNumbers } from '../violation/violation-numbering.js';
+import { buildImagePlaceholder, renderImageWithFallback } from '../violation/violation-image-render.js';
 
 /** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
 const SHEET_HEIGHT_MM = 297;
@@ -173,38 +174,37 @@ export class PreviewViolationRenderer {
     static _addImage(container, item) {
         const wrap = document.createElement('div');
         wrap.className = 'preview-violation-image-wrap';
+        const placeholderText = `Изображение: ${item.filename || ''}`;
+        const placeholderClassName = 'preview-violation-line preview-violation-line--small';
 
         if (!item.url) {
             // Пустой url (черновик) → плейсхолдер, как в DOCX/MD/TXT.
-            const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line preview-violation-line--small';
-            placeholder.textContent = `Изображение: ${item.filename || ''}`;
-            wrap.appendChild(placeholder);
+            wrap.appendChild(buildImagePlaceholder(placeholderText, placeholderClassName));
             container.appendChild(wrap);
             this._appendCaption(container, item);
             return;
         }
 
-        const img = document.createElement('img');
-        img.className = 'preview-violation-image';
-        img.alt = item.caption || item.filename || '';
         const style = imagePresentationStyle(item, getImageLimits().imageMaxHeightPercent);
-        // Явная ширина — рендерим ровно как DOCX (_scale_picture задаёт только
-        // ширину, без потолка высоты). Авторазмер (width=0) — ограничиваем
-        // высоту долей листа, чтобы огромная картинка не разнесла скролл (Б-1.6).
-        if (style.width) {
-            img.style.width = style.width;
-        } else {
-            img.style.maxHeight = style.maxHeight;
-        }
-        img.onerror = () => {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line preview-violation-line--small';
-            placeholder.textContent = `Изображение: ${item.filename || ''}`;
-            wrap.replaceChildren(placeholder);
-        };
-        img.src = item.url;
-        wrap.appendChild(img);
+        // #27: onerror ДО src + текст-плейсхолдер при битой картинке — общее
+        // ядро с редактором (violation-rendering.js).
+        renderImageWithFallback(wrap, {
+            src: item.url,
+            alt: item.caption || item.filename || '',
+            imgClassName: 'preview-violation-image',
+            placeholderText,
+            placeholderClassName,
+            configureImg: (img) => {
+                // Явная ширина задаёт width; потолок высоты
+                // (image_max_height_percent) применяется ВСЕГДА — и при явной
+                // ширине, и при авторазмере (#13). Паритет с DOCX
+                // _scale_picture, который досжимает по высоте в обеих ветках.
+                if (style.width) {
+                    img.style.width = style.width;
+                }
+                img.style.maxHeight = style.maxHeight;
+            },
+        });
         container.appendChild(wrap);
         this._appendCaption(container, item);
     }

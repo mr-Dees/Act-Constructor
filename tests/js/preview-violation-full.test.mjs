@@ -224,12 +224,12 @@ test('нулевой/отсутствующий процент высоты → 
     assert.equal(imagePresentationStyle({}, undefined).maxHeight, '118.8mm');
 });
 
-// --- применённый стиль <img> (FINDING 6 / Б-1.6): явная ширина = как DOCX ---
+// --- применённый стиль <img> (FINDING 6 / Б-1.6, #13): паритет с DOCX ---
 
-test('явная ширина → задаётся только width, без потолка высоты (паритет DOCX)', () => {
+test('явная ширина → задаётся И width, И потолок высоты (#13, паритет с DOCX _scale_picture)', () => {
     const style = renderImageStyle({ type: 'image', url: 'data:image/png;base64,AAAA', width: 50, filename: 'x.png' });
     assert.equal(style.width, '50%');
-    assert.equal(style.maxHeight, undefined, 'explicit-width картинка не должна получать maxHeight');
+    assert.equal(style.maxHeight, '118.8mm', 'explicit-width картинка тоже ограничена по высоте, как в DOCX');
 });
 
 test('авторазмер (width=0) → задаётся maxHeight, ширина не фиксируется', () => {

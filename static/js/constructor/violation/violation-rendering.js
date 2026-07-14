@@ -11,6 +11,7 @@ import {
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
+import { renderImageWithFallback } from './violation-image-render.js';
 
 /**
  * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
@@ -185,17 +186,20 @@ Object.assign(ViolationManager.prototype, {
         const imgContainer = document.createElement('div');
         imgContainer.className = 'image-preview-container';
 
-        const img = document.createElement('img');
-        img.src = item.url;
-        img.alt = item.caption || item.filename;
-        img.className = 'image-preview';
-
-        // Запрещаем перетаскивание самого изображения
-        img.draggable = false;
-        img.style.pointerEvents = 'none';
-        img.style.userSelect = 'none';
-
-        imgContainer.appendChild(img);
+        // #27: onerror ДО src + текст-плейсхолдер при битой картинке (зеркалит превью).
+        renderImageWithFallback(imgContainer, {
+            src: item.url,
+            alt: item.caption || item.filename,
+            imgClassName: 'image-preview',
+            placeholderText: `Изображение: ${item.filename}`,
+            placeholderClassName: 'image-preview-placeholder',
+            configureImg: (img) => {
+                // Запрещаем перетаскивание самого изображения
+                img.draggable = false;
+                img.style.pointerEvents = 'none';
+                img.style.userSelect = 'none';
+            },
+        });
 
         const filenameDiv = document.createElement('div');
         filenameDiv.className = 'image-filename';
