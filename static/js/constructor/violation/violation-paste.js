@@ -65,15 +65,20 @@ Object.assign(ViolationManager.prototype, {
             // Глобальный слушатель живёт всегда — guard именно здесь обязателен.
             if (AppConfig.readOnlyMode?.isReadOnly) return;
 
-            // Проверяем, есть ли текущий активный контейнер
-            if (!this.currentActiveContainer) {
-                return;
-            }
+            // Стандартную вставку в поля ввода и contenteditable-редактор
+            // (текстблок) не перехватываем — даже если мышь/фокус рядом с зоной
+            // нарушения (#19). Без этого Ctrl+V в текстблоке уходил бы в
+            // дополнительный контент по hover-модели.
+            if (pasteTargetIsEditable(e.target)) return;
 
-            // Если вставка происходит в textarea или input внутри дополнительного контента —
-            // не перехватываем, позволяем стандартное поведение браузера
-            const target = e.target;
-            if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+            // Целевую зону определяем по ФОКУСУ (activeElement), а НЕ по hover (#19):
+            // hover-модель (currentActiveContainer/cursorInsertPosition) осталась
+            // только для визуального индикатора позиции при drag файлов. Контейнер
+            // зоны focusable (tabindex=0) — клик по нему даёт фокус.
+            const targetContainer = document.activeElement && document.activeElement.closest
+                ? document.activeElement.closest('.additional-content-wrapper')
+                : null;
+            if (!targetContainer) {
                 return;
             }
 
@@ -83,7 +88,6 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            const targetContainer = this.currentActiveContainer;
             const itemsContainer = targetContainer.querySelector('.additional-content-items');
             const violationId = itemsContainer?.dataset.violationId;
 
@@ -98,10 +102,9 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            // Определяем позицию вставки на основе положения курсора
-            const insertIndex = this.cursorInsertPosition !== null
-                ? this.cursorInsertPosition
-                : violation.additionalContent.items.length;
+            // Под focus-моделью вставляем в КОНЕЦ зоны (#19): позиция курсора мыши
+            // неактуальна — вставка инициирована с клавиатуры по фокусу.
+            const insertIndex = violation.additionalContent.items.length;
 
             // Собираем ВСЕ картинки буфера (не только последнюю, #28) и
             // отдельно наличие текста.
