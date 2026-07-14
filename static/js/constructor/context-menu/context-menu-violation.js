@@ -181,11 +181,6 @@ export class ViolationContextMenu {
 
         violation.additionalContent.items.splice(itemIndex, 1);
 
-        // Переиндексируем order
-        violation.additionalContent.items.forEach((item, idx) => {
-            item.order = idx;
-        });
-
         const itemsContainer = contentContainer.querySelector('.additional-content-items');
         if (itemsContainer && violationManager?.renderContentItems) {
             violationManager.renderContentItems(violation, itemsContainer);

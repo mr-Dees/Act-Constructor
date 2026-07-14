@@ -507,7 +507,7 @@ class TestRestoreVersionPreSnapshot:
                     "additionalContent": {"enabled": True, "items": [
                         {"id": "i1", "type": "image", "url": "data:image/png;base64,AAAA",
                          "content": "", "caption": "<b>подпись</b>",
-                         "filename": "<script>f</script>имя.png", "order": 0},
+                         "filename": "<script>f</script>имя.png"},
                     ]},
                     "reasons": {"enabled": True, "content": "<svg onload=x></svg>причина"},
                 },

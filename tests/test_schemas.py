@@ -397,6 +397,31 @@ class TestViolationAdditionalContentItemsLimit:
             )
 
 
+# ── ViolationContentItemSchema: устаревшее поле order (#24) ──
+
+
+class TestViolationContentItemLegacyOrder:
+    """Директива владельца: поле order вырезано из модели (#24).
+
+    Порядок элемента задаётся позицией в списке items, order был write-only
+    дублем (фронт писал, никто не читал). Старые сохранённые акты хранят его
+    в content-JSON — загрузка/PUT такого акта не должна падать при
+    extra="forbid" (before-валидатор молча выкидывает ключ).
+    """
+
+    def test_legacy_order_key_ignored(self):
+        item = ViolationContentItemSchema.model_validate({
+            "id": "i1", "type": "case", "content": "текст", "order": 3,
+        })
+        assert "order" not in item.model_dump()
+        assert item.content == "текст"
+
+    def test_other_unknown_field_still_rejected(self):
+        # extra="forbid" сохранён: выкидывается только известное легаси-поле.
+        with pytest.raises(ValidationError, match="junk"):
+            ViolationContentItemSchema(id="i1", type="case", junk=1)
+
+
 # ── TextBlockSchema: устаревшее поле formatting ──
 
 

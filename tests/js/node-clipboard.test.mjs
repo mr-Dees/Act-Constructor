@@ -468,7 +468,7 @@ test('КП-5: вставка отклонена при превышении ли
     const bigUrl = 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
-        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
+        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl }],
     };
 
     assert.ok(NodeClipboard.copyNode(src.id));
@@ -491,7 +491,7 @@ test('КП-5: copyNode отклоняет фрагмент с картинкам
     const bigUrl = 'data:image/png;base64,' + 'A'.repeat(8 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
-        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
+        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl }],
     };
 
     // Шпион за setItem: при отказе он не должен вызываться.

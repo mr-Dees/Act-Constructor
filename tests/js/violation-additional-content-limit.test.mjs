@@ -51,7 +51,7 @@ function reset(maxItemsPerViolation) {
 
 /** Минимальный существующий элемент (тип роли не играет для гейта). */
 function existingItem(id, type = CONTENT_TYPE_CASE) {
-    return { id, type, order: 0, content: '' };
+    return { id, type, content: '' };
 }
 
 function makeViolation(items) {

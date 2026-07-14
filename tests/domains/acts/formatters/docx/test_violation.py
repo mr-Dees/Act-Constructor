@@ -147,7 +147,7 @@ def test_labels_are_underlined(doc):
 def _img_item(**overrides):
     base = dict(
         id="img1", type="image", url=_PNG_1PX_DATA_URL,
-        caption="", filename="screen.png", order=0,
+        caption="", filename="screen.png",
     )
     base.update(overrides)
     return ViolationContentItemSchema(**base)

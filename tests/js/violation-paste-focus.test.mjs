@@ -47,7 +47,7 @@ test('pasteTargetIsEditable: textarea/input/contenteditable → true, проче
 
 function makeViolation(count) {
     const items = [];
-    for (let i = 0; i < count; i++) items.push({ id: `x${i}`, type: 'freeText', content: '', order: i });
+    for (let i = 0; i < count; i++) items.push({ id: `x${i}`, type: 'freeText', content: '' });
     return { id: 'v1', additionalContent: { enabled: true, items } };
 }
 

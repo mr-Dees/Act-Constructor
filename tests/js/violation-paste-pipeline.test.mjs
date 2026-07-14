@@ -216,7 +216,7 @@ test('#4 insertImageFilesInOrder: пачка сверх лимита → вст�
     reset(2);
     const vm = new ViolationManager();
     const violation = makeViolation([
-        { id: 'x0', type: CONTENT_TYPE_IMAGE, order: 0, url: 'data:x', filename: 'x0.png' },
+        { id: 'x0', type: CONTENT_TYPE_IMAGE, url: 'data:x', filename: 'x0.png' },
     ]);
     const container = makeContainer();
 

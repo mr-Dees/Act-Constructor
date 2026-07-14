@@ -21,10 +21,11 @@ export const CONTENT_TYPE_FREE_TEXT = 'freeText';
 /**
  * Создаёт элемент дополнительного контента только с релевантными типу полями:
  * кейс/текст — content; картинка — url/caption/filename/width. Лишние поля
- * не присваиваются (бэк-схема дозаполняет дефолтами при валидации).
+ * не присваиваются (бэк-схема дозаполняет дефолтами при валидации). Порядок
+ * элемента задаётся позицией в массиве additionalContent.items — отдельного
+ * поля order нет (#24, убрано как write-only дубль).
  *
  * @param {string} type - Тип элемента (CONTENT_TYPE_*)
- * @param {number} order - Порядковый номер (позиция вставки)
  * @param {Object} [extraData] - Дополнительные данные элемента
  * @param {string} [extraData.content] - Текст (для case и freeText)
  * @param {string} [extraData.url] - data-URL картинки (для image)
@@ -33,11 +34,10 @@ export const CONTENT_TYPE_FREE_TEXT = 'freeText';
  *        (0 — авто, Б-1.4)
  * @returns {Object} Новый элемент контента
  */
-export function createContentItem(type, order, extraData = {}) {
+export function createContentItem(type, extraData = {}) {
     const item = {
         id: `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type,
-        order,
     };
 
     if (type === CONTENT_TYPE_IMAGE) {

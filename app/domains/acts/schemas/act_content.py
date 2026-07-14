@@ -419,7 +419,6 @@ class ViolationContentItemSchema(BaseModel):
         url: URL изображения (для image)
         caption: Подпись изображения (для image)
         filename: Имя файла (для image)
-        order: Порядок отображения
         width: Ширина изображения в процентах полезной ширины страницы
     """
     model_config = ConfigDict(extra="forbid")
@@ -430,11 +429,24 @@ class ViolationContentItemSchema(BaseModel):
     url: str = Field(default="", description="URL изображения")
     caption: str = Field(default="", description="Подпись изображения")
     filename: str = Field(default="", description="Имя файла")
-    order: int = Field(default=0, ge=0, description="Порядок")
     width: int = Field(
         default=0, ge=0, le=100,
         description="Ширина изображения, % полезной ширины страницы (0 — авто)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_order(cls, data):
+        """Отбрасывает устаревшее поле order (директива владельца, #24).
+
+        Порядок элемента задаётся позицией в списке items, order был
+        write-only дублем (фронт писал, никто не читал). В ранее сохранённых
+        актах ещё встречается — при extra="forbid" его наличие уронило бы
+        restore/PUT такого акта. Молча выкидываем; новые сохранения его не пишут.
+        """
+        if isinstance(data, dict):
+            data.pop("order", None)
+        return data
 
     @model_validator(mode="after")
     def validate_image_url(self) -> "ViolationContentItemSchema":

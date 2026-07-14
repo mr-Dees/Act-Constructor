@@ -39,16 +39,15 @@ const goldenViolation = {
     additionalContent: {
         enabled: true,
         items: [
-            { id: 'ac1', type: 'case', content: 'GOLDEN_V_CASE_1', order: 0 },
-            { id: 'ac2', type: 'case', content: 'GOLDEN_V_CASE_2', order: 1 },
-            { id: 'ac3', type: 'freeText', content: 'GOLDEN_V_FREETEXT', order: 2 },
+            { id: 'ac1', type: 'case', content: 'GOLDEN_V_CASE_1' },
+            { id: 'ac2', type: 'case', content: 'GOLDEN_V_CASE_2' },
+            { id: 'ac3', type: 'freeText', content: 'GOLDEN_V_FREETEXT' },
             {
                 id: 'ac4',
                 type: 'image',
                 url: GOLDEN_PNG_DATA_URL,
                 caption: 'GOLDEN_V_IMG_CAPTION',
                 filename: 'golden_image.png',
-                order: 3,
                 width: 50,
             },
         ],

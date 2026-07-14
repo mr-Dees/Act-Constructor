@@ -250,7 +250,7 @@ Object.assign(ViolationManager.prototype, {
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
         // Фабрика создаёт только релевантные типу поля (violation-3):
         // кейс/текст — content; картинка — url/caption/filename/width.
-        const newItem = createContentItem(type, insertIndex, extraData);
+        const newItem = createContentItem(type, extraData);
         return this._insertContentItemsBulk(violation, container, insertIndex, [newItem]) > 0;
     },
 
@@ -294,12 +294,8 @@ Object.assign(ViolationManager.prototype, {
         if (toInsert.length === 0) return 0;
 
         // Splice РАЗОМ на insertIndex — порядок элементов пачки сохраняется.
+        // Порядок задаётся позицией в массиве, отдельного поля order нет (#24).
         violation.additionalContent.items.splice(insertIndex, 0, ...toInsert);
-
-        // Обновляем порядок всех элементов.
-        violation.additionalContent.items.forEach((item, idx) => {
-            item.order = idx;
-        });
 
         const itemsContainer = container.querySelector('.additional-content-items');
 
@@ -410,7 +406,7 @@ Object.assign(ViolationManager.prototype, {
             }
 
             runningBytes += bytes;
-            items.push(createContentItem(CONTENT_TYPE_IMAGE, insertIndex, {
+            items.push(createContentItem(CONTENT_TYPE_IMAGE, {
                 url: result.url,
                 filename: result.file.name,
             }));

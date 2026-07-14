@@ -14,8 +14,8 @@ import { CONTENT_TYPE_CASE } from './violation-content-item.js';
 /**
  * Вычисляет номера элементов дополнительного контента.
  *
- * @param {Array<Object>} items - Элементы дополнительного контента (order
- *        соответствует позиции в массиве)
+ * @param {Array<Object>} items - Элементы дополнительного контента (порядок
+ *        отображения — позиция в массиве, отдельного поля order нет)
  * @returns {Array<{ id: *, kind: string, number: (number|null), visible: boolean }>}
  *          Массив той же длины и порядка, что items. Для кейсов number —
  *          сквозной номер (с 1); для остальных типов — null. visible всегда

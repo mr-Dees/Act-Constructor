@@ -172,10 +172,7 @@ Object.assign(ViolationManager.prototype, {
         toIndex = Math.max(0, Math.min(toIndex, items.length));
         items.splice(toIndex, 0, moved);
 
-        // Обновляем order для всех элементов
-        items.forEach((item, idx) => {
-            item.order = idx;
-        });
+        // Порядок элементов — позиция в массиве, отдельного поля order нет (#24).
 
         // Коммит состоялся — handleDragEnd не должен перерисовывать повторно.
         this._dropCommitted = true;

@@ -28,7 +28,7 @@ function makeViolation(ids) {
     return {
         id: 'v1',
         additionalContent: {
-            items: ids.map((id, i) => ({ id, type: 'freeText', content: id, order: i })),
+            items: ids.map((id) => ({ id, type: 'freeText', content: id })),
         },
     };
 }
@@ -60,7 +60,6 @@ test('drop переставляет элемент вниз (поправка н
     vm.handleDrop(noopEvent(), v, 2, container);
 
     assert.deepEqual(v.additionalContent.items.map((i) => i.id), ['B', 'C', 'A', 'D']);
-    assert.deepEqual(v.additionalContent.items.map((i) => i.order), [0, 1, 2, 3], 'order пересчитан');
     assert.equal(vm._renderCount(), 1, 'один renderContentItems');
     assert.equal(previewCalls, 1, 'один updateBlock');
     assert.equal(vm._dropCommitted, true, 'коммит зафиксирован');
