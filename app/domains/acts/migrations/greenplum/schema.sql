@@ -450,6 +450,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
     tables_data JSONB NOT NULL DEFAULT '{}',
     textblocks_data JSONB NOT NULL DEFAULT '{}',
     violations_data JSONB NOT NULL DEFAULT '{}',
+    invoices_data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (act_id, id),
     UNIQUE (act_id, version_number)
@@ -466,6 +467,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.tree_data IS 'Снэпш
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.tables_data IS 'Снэпшот таблиц';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.textblocks_data IS 'Снэпшот текстовых блоков';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.violations_data IS 'Снэпшот нарушений';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.invoices_data IS 'Снэпшот фактур (привязка node_id → реквизиты фактуры на момент версии)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Время создания версии';
 
 -- ============================================================================
