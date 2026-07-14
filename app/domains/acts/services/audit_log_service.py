@@ -4,6 +4,7 @@ import logging
 
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.repositories.act_content import ActContentRepository
+from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
 from app.domains.acts.services.content_validation import (
     collect_validation_issues,
     status_from_issues,
@@ -60,19 +61,20 @@ class AuditLogService:
         # несанитизированный HTML в БД (stored XSS).
         sanitize_act_data(restore_data)
 
+        invoice_repo = ActInvoiceRepository(self.conn)
+
         async with self.conn.transaction():
-            # Pre-snapshot текущего содержимого ДО перезаписи.
-            # get_content вернёт dict {tree, tables, textBlocks, violations,
-            # invoices, ...}; сохраняем как auto-снимок — это не пользовательский
-            # save, значения manual/periodic зарезервированы за явными действиями
-            # редактора (см. saveType в ActDataSchema).
+            # Pre-snapshot фиксирует РЕАЛЬНОЕ текущее содержимое акта ДО
+            # перезаписи. get_content НЕ отдаёт фактуры (только tree/tables/
+            # textBlocks/violations), поэтому текущие фактуры тянем напрямую из
+            # репозитория и кладём в снимок отдельным словарём {node_id: реквизиты}.
+            pre_rows = await invoice_repo.get_invoices_for_act(act_id)
+            pre_restore_invoices = {r["node_id"]: r for r in pre_rows}
+
+            # Сохраняем как auto-снимок — это не пользовательский save, значения
+            # manual/periodic зарезервированы за явными действиями редактора
+            # (см. saveType в ActDataSchema).
             current = await content_repo.get_content(act_id)
-            # Pre-snapshot фиксирует состояние ДО restore — с текущими фактурами
-            # акта. Сам restore фактуры СТИРАЕТ: restore_data собирается без
-            # invoiceNodeIds (дефолт []), а _sync_invoices на пустом списке
-            # удаляет все фактуры акта (act_content.py). Поэтому post-снимок ниже
-            # отражает уже обнулённое состояние (invoices={}), а не эти.
-            pre_restore_invoices = current.get("invoices", {}) if current else {}
             if current:
                 # pbe-6: pre-snapshot симметричен post-snapshot'у — HTML-поля
                 # чистятся той же санитизацией (dict-форма), иначе restore
@@ -88,6 +90,32 @@ class AuditLogService:
                     violations=current.get("violations", {}),
                     invoices=pre_restore_invoices,
                 )
+
+            # Заново прикрепляем фактуры восстанавливаемой версии: UPSERT по
+            # (act_id, node_id). verification_status при этом сбрасывается в
+            # 'pending' (решение владельца — восстановленная фактура требует
+            # повторной верификации). Делаем ДО save_content, чтобы UPDATE-ветка
+            # _sync_invoices нашла реальные строки, а не ушла в DELETE-всё.
+            invoices_snapshot = version.get("invoices_data") or {}
+            for node_id, inv in invoices_snapshot.items():
+                await invoice_repo.save_invoice(
+                    {
+                        "act_id": act_id,
+                        "node_id": node_id,
+                        "node_number": inv.get("node_number"),
+                        "db_type": inv.get("db_type"),
+                        "schema_name": inv.get("schema_name"),
+                        "table_name": inv.get("table_name"),
+                        "metrics": inv.get("metrics"),
+                        "process": inv.get("process"),
+                        "profile_div": inv.get("profile_div"),
+                    },
+                    username,
+                )
+            # invoiceNodeIds = узлы снимка → _sync_invoices удалит фактуры узлов
+            # вне снимка и освежит номера/аудит-поля оставшихся (вместо ветки
+            # DELETE-всё на пустом списке, которая и стирала фактуры при restore).
+            restore_data.invoiceNodeIds = list(invoices_snapshot.keys())
 
             # Пересчитываем состояние валидации из ВОССТАНОВЛЕННОГО содержимого
             # (тот же источник истины, что и обычное сохранение). Иначе restore
@@ -110,10 +138,8 @@ class AuditLogService:
             # Снимок после восстановления берём из уже санитизированного
             # restore_data, а не из сырых данных версии — иначе в историю
             # попал бы несанитизированный HTML, который при повторном restore
-            # вернул бы stored XSS.
-            # Фактуры пустые: restore их обнулил (restore_data без invoiceNodeIds
-            # → _sync_invoices удалил все). Снимок обязан отражать РЕАЛЬНОЕ
-            # состояние после restore, иначе дифф показал бы фантомное «removed».
+            # вернул бы stored XSS. Фактуры — снимок восстановленной версии
+            # (реальное состояние после restore), а не {}.
             await self.versions_repo.create_version(
                 act_id=act_id,
                 username=username,
@@ -122,7 +148,7 @@ class AuditLogService:
                 tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
                 textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
                 violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
-                invoices={},
+                invoices=invoices_snapshot,
             )
 
         logger.info(

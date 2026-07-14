@@ -37,6 +37,10 @@ def _make_tx_conn() -> AsyncMock:
     tx.__aenter__ = AsyncMock(return_value=tx)
     tx.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=tx)
+    # restore_version тянет текущие фактуры напрямую через ActInvoiceRepository
+    # (реальный репо на этом же conn в тестах без явного patch'а) — пустой
+    # fetch по умолчанию, чтобы get_invoices_for_act вернул [].
+    conn.fetch = AsyncMock(return_value=[])
     return conn
 
 
@@ -465,46 +469,84 @@ class TestRestoreVersionPreSnapshot:
         assert second_call.kwargs["save_type"] == "manual"
         assert second_call.kwargs["tree"]["label"] == "v1"
 
-    async def test_snapshots_invoices_reflect_restore_erasing_them(self):
-        """Pre-снимок несёт текущие фактуры, post-снимок — {} (restore их стёр).
+    async def test_restore_reattaches_version_invoices(self):
+        """restore заново прикрепляет фактуры версии, а не стирает их.
 
-        restore_data собирается без invoiceNodeIds → _sync_invoices удаляет все
-        фактуры акта. Post-снимок обязан отразить обнулённое состояние, иначе
-        дифф показал бы фантомное «removed».
+        Pre-снимок несёт РЕАЛЬНЫЕ текущие фактуры акта (get_invoices_for_act —
+        get_content их не отдаёт). Сам restore UPSERT'ит фактуры версии
+        (save_invoice на каждый узел снимка) и проставляет restore_data.
+        invoiceNodeIds — так _sync_invoices освежает строки, а не уходит в
+        ветку DELETE-всё. Post-снимок отражает восстановленные фактуры (не {}).
         """
         svc, versions_repo = self._make_service()
+        version_invoices = {
+            "n7": {
+                "node_id": "n7", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t7",
+                "metrics": {"m": 1}, "node_number": "1.1",
+                "process": None, "profile_div": None,
+                "verification_status": "verified",
+            },
+        }
         versions_repo.get_version.return_value = {
             "version_number": 1,
             "tree_data": {"id": "root", "label": "v1", "children": []},
             "tables_data": {},
             "textblocks_data": {},
             "violations_data": {},
+            "invoices_data": version_invoices,
         }
         current_content = {
             "tree": {"id": "root", "label": "v_current", "children": []},
             "tables": {},
             "textBlocks": {},
             "violations": {},
-            "invoices": {"n5": {"node_id": "n5", "db_type": "hive", "table_name": "t1"}},
         }
+        # Реальные текущие фактуры акта ДО restore — источник pre-снимка.
+        current_invoice_rows = [
+            {
+                "node_id": "n5", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t5", "metrics": {},
+                "node_number": "2.1", "process": None, "profile_div": None,
+                "verification_status": "verified",
+            },
+        ]
 
         with patch(
             "app.domains.acts.services.audit_log_service.ActContentRepository"
-        ) as content_cls:
-            instance = content_cls.return_value
-            instance.save_content = AsyncMock()
-            instance.get_content = AsyncMock(return_value=current_content)
+        ) as content_cls, patch(
+            "app.domains.acts.services.audit_log_service.ActInvoiceRepository"
+        ) as invoice_cls:
+            content_inst = content_cls.return_value
+            content_inst.save_content = AsyncMock()
+            content_inst.get_content = AsyncMock(return_value=current_content)
+
+            invoice_inst = invoice_cls.return_value
+            invoice_inst.get_invoices_for_act = AsyncMock(
+                return_value=current_invoice_rows
+            )
+            invoice_inst.save_invoice = AsyncMock()
 
             await svc.restore_version(act_id=42, version_id=1, username="12345")
 
+        # Фактура версии заново прикреплена: save_invoice на узел снимка.
+        invoice_inst.save_invoice.assert_awaited_once()
+        saved_data = invoice_inst.save_invoice.await_args.args[0]
+        assert saved_data["act_id"] == 42
+        assert saved_data["node_id"] == "n7"
+        assert saved_data["table_name"] == "t7"
+
+        # save_content получил непустой invoiceNodeIds → _sync_invoices не
+        # уходит в ветку DELETE-всё (restore больше не стирает фактуры).
+        restore_data = content_inst.save_content.await_args.args[1]
+        assert restore_data.invoiceNodeIds == ["n7"]
+
         pre_call = versions_repo.create_version.await_args_list[0]
         post_call = versions_repo.create_version.await_args_list[1]
-        # Pre — текущие фактуры (состояние ДО restore)
-        assert pre_call.kwargs["invoices"] == {
-            "n5": {"node_id": "n5", "db_type": "hive", "table_name": "t1"}
-        }
-        # Post — пусто (restore обнулил фактуры)
-        assert post_call.kwargs["invoices"] == {}
+        # Pre — реальные текущие фактуры акта (keyed by node_id).
+        assert pre_call.kwargs["invoices"] == {"n5": current_invoice_rows[0]}
+        # Post — фактуры восстановленной версии (не {}).
+        assert post_call.kwargs["invoices"] == version_invoices
 
     async def test_pre_snapshot_sanitized_before_write(self):
         """pbe-6: pre-snapshot чистится той же санитизацией, что и post.
