@@ -160,6 +160,33 @@ test('удаление соседа НЕ помечает существующи
     assert.equal(findAnnotated(d.tree, 'y')._moved, undefined);
 });
 
+test('репарент: узел ушёл к новому родителю → сам _moved, оставшиеся same-parent соседи НЕ ложно _moved', () => {
+    // Раздел S с пунктами 3.1..3.4; тащим 3.2 в дети 3.1.
+    // Регресс: ранг оставшихся 3.3/3.4 не должен «съехать» из-за выбывшего 3.2.
+    const oldTree = node({
+        id: 'S',
+        children: [
+            node({ id: 'p1' }),
+            node({ id: 'p2' }),
+            node({ id: 'p3' }),
+            node({ id: 'p4' }),
+        ],
+    });
+    const newTree = node({
+        id: 'S',
+        children: [
+            node({ id: 'p1', children: [node({ id: 'p2' })] }),
+            node({ id: 'p3' }),
+            node({ id: 'p4' }),
+        ],
+    });
+    const d = DiffEngine._diffTree(oldTree, newTree);
+    assert.equal(findAnnotated(d.tree, 'p2')._moved, true, 'реперентнутый узел должен быть _moved');
+    assert.equal(findAnnotated(d.tree, 'p3')._moved, undefined, 'сосед 3.3 не должен ложно помечаться');
+    assert.equal(findAnnotated(d.tree, 'p4')._moved, undefined, 'сосед 3.4 не должен ложно помечаться');
+    assert.equal(findAnnotated(d.tree, 'p1')._moved, undefined, 'новый родитель не должен помечаться');
+});
+
 test('перемещённый узел без правок атрибутов → _diff остаётся unchanged, но _moved true', () => {
     const oldTree = node({
         id: 'root',
