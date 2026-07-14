@@ -491,6 +491,17 @@ export class APIClient {
                 console.info(`6.4: нормализовано нестандартных размеров шрифта: ${fontNorm.count}`);
             }
 
+            // #20: до-заполняем недостающие под-объекты/скаляры формы нарушения
+            // эталоном (legacy-акты после ручной правки БД/сбойного мигратора).
+            // Правит content.violations ДО присвоения в AppState; при изменении
+            // помечаем акт несохранённым после re-enable tracking (ниже), как fontNorm.
+            const violationsNorm = window.normalizeViolations
+                ? window.normalizeViolations(content.violations)
+                : { changed: false, count: 0 };
+            if (violationsNorm.changed) {
+                console.info(`#20: нормализована форма нарушений: ${violationsNorm.count}`);
+            }
+
             // Отключаем tracking на время загрузки
             window.StorageManager.disableTracking();
 
@@ -582,6 +593,11 @@ export class APIClient {
                     // снова включён, помечаем акт несохранённым (автосейв персистит).
                     // #4: НЕ в read-only — у зрителя нет прав на PUT (иначе фоновый
                     // автосейв бил бы в 403), а нормализация в БД всё равно не уйдёт.
+                    window.StorageManager.markAsUnsaved();
+                }
+                if (violationsNorm.changed && !AppConfig.readOnlyMode.isReadOnly) {
+                    // #20: аналогично fontNorm — до-заполнение формы нарушения
+                    // помечает акт несохранённым, не в read-only (см. комментарий выше).
                     window.StorageManager.markAsUnsaved();
                 }
                 if (draftRestored) {

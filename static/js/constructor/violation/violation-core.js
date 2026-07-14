@@ -266,6 +266,14 @@ export class ViolationManager {
      * @returns {HTMLElement} Контейнер с опциональным полем
      */
     createOptionalField(violation, fieldName, label, type, isReadOnly = false) {
+        // #20 страховка А: дешёвая защита от отсутствующего под-объекта поля
+        // (старые/повреждённые данные до normalizeViolations на загрузке).
+        // Не перезатирает валидные данные — подставляет дефолт только при
+        // полном отсутствии поля; последующие чтения (в т.ч. renderList) безопасны.
+        if (!violation[fieldName] || typeof violation[fieldName] !== 'object') {
+            violation[fieldName] = { enabled: false, items: [], content: '' };
+        }
+
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field';
 
