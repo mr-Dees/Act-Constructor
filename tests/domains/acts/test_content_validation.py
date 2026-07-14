@@ -414,6 +414,64 @@ def test_validate_tree_single_pass_traversal():
     assert len(access_log) == 1
 
 
+def test_validate_tree_depth_error_precedes_per_node_error():
+    """#14 код-ревью: при одновременном превышении глубины и per-node лимита
+    приоритет у ошибки глубины — как при прежних последовательных проверках,
+    где глубина проверялась ДО per-node. Регрессия на случай, если будущий
+    рефактор переставит порядок raise в едином обходе."""
+    svc, _saved = _svc()
+    svc.acts_settings.resource.max_tree_depth = 1
+    svc.acts_settings.textblocks.per_node = 2
+    # Узел на глубине 2 с 3 текстблоками: превышены И глубина (3 > 1), И лимит
+    # текстблоков (3 > 2). Ожидаем именно ошибку глубины.
+    deep_and_wide = {
+        "id": "root", "label": "Акт", "children": [
+            {"id": "s1", "label": "Секция", "type": "section", "children": [
+                {"id": "n", "label": "Узел", "type": "section", "children": [
+                    {"id": f"tb{i}", "label": "ТБ", "type": "textblock",
+                     "textBlockId": f"tb{i}", "children": []}
+                    for i in range(3)
+                ]},
+            ]},
+        ],
+    }
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    data.tree = deep_and_wide
+    with pytest.raises(ActValidationError, match="Глубина дерева"):
+        svc._validate_tree(data)
+
+
+def test_validate_tree_textblock_error_precedes_table_error():
+    """#14 код-ревью: при одновременном превышении лимитов текстблоков и таблиц
+    в одном узле приоритет у текстблоков (порядок проверок текстблоки →
+    нарушения → таблицы сохранён)."""
+    svc, _saved = _svc()
+    svc.acts_settings.textblocks.per_node = 2
+    svc.acts_settings.tables.per_node = 2
+    node_children = (
+        [{"id": f"tb{i}", "label": "ТБ", "type": "textblock",
+          "textBlockId": f"tb{i}", "children": []} for i in range(3)]
+        + [{"id": f"tbl{i}", "label": "Табл", "type": "table",
+            "tableId": f"tbl{i}", "children": []} for i in range(3)]
+    )
+    both_over = {
+        "id": "root", "label": "Акт", "children": [
+            {"id": "s1", "label": "Секция", "type": "section",
+             "children": node_children},
+        ],
+    }
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    data.tree = both_over
+    with pytest.raises(ActValidationError, match="текстовых блоков"):
+        svc._validate_tree(data)
+
+
 async def test_warning_act_manual_save_does_not_notify():
     """Статус warning (только пустые таблицы) портальное уведомление НЕ шлёт —
     даже при ручном сохранении: warning не критичен (решение пользователя)."""
