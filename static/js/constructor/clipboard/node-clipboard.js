@@ -403,11 +403,12 @@ export const NodeClipboard = {
             return false;
         }
 
-        // PERSIST-2: лимит текстблоков-на-узел (B-13). insertNodeAt не зовёт
-        // canAddContent — без этой проверки paste мог дать узлу N+1 текстблоков.
-        const textBlockLimitCheck = ValidationTree.canInsertTextBlockSubtree(targetNodeId, regenerated.node);
-        if (!textBlockLimitCheck.valid) {
-            Notifications.error(textBlockLimitCheck.message);
+        // PERSIST-2/#7: лимиты блоков-на-узел (текстблоки/нарушения/таблицы).
+        // insertNodeAt не зовёт canAddContent — без этой проверки paste мог дать
+        // узлу N+1 блоков лимитируемого типа.
+        const blockLimitCheck = ValidationTree.canInsertSubtree(targetNodeId, regenerated.node);
+        if (!blockLimitCheck.valid) {
+            Notifications.error(blockLimitCheck.message);
             return false;
         }
 

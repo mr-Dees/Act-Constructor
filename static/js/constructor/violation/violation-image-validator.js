@@ -40,8 +40,10 @@ export const DEFAULT_STRUCTURE_LIMITS = {
     fontSizeMax: AppConfig.limits.textblock.fontSizeMax,
     // Базовый размер текстблока (px) — единый источник для редактора/превью.
     fontSizeDefault: AppConfig.limits.textblock.fontSizeDefault,
-    // B-13: макс. число текстблоков на узел — фолбэк до ответа /acts/limits.
+    // B-13/#7: макс. число блоков на узел — фолбэк до ответа /acts/limits.
     textBlocksPerNode: AppConfig.content.limits.textBlocksPerNode,
+    violationsPerNode: AppConfig.content.limits.violationsPerNode,
+    tablesPerNode: AppConfig.content.limits.tablesPerNode,
 };
 
 let _limits = { ...DEFAULT_IMAGE_LIMITS };
@@ -78,6 +80,8 @@ export function loadImageLimits() {
                 if (typeof tbl.max_rows === 'number') _structure.maxRows = tbl.max_rows;
                 if (typeof tbl.max_cols === 'number') _structure.maxCols = tbl.max_cols;
                 if (typeof tbl.min_col_width_px === 'number') _structure.minColWidthPx = tbl.min_col_width_px;
+                // #7: серверный лимит числа таблиц на узел.
+                if (typeof tbl.per_node === 'number') _structure.tablesPerNode = tbl.per_node;
             }
             const tb = data && data.textblocks;
             if (tb) {
@@ -87,6 +91,11 @@ export function loadImageLimits() {
                 if (typeof tb.font_size_default === 'number') _structure.fontSizeDefault = tb.font_size_default;
                 // B-13: серверный лимит числа текстблоков на узел.
                 if (typeof tb.per_node === 'number') _structure.textBlocksPerNode = tb.per_node;
+            }
+            const vio = data && data.violations;
+            if (vio) {
+                // #7: серверный лимит числа нарушений на узел.
+                if (typeof vio.per_node === 'number') _structure.violationsPerNode = vio.per_node;
             }
             // B-5/4е: единый allowlist санитайзера из той же выдачи /acts/limits.
             if (data && data.sanitizer) {
@@ -119,7 +128,8 @@ export function getImageLimits() {
  *
  * @returns {{maxRows:number, maxCols:number, minColWidthPx:number,
  *            fontSizeMin:number, fontSizeMax:number, fontSizeDefault:number,
- *            textBlocksPerNode:number}}
+ *            textBlocksPerNode:number, violationsPerNode:number,
+ *            tablesPerNode:number}}
  */
 export function getStructureLimits() {
     return _structure;
