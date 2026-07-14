@@ -3,8 +3,11 @@
  *
  * Паритет ПОЛНОТЫ данных с DOCX (build_violation): полные тексты всех полей
  * без обрезки, полный список описаний (descriptionList), полные кейсы и
- * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подписи-ярлыки
- * остаются превью-стилем (решение Д.3 — паритет данных, не букв подписей).
+ * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подпись
+ * responsible и шаблоны кейс/свободный-текст берутся из контракта
+ * violation-fields.js (Task 1); остальные подписи-ярлыки — превью-стилем.
+ * Q1: пустые поля рендерятся как «метка + пустое тело», без «—» и без
+ * фильтрации по trim() (ядро/кейсы/свободный текст/пункты списка).
  */
 import { getImageLimits } from '../violation/violation-image-validator.js';
 import {
@@ -12,14 +15,16 @@ import {
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from '../violation/violation-content-item.js';
+import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../violation/violation-fields.js';
+import { computeAdditionalContentNumbers } from '../violation/violation-numbering.js';
 
 /** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
 const SHEET_HEIGHT_MM = 297;
 
 /**
  * Чистая модель строк нарушения — полные тексты, как в DOCX.
- * Семантика нумерации кейсов и сброса счётчиков — как в
- * docx/builders/violation.py и MD/TXT-форматтерах.
+ * Нумерация кейсов и сброс счётчика — через computeAdditionalContentNumbers
+ * (Task 2, violation-numbering.js): нумеруются ВСЕ кейсы, включая пустые.
  *
  * Флаг `small` помечает поля, которые в Word рендерятся 9pt-курсивом
  * (Нарушено/Установлено/descriptionList/additionalContent — см. styles.Sizes.
@@ -33,42 +38,35 @@ const SHEET_HEIGHT_MM = 297;
 export function collectViolationLines(violation) {
     const lines = [];
 
-    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '—', small: true });
-    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '—', small: true });
+    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '', small: true });
+    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '', small: true });
 
     if (violation.descriptionList?.enabled) {
-        const items = (violation.descriptionList.items || []).filter(item => item && item.trim());
+        const items = violation.descriptionList.items || [];
         if (items.length > 0) {
-            lines.push({ type: 'list', label: 'В том числе', items, small: true });
+            lines.push({ type: 'list', label: '', items, small: true });
         }
     }
 
     if (violation.additionalContent?.enabled) {
-        let caseNumber = 1;
-        let textNumber = 1;
-        for (const item of violation.additionalContent.items || []) {
+        const items = violation.additionalContent.items || [];
+        const numbering = computeAdditionalContentNumbers(items);
+        items.forEach((item, i) => {
             if (item.type === CONTENT_TYPE_CASE) {
-                if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content, small: true });
-                    caseNumber++;
-                }
+                const label = CASE_LABEL_TEMPLATE.replace('{n}', numbering[i].number);
+                lines.push({ type: 'line', label, text: item.content || '', small: true });
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 lines.push({ type: 'image', item });
-                caseNumber = 1;
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
-                if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content, small: true });
-                    textNumber++;
-                }
-                caseNumber = 1;
+                lines.push({ type: 'line', label: FREE_TEXT_LABEL, text: item.content || '', small: true });
             }
-        }
+        });
     }
 
     const optionalFields = [
         ['reasons', 'Причины'],
         ['consequences', 'Последствия'],
-        ['responsible', 'Ответственный за решение проблем'],
+        ['responsible', VIOLATION_LABELS.responsible],
         ['recommendations', 'Рекомендации'],
     ];
     for (const [key, label] of optionalFields) {
@@ -148,10 +146,12 @@ export class PreviewViolationRenderer {
         const line = document.createElement('div');
         line.className = small ? 'preview-violation-line preview-violation-line--small'
                                : 'preview-violation-line';
-        const labelEl = document.createElement('span');
-        labelEl.className = 'preview-violation-label';
-        labelEl.textContent = `${label}:`;
-        line.appendChild(labelEl);
+        if (label) {
+            const labelEl = document.createElement('span');
+            labelEl.className = 'preview-violation-label';
+            labelEl.textContent = `${label}:`;
+            line.appendChild(labelEl);
+        }
         container.appendChild(line);
 
         const list = document.createElement('ul');
