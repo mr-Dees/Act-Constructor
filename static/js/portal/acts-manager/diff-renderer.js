@@ -5,6 +5,7 @@
 import { SafeHTML, renderActContent } from '../../shared/sanitize.js';
 import { iterateVisibleCells } from '../../constructor/table/grid-merges.js';
 import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../../constructor/violation/violation-fields.js';
+import { INVOICE_FIELD_LABELS } from './invoice-diff-fields.js';
 import { computeAdditionalContentNumbers } from '../../constructor/violation/violation-numbering.js';
 import { CONTENT_TYPE_CASE, CONTENT_TYPE_IMAGE } from '../../constructor/violation/violation-content-item.js';
 import { renderImageWithFallback, buildImagePlaceholder } from '../../constructor/violation/violation-image-render.js';
@@ -407,14 +408,6 @@ export class DiffRenderer {
         return '';
     }
 
-    /** Метки реквизитов фактуры (порядок вывода — как список ниже). */
-    static _INVOICE_FIELD_LABELS = {
-        db_type: 'Источник (БД)', schema_name: 'Схема', table_name: 'Таблица',
-        node_number: 'Пункт', profile_div: 'Подразделение профиля',
-        verification_status: 'Статус верификации', metrics: 'Метрики',
-        process: 'Процессы',
-    };
-
     /**
      * Рендер диффа фактуры узла: реквизиты списком, изменённые — old→new
      * (del/ins). Элементы строятся напрямую (textContent), без SafeHTML — как
@@ -435,7 +428,7 @@ export class DiffRenderer {
 
         const data = invDiff.newData || invDiff.oldData;
         if (data) {
-            for (const field of Object.keys(this._INVOICE_FIELD_LABELS)) {
+            for (const field of Object.keys(INVOICE_FIELD_LABELS)) {
                 const changed = invDiff.fieldDiffs?.[field];
                 const text = this._invoiceFieldText(data, field);
                 if (!text && !changed) continue;
@@ -443,7 +436,7 @@ export class DiffRenderer {
                 const fieldDiv = document.createElement('div');
                 fieldDiv.className = 'diff-invoice-field diff-violation-field';
                 const strong = document.createElement('strong');
-                strong.textContent = `${this._INVOICE_FIELD_LABELS[field]}: `;
+                strong.textContent = `${INVOICE_FIELD_LABELS[field]}: `;
                 fieldDiv.appendChild(strong);
 
                 if (changed) {

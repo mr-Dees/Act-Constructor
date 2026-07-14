@@ -1,3 +1,5 @@
+import { INVOICE_DIFF_FIELD_KEYS } from './invoice-diff-fields.js';
+
 /**
  * Вычисление структурного diff между двумя снэпшотами содержимого.
  * Чистый utility-класс без DOM-зависимостей.
@@ -306,11 +308,21 @@ export class DiffEngine {
             const newV = newViols[id];
 
             if (!oldV) {
-                result[id] = { status: 'added', newData: newV };
+                const fieldDiffs = {};
+                const descDiff = this._diffDescriptionList(null, newV);
+                if (descDiff.changed) fieldDiffs.descriptionList = descDiff;
+                const addDiff = this._diffAdditionalContent(null, newV);
+                if (addDiff.changed) fieldDiffs.additionalContent = addDiff;
+                result[id] = { status: 'added', newData: newV, fieldDiffs };
                 continue;
             }
             if (!newV) {
-                result[id] = { status: 'removed', oldData: oldV };
+                const fieldDiffs = {};
+                const descDiff = this._diffDescriptionList(oldV, null);
+                if (descDiff.changed) fieldDiffs.descriptionList = descDiff;
+                const addDiff = this._diffAdditionalContent(oldV, null);
+                if (addDiff.changed) fieldDiffs.additionalContent = addDiff;
+                result[id] = { status: 'removed', oldData: oldV, fieldDiffs };
                 continue;
             }
 
@@ -361,8 +373,7 @@ export class DiffEngine {
     static _diffInvoices(oldInvoices, newInvoices) {
         const result = {};
         const allKeys = new Set([...Object.keys(oldInvoices), ...Object.keys(newInvoices)]);
-        const fields = ['db_type', 'schema_name', 'table_name', 'node_number',
-                        'profile_div', 'verification_status', 'metrics', 'process'];
+        const fields = INVOICE_DIFF_FIELD_KEYS;
 
         for (const nodeId of allKeys) {
             const oldInv = oldInvoices[nodeId];

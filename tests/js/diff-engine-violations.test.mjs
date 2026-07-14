@@ -216,3 +216,60 @@ test('идентичные нарушения → unchanged, пустой fieldD
     assert.equal(d.status, 'unchanged');
     assert.deepEqual(d.fieldDiffs, {});
 });
+
+// --- #6: целиком добавленное/удалённое нарушение несёт descriptionList/additionalContent ---
+// Раньше added/removed-ветки возвращали только {status, newData}/{status, oldData}
+// без fieldDiffs — рендер (гейт по fieldDiffs?.descriptionList/.additionalContent)
+// не показывал список описаний и доп.контент целиком нового/удалённого нарушения.
+
+test('добавленное нарушение с descriptionList и additionalContent → fieldDiffs несёт оба под-диффа', () => {
+    const newV = makeViol({
+        descriptionList: { enabled: true, items: ['пункт а', 'пункт б'] },
+        additionalContent: { enabled: true, items: [{ id: 'c1', type: 'case', content: 'кейс' }] },
+    });
+    const d = diffOne(undefined, newV);
+    assert.equal(d.status, 'added');
+    assert.equal(d.newData, newV);
+
+    const dl = d.fieldDiffs.descriptionList;
+    assert.ok(dl, 'descriptionList должен присутствовать в fieldDiffs добавленного нарушения');
+    assert.equal(dl.changed, true);
+    assert.equal(dl.items[0].status, 'added');
+    assert.equal(dl.items[0].new, 'пункт а');
+
+    const ac = d.fieldDiffs.additionalContent;
+    assert.ok(ac, 'additionalContent должен присутствовать в fieldDiffs добавленного нарушения');
+    assert.equal(ac.changed, true);
+    assert.equal(ac.entries[0].status, 'added');
+    assert.equal(ac.entries[0].newItem.id, 'c1');
+});
+
+test('удалённое нарушение с descriptionList и additionalContent → fieldDiffs несёт оба под-диффа', () => {
+    const oldV = makeViol({
+        descriptionList: { enabled: true, items: ['пункт а'] },
+        additionalContent: { enabled: true, items: [{ id: 'i1', type: 'image', url: 'u', caption: '', filename: 'p.png', width: 0 }] },
+    });
+    const d = diffOne(oldV, undefined);
+    assert.equal(d.status, 'removed');
+    assert.equal(d.oldData, oldV);
+
+    const dl = d.fieldDiffs.descriptionList;
+    assert.ok(dl, 'descriptionList должен присутствовать в fieldDiffs удалённого нарушения');
+    assert.equal(dl.changed, true);
+    assert.equal(dl.items[0].status, 'removed');
+    assert.equal(dl.items[0].old, 'пункт а');
+
+    const ac = d.fieldDiffs.additionalContent;
+    assert.ok(ac, 'additionalContent должен присутствовать в fieldDiffs удалённого нарушения');
+    assert.equal(ac.changed, true);
+    assert.equal(ac.entries[0].status, 'removed');
+    assert.equal(ac.entries[0].oldItem.id, 'i1');
+});
+
+test('добавленное нарушение с выключенными descriptionList/additionalContent → fieldDiffs их не несёт (changed=false)', () => {
+    const newV = makeViol();
+    const d = diffOne(undefined, newV);
+    assert.equal(d.status, 'added');
+    assert.equal(d.fieldDiffs.descriptionList, undefined);
+    assert.equal(d.fieldDiffs.additionalContent, undefined);
+});
