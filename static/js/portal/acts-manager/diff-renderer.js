@@ -118,6 +118,15 @@ export class DiffRenderer {
             }
         }
 
+        // Фактура, привязанная к узлу по node.id (фактуры не отдельный тип узла —
+        // крепятся к листовым узлам раздела 5). Каждый удалённый узел приходит
+        // отдельной записью removedNodes с тем же node.id, поэтому фактуры
+        // удалённых узлов тоже отрисуются здесь.
+        const invDiff = diffResult.invoices?.[node.id];
+        if (invDiff && (invDiff.status !== 'unchanged' || !onlyChanges)) {
+            this._renderDiffInvoice(nodeDiv, invDiff);
+        }
+
         container.appendChild(nodeDiv);
 
         // Рекурсия
@@ -132,6 +141,10 @@ export class DiffRenderer {
         if (node.tableId && diffResult.tables[node.tableId]?.status !== 'unchanged') return true;
         if (node.textBlockId && diffResult.textblocks[node.textBlockId]?.status !== 'unchanged') return true;
         if (node.violationId && diffResult.violations[node.violationId]?.status !== 'unchanged') return true;
+        // Фактура привязана к узлу по node.id; её изменение делает узел changed —
+        // иначе в режиме «только изменения» узел с diff-unchanged был бы скрыт
+        // CSS'ом вместе с изменённой фактурой внутри.
+        if (diffResult.invoices?.[node.id] && diffResult.invoices[node.id].status !== 'unchanged') return true;
         return false;
     }
 
@@ -398,6 +411,88 @@ export class DiffRenderer {
             return val.content || '';
         }
         return '';
+    }
+
+    /** Метки реквизитов фактуры (порядок вывода — как список ниже). */
+    static _INVOICE_FIELD_LABELS = {
+        db_type: 'Источник (БД)', schema_name: 'Схема', table_name: 'Таблица',
+        node_number: 'Пункт', profile_div: 'Подразделение профиля',
+        verification_status: 'Статус верификации', metrics: 'Метрики',
+        process: 'Процессы',
+    };
+
+    /**
+     * Рендер диффа фактуры узла: реквизиты списком, изменённые — old→new
+     * (del/ins). Элементы строятся напрямую (textContent), без SafeHTML — как
+     * поля нарушения; значения фактур plain-text (без HTML). added/removed —
+     * весь блок помечен цветом через diff-<status>.
+     */
+    static _renderDiffInvoice(container, invDiff) {
+        const div = document.createElement('div');
+        div.className = `diff-invoice diff-${invDiff.status}`;
+
+        const label = document.createElement('div');
+        label.className = 'diff-invoice-label';
+        let marker = '';
+        if (invDiff.status === 'added') marker = ' (ДОБАВЛЕНО)';
+        else if (invDiff.status === 'removed') marker = ' (УДАЛЕНО)';
+        label.textContent = `Фактура${marker}`;
+        div.appendChild(label);
+
+        const data = invDiff.newData || invDiff.oldData;
+        if (data) {
+            for (const field of Object.keys(this._INVOICE_FIELD_LABELS)) {
+                const changed = invDiff.fieldDiffs?.[field];
+                const text = this._invoiceFieldText(data, field);
+                if (!text && !changed) continue;
+
+                const fieldDiv = document.createElement('div');
+                fieldDiv.className = 'diff-invoice-field diff-violation-field';
+                const strong = document.createElement('strong');
+                strong.textContent = `${this._INVOICE_FIELD_LABELS[field]}: `;
+                fieldDiv.appendChild(strong);
+
+                if (changed) {
+                    fieldDiv.classList.add('diff-field-changed');
+                    const oldText = this._invoiceFieldText(invDiff.oldData, field);
+                    const newText = this._invoiceFieldText(invDiff.newData, field);
+                    if (oldText) {
+                        const del = document.createElement('del');
+                        del.textContent = oldText;
+                        fieldDiv.appendChild(del);
+                        fieldDiv.appendChild(document.createTextNode(' → '));
+                    }
+                    const ins = document.createElement('ins');
+                    ins.textContent = newText || '∅';
+                    fieldDiv.appendChild(ins);
+                } else {
+                    fieldDiv.appendChild(document.createTextNode(text));
+                }
+                div.appendChild(fieldDiv);
+            }
+        }
+
+        container.appendChild(div);
+    }
+
+    /**
+     * Читаемое значение реквизита фактуры. metrics/process — массивы объектов,
+     * сворачиваем в коды через запятую; прочее — как есть.
+     */
+    static _invoiceFieldText(inv, field) {
+        if (!inv) return '';
+        const val = inv[field];
+        if (val === null || val === undefined) return '';
+        if (field === 'metrics' && Array.isArray(val)) {
+            return val.map(m => (m && (m.metric_code || m.code || m.metric_name)) || '')
+                .filter(Boolean).join(', ');
+        }
+        if (field === 'process' && Array.isArray(val)) {
+            return val.map(m => (m && (m.process_code || m.process_name)) || '')
+                .filter(Boolean).join(', ');
+        }
+        if (typeof val === 'object') return JSON.stringify(val);
+        return String(val);
     }
 
     /**

@@ -370,6 +370,29 @@ h5.version-preview-heading { font-size: 13px; }
     padding: 1px 3px;
 }
 
+/* Diff фактуры (привязка node → реквизиты) */
+.diff-invoice {
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 2px solid transparent;
+}
+
+.diff-invoice.diff-added { border-left-color: #22c55e; }
+.diff-invoice.diff-removed { border-left-color: #ef4444; }
+.diff-invoice.diff-modified { border-left-color: #f59e0b; }
+
+.diff-invoice-label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.diff-invoice-field {
+    margin: 3px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
 /* Diff: список описаний нарушения (descriptionList) */
 .diff-desclist {
     margin: 4px 0 4px 20px;
