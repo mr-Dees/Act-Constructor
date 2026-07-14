@@ -21,6 +21,12 @@
  * ниже как module-level side effect) — отрабатывает на всех трёх flush-сайтах
  * (авто-сейв, ручное сохранение, истечение сессии) без ручной синхронизации.
  *
+ * #5: flush() отрабатывает ДО await fetch(PUT) на всех трёх save-сайтах — эталон
+ * нельзя сдвигать прямо в synthesize(), иначе неудачный PUT теряет и запись
+ * аудита (уже улетела во flush), и саму правку (эталон уже съехал). Поэтому
+ * synthesize() лишь откладывает кандидата в _pendingSnapshot; коммит эталона —
+ * через confirmSave(), вызываемый вызывающей стороной только при resp.ok.
+ *
  * Модуль без DOM — тестируется под node:test напрямую.
  */
 import { ChangelogTracker } from '../changelog-tracker.js';
@@ -28,6 +34,15 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 export class ViolationAudit {
     /** Эталонный снимок: Map<violationId, отпечаток(строка)>. */
     static _snapshot = new Map();
+
+    /**
+     * Снимок-кандидат, вычисленный последним synthesize(), но ещё не подтверждённый
+     * успешным сохранением (#5: раньше _snapshot сдвигался ДО ответа PUT — при
+     * неудачном сохранении запись аудита уже улетала во flush, а эталон уже
+     * съезжал на пост-правочное состояние, и правка терялась безвозвратно).
+     * Коммитится в _snapshot только через confirmSave().
+     */
+    static _pendingSnapshot = null;
 
     /**
      * Отпечаток текстового под-поля (reasons/consequences/responsible/recommendations).
@@ -104,26 +119,44 @@ export class ViolationAudit {
     /** Полный сброс снимка (teardown / тесты). */
     static reset() {
         this._snapshot = new Map();
+        this._pendingSnapshot = null;
     }
 
     /**
      * Синтез записей modify_violation: одна запись на каждое нарушение, чей
-     * отпечаток отличается от снимка. После синтеза снимок переустанавливается
-     * на текущее состояние (следующие правки сравниваются с новой базой).
+     * отпечаток отличается от снимка. Свежий отпечаток кандидата откладывается
+     * в _pendingSnapshot — эталон (_snapshot) НЕ трогается здесь (#5: сдвиг
+     * эталона до подтверждения сохранения терял правку при неудачном PUT).
+     * Коммит эталона — через confirmSave() из вызывающей стороны при resp.ok.
      * Новые нарушения (нет в снимке) в modify НЕ попадают — их фиксирует
      * add_violation при создании.
      * @param {Object<string, Object>} violations - текущее AppState.violations
      */
     static synthesize(violations) {
         if (!violations || typeof violations !== 'object') return;
+        const pending = new Map();
         for (const [id, v] of Object.entries(violations)) {
-            if (!this._snapshot.has(id)) continue;
-            if (this.fingerprint(v) !== this._snapshot.get(id)) {
+            const fp = this.fingerprint(v);
+            if (this._snapshot.has(id) && fp !== this._snapshot.get(id)) {
                 ChangelogTracker.record('modify_violation', id, 'Нарушение');
             }
+            pending.set(id, fp);
         }
-        // Ре-снимок ПОСЛЕ синтеза — эталон = текущее состояние.
-        this.snapshot(violations);
+        // Кандидат на новый эталон — коммитится только через confirmSave().
+        this._pendingSnapshot = pending;
+    }
+
+    /**
+     * Подтверждает успешное сохранение: коммитит отложенный снимок в эталон.
+     * Вызывается ТОЛЬКО из success-ветки PUT /content (никогда из catch/finally)
+     * — при неудачном сохранении _snapshot остаётся прежним, и следующий
+     * synthesize() заново обнаружит и запишет ту же правку.
+     */
+    static confirmSave() {
+        if (this._pendingSnapshot) {
+            this._snapshot = this._pendingSnapshot;
+            this._pendingSnapshot = null;
+        }
     }
 }
 

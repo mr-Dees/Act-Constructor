@@ -231,7 +231,7 @@ test('несколько изменившихся нарушений → по о
     assert.equal(countMods(entries, 'v3'), 1);
 });
 
-test('ре-снимок после flush: повторный flush без правок → нет записи', () => {
+test('ре-снимок после flush+confirmSave: повторный flush без правок → нет записи', () => {
     const v = makeViolation();
     const violations = { v1: v };
     ViolationAudit.snapshot(violations);
@@ -241,8 +241,43 @@ test('ре-снимок после flush: повторный flush без пра
     const first = ChangelogTracker.flush();
     assert.equal(countMods(first), 1, 'первый flush фиксирует правку');
 
+    // #5: эталон коммитится только после подтверждённого сохранения — имитируем
+    // успешный PUT (без confirmSave второй flush заново обнаружил бы ту же правку).
+    ViolationAudit.confirmSave();
+
     const second = ChangelogTracker.flush();
-    assert.equal(countMods(second), 0, 'второй flush без новых правок — снимок переустановлен на текущее');
+    assert.equal(countMods(second), 0, 'второй flush после confirmSave — снимок переустановлен на текущее');
+});
+
+// ── #5: снимок коммитится только после подтверждённого сохранения ─────────────
+
+test('#5 synthesize БЕЗ confirmSave не сдвигает эталон: неудачное сохранение не теряет правку', () => {
+    const v = makeViolation();
+    const violations = { v1: v };
+    ViolationAudit.snapshot(violations);
+    window.AppState = { violations };
+
+    v.reasons.content = 'правка при сбое сохранения';
+    const first = ChangelogTracker.flush();
+    assert.equal(countMods(first), 1, 'первый flush (== неудачный save) фиксирует правку в журнале');
+
+    // confirmSave НЕ вызывается — имитация неудачного PUT (resp.ok === false).
+    const second = ChangelogTracker.flush();
+    assert.equal(countMods(second), 1, 'повторный synthesize без confirmSave снова видит ту же правку — она не потеряна');
+});
+
+test('#5 confirmSave коммитит отложенный снимок: повторный synthesize без новых правок ничего не пишет', () => {
+    const v = makeViolation();
+    const violations = { v1: v };
+    ViolationAudit.snapshot(violations);
+    window.AppState = { violations };
+
+    v.reasons.content = 'подтверждённая правка';
+    ChangelogTracker.flush();
+    ViolationAudit.confirmSave();
+
+    const entries = ChangelogTracker.flush();
+    assert.equal(countMods(entries), 0, 'после confirmSave эталон = текущее состояние — новых записей нет');
 });
 
 test('flush без AppState / без нарушений не падает и не пишет modify', () => {
@@ -270,4 +305,87 @@ test('synthesize напрямую: одна запись на изменивше
     const mods = calls.filter(([op, id]) => op === 'modify_violation' && id === 'v1');
     assert.equal(mods.length, 1);
     assert.equal(mods[0][2], 'Нарушение', 'имя записи — «Нарушение» (как у add_violation)');
+});
+
+// ── #5 напрямую через synthesize/confirmSave (без ChangelogTracker.flush) ─────
+
+test('#5a synthesize пишет modify и НЕ сдвигает _snapshot до confirmSave', () => {
+    const v = makeViolation();
+    const violations = { v1: v };
+    ViolationAudit.snapshot(violations);
+    const baselineBefore = ViolationAudit._snapshot.get('v1');
+
+    v.violated = 'изменено';
+    const calls = [];
+    const orig = ChangelogTracker.record;
+    ChangelogTracker.record = (...a) => calls.push(a);
+    try {
+        ViolationAudit.synthesize(violations);
+    } finally {
+        ChangelogTracker.record = orig;
+    }
+
+    assert.equal(calls.filter(([op, id]) => op === 'modify_violation' && id === 'v1').length, 1,
+        'synthesize зафиксировал правку');
+    assert.equal(ViolationAudit._snapshot.get('v1'), baselineBefore,
+        'эталон НЕ сдвинут — confirmSave ещё не вызывался');
+});
+
+test('#5b имитация неудачного сохранения: synthesize без confirmSave, второй synthesize той же правки снова пишет', () => {
+    const v = makeViolation();
+    const violations = { v1: v };
+    ViolationAudit.snapshot(violations);
+
+    v.violated = 'правка, потерянная бы при старом баге';
+    const calls = [];
+    const orig = ChangelogTracker.record;
+    ChangelogTracker.record = (...a) => calls.push(a);
+    try {
+        ViolationAudit.synthesize(violations); // == pre-flush hook перед неудачным PUT
+        // confirmSave НЕ вызывается — PUT вернул ошибку.
+        ViolationAudit.synthesize(violations); // == следующий цикл сохранения
+    } finally {
+        ChangelogTracker.record = orig;
+    }
+
+    const mods = calls.filter(([op, id]) => op === 'modify_violation' && id === 'v1');
+    assert.equal(mods.length, 2, 'правка не потеряна — каждый synthesize без confirmSave заново её видит');
+});
+
+test('#5c synthesize + confirmSave коммитит эталон: следующий synthesize без новых правок ничего не пишет', () => {
+    const v = makeViolation();
+    const violations = { v1: v };
+    ViolationAudit.snapshot(violations);
+
+    v.violated = 'подтверждённая правка';
+    const calls = [];
+    const orig = ChangelogTracker.record;
+    ChangelogTracker.record = (...a) => calls.push(a);
+    try {
+        ViolationAudit.synthesize(violations);
+        ViolationAudit.confirmSave(); // == успешный PUT
+        ViolationAudit.synthesize(violations); // нарушение не менялось после confirmSave
+    } finally {
+        ChangelogTracker.record = orig;
+    }
+
+    const mods = calls.filter(([op, id]) => op === 'modify_violation' && id === 'v1');
+    assert.equal(mods.length, 1, 'вторая правка не найдена — эталон уже = сохранённое состояние');
+});
+
+test('#5 confirmSave без предшествующего synthesize — безопасный no-op', () => {
+    ViolationAudit.reset();
+    assert.doesNotThrow(() => ViolationAudit.confirmSave());
+});
+
+test('#5 synthesize без нарушений не создаёт бессмысленный pending-снимок (ранний return)', () => {
+    ViolationAudit.reset();
+    ViolationAudit.snapshot({ v1: makeViolation() });
+    const baselineBefore = ViolationAudit._snapshot.get('v1');
+
+    ViolationAudit.synthesize(null);
+    assert.equal(ViolationAudit._pendingSnapshot, null, 'ранний return — pending не создан');
+
+    ViolationAudit.confirmSave();
+    assert.equal(ViolationAudit._snapshot.get('v1'), baselineBefore, 'эталон не пострадал от no-op confirmSave');
 });

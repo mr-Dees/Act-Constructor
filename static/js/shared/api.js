@@ -832,6 +832,10 @@ export class APIClient {
                 window.StorageManager.setBaseUpdatedAt(result.updated_at);
             }
 
+            // #5: PUT подтверждён — коммитим отложенный снимок аудита нарушений
+            // (иначе неудачное сохранение теряло бы правку безвозвратно).
+            window.ViolationAudit?.confirmSave?.();
+
             // PERSIST-4/A1: единый финал успешного PUT (эпоха-гейт синхронизации
             // + снятие снимка при стабильной эпохе; гашение offline-машинерии в
             // любом случае). Если за время PUT пользователь печатал (эпоха
@@ -977,6 +981,8 @@ export class APIClient {
             }
             const result = await resp.json();
             if (result?.updated_at) window.StorageManager.setBaseUpdatedAt(result.updated_at);
+            // #5: PUT подтверждён — коммитим отложенный снимок аудита нарушений.
+            window.ViolationAudit?.confirmSave?.();
             // PERSIST-4/A1: единый финал (эпоха-гейт синхронизации + снятие снимка
             // + гашение offline-машинерии). Eviction снимка живёт здесь, а не в
             // _escalateQuotaToDb — атомарно с гейтом (как в saveActContent).
