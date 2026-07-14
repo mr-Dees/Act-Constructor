@@ -67,10 +67,12 @@ class AuditLogService:
             # save, значения manual/periodic зарезервированы за явными действиями
             # редактора (см. saveType в ActDataSchema).
             current = await content_repo.get_content(act_id)
-            # Фактуры restore не меняет (_sync_invoices пропускает пустой
-            # invoiceNodeIds), поэтому одна и та же привязка node_id → реквизиты
-            # уходит и в pre-, и в post-снимок.
-            current_invoices = current.get("invoices", {}) if current else {}
+            # Pre-snapshot фиксирует состояние ДО restore — с текущими фактурами
+            # акта. Сам restore фактуры СТИРАЕТ: restore_data собирается без
+            # invoiceNodeIds (дефолт []), а _sync_invoices на пустом списке
+            # удаляет все фактуры акта (act_content.py). Поэтому post-снимок ниже
+            # отражает уже обнулённое состояние (invoices={}), а не эти.
+            pre_restore_invoices = current.get("invoices", {}) if current else {}
             if current:
                 # pbe-6: pre-snapshot симметричен post-snapshot'у — HTML-поля
                 # чистятся той же санитизацией (dict-форма), иначе restore
@@ -84,7 +86,7 @@ class AuditLogService:
                     tables=current.get("tables", {}),
                     textblocks=current.get("textBlocks", {}),
                     violations=current.get("violations", {}),
-                    invoices=current_invoices,
+                    invoices=pre_restore_invoices,
                 )
 
             # Пересчитываем состояние валидации из ВОССТАНОВЛЕННОГО содержимого
@@ -109,6 +111,9 @@ class AuditLogService:
             # restore_data, а не из сырых данных версии — иначе в историю
             # попал бы несанитизированный HTML, который при повторном restore
             # вернул бы stored XSS.
+            # Фактуры пустые: restore их обнулил (restore_data без invoiceNodeIds
+            # → _sync_invoices удалил все). Снимок обязан отражать РЕАЛЬНОЕ
+            # состояние после restore, иначе дифф показал бы фантомное «removed».
             await self.versions_repo.create_version(
                 act_id=act_id,
                 username=username,
@@ -117,7 +122,7 @@ class AuditLogService:
                 tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
                 textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
                 violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
-                invoices=current_invoices,
+                invoices={},
             )
 
         logger.info(

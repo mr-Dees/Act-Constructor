@@ -465,6 +465,47 @@ class TestRestoreVersionPreSnapshot:
         assert second_call.kwargs["save_type"] == "manual"
         assert second_call.kwargs["tree"]["label"] == "v1"
 
+    async def test_snapshots_invoices_reflect_restore_erasing_them(self):
+        """Pre-снимок несёт текущие фактуры, post-снимок — {} (restore их стёр).
+
+        restore_data собирается без invoiceNodeIds → _sync_invoices удаляет все
+        фактуры акта. Post-снимок обязан отразить обнулённое состояние, иначе
+        дифф показал бы фантомное «removed».
+        """
+        svc, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "label": "v1", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+        current_content = {
+            "tree": {"id": "root", "label": "v_current", "children": []},
+            "tables": {},
+            "textBlocks": {},
+            "violations": {},
+            "invoices": {"n5": {"node_id": "n5", "db_type": "hive", "table_name": "t1"}},
+        }
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=current_content)
+
+            await svc.restore_version(act_id=42, version_id=1, username="12345")
+
+        pre_call = versions_repo.create_version.await_args_list[0]
+        post_call = versions_repo.create_version.await_args_list[1]
+        # Pre — текущие фактуры (состояние ДО restore)
+        assert pre_call.kwargs["invoices"] == {
+            "n5": {"node_id": "n5", "db_type": "hive", "table_name": "t1"}
+        }
+        # Post — пусто (restore обнулил фактуры)
+        assert post_call.kwargs["invoices"] == {}
+
     async def test_pre_snapshot_sanitized_before_write(self):
         """pbe-6: pre-snapshot чистится той же санитизацией, что и post.
 
