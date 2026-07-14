@@ -128,6 +128,8 @@ Object.assign(ViolationManager.prototype, {
     createCaseElement(violation, item, index, caseNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
+        // Подсветка пустого кейса (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+        wrapper.classList.toggle('content-item-wrapper--empty', !item.content?.trim());
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
@@ -149,6 +151,7 @@ Object.assign(ViolationManager.prototype, {
             textarea.addEventListener('input', () => {
                 // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
                 this.setContentItemField(violation, item, 'content', textarea.value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !textarea.value.trim());
             });
         }
 
@@ -267,6 +270,8 @@ Object.assign(ViolationManager.prototype, {
     createFreeTextElement(violation, item, index, textNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
+        // Подсветка пустого текста (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+        wrapper.classList.toggle('content-item-wrapper--empty', !item.content?.trim());
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
@@ -288,6 +293,7 @@ Object.assign(ViolationManager.prototype, {
             textarea.addEventListener('input', () => {
                 // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
                 this.setContentItemField(violation, item, 'content', textarea.value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !textarea.value.trim());
             });
         }
 

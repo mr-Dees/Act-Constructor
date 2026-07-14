@@ -360,6 +360,8 @@ export class ViolationManager {
         violation[fieldName].items.forEach((item, index) => {
             const itemContainer = document.createElement('div');
             itemContainer.className = 'violation-list-item';
+            // Подсветка пустого пункта (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+            itemContainer.classList.toggle('violation-list-item--empty', !item.trim());
 
             const input = document.createElement('input');
             input.type = 'text';
@@ -376,6 +378,7 @@ export class ViolationManager {
                 // Обновляем массив при вводе
                 input.addEventListener('input', () => {
                     this.setViolationListItem(violation, index, input.value);
+                    itemContainer.classList.toggle('violation-list-item--empty', !input.value.trim());
                 });
 
                 // Обработка горячих клавиш для элементов списка
@@ -389,6 +392,7 @@ export class ViolationManager {
                         e.preventDefault();
                         input.value = originalValue;
                         violation[fieldName].items[index] = originalValue;
+                        itemContainer.classList.toggle('violation-list-item--empty', !originalValue.trim());
                         input.blur();
                         PreviewManager.updateBlock('violation', violation.id);
                     }

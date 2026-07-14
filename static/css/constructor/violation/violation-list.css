@@ -137,6 +137,14 @@
     outline-offset: var(--focus-outline-offset);
 }
 
+/* Подсветка пустого пункта списка описаний (#9-Г, Wave 2): не блокирующий
+   визуальный сигнал — пунктирная рамка предупреждающего цвета на поле ввода.
+   Класс тоггалится в JS (renderList, violation-core.js). */
+.violation-list-item--empty .violation-list-input {
+    border-style: dashed;
+    border-color: var(--warning);
+}
+
 /* Пустой список */
 .violation-list-container:empty::after {
     content: 'Список пуст. Нажмите кнопку выше для добавления элемента.';

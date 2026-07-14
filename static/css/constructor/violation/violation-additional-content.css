@@ -122,6 +122,16 @@
     cursor: grabbing;
 }
 
+/* Подсветка пустого кейса/текста (#9-Г, Wave 2): не блокирующий визуальный
+   сигнал — пунктирная рамка предупреждающего цвета. Класс тоггалится в JS
+   (createCaseElement/createFreeTextElement, violation-rendering.js) при
+   создании элемента и на каждый ввод. Анимаций нет — не требует отдельного
+   prefers-reduced-motion (глушится общим правилом в base/animations.css). */
+.content-item-wrapper--empty {
+    border-style: dashed;
+    border-color: var(--warning);
+}
+
 /* Метка типа элемента */
 .content-item-label {
     padding: var(--spacing-sm) var(--spacing-md);
