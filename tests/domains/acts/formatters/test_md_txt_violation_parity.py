@@ -1,8 +1,11 @@
-"""Тест-фиксация семантики descriptionList в MD/TXT (M.3-хвост).
+"""Тест-фиксация семантики нарушений в MD/TXT (M.3-хвост + Wave 2 #9/#12/#14/#16).
 
-Семантика как в DOCX: ПОЛНЫЙ список пунктов (не сводка «N метрик»).
-MD: «**Описание:**» + маркированный список; TXT: «Описание:» + «  • …».
-Если кто-то «оптимизирует» вывод до счётчика — эти тесты укажут на дрейф.
+descriptionList — ПОЛНЫЙ список пунктов (не сводка «N метрик»), БЕЗ заголовка
+«Описание» (#12): только маркированный список (MD «- …», TXT «  • …»).
+Обязательные Нарушено/Установлено выводят метку даже при пустом теле (#14);
+кейсы нумеруются сквозняком включая пустые, сброс на не-кейсе (#9/Q1); в MD
+картинка встраивается markdown-разметкой (#16). Если кто-то «оптимизирует»
+вывод — эти тесты укажут на дрейф.
 """
 from app.domains.acts.formatters.markdown_formatter import MarkdownFormatter
 from app.domains.acts.formatters.text_formatter import TextFormatter
@@ -44,7 +47,8 @@ def test_markdown_renders_full_description_list():
 
 def test_text_renders_full_description_list():
     out = _txt()._format_violation(_VIOLATION)
-    assert "Описание:" in out
+    # #12: заголовок «Описание» убран — остаются только буллиты.
+    assert "Описание:" not in out
     for item in _VIOLATION["descriptionList"]["items"]:
         assert f"• {item}" in out
     assert "метрик" not in out
@@ -122,3 +126,35 @@ def test_markdown_image_empty_url_falls_back_to_filename():
     out = _md()._format_violation(v)
     assert "*draft.png*" in out
     assert "![" not in out
+
+
+# --- TXT: те же правила #9/#14 (картинка #16 в TXT не трогается) ---
+
+
+def test_text_empty_first_case_shifts_next_to_case_2():
+    v = _violation_with_items([
+        {"type": "case", "content": ""},
+        {"type": "case", "content": "Второй"},
+    ])
+    out = _txt()._format_violation(v)
+    assert "Кейс 1:" in out
+    assert "Кейс 2: Второй" in out
+
+
+def test_text_case_numbering_resets_after_non_case():
+    v = _violation_with_items([
+        {"type": "case", "content": "A"},
+        {"type": "freeText", "content": "текст"},
+        {"type": "case", "content": "B"},
+    ])
+    out = _txt()._format_violation(v)
+    assert "Кейс 1: A" in out
+    assert "Кейс 1: B" in out
+    assert "Кейс 2:" not in out
+
+
+def test_text_required_labels_shown_when_empty():
+    v = dict(_VIOLATION, violated="", established="")
+    out = _txt()._format_violation(v)
+    assert "Нарушено:" in out
+    assert "Установлено:" in out
