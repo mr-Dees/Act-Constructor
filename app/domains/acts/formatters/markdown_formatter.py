@@ -182,9 +182,10 @@ class MarkdownFormatter(BaseFormatter):
             return
 
         # #12: заголовок «Описание» убран — только маркированный список.
+        # #15/Q1: рендерятся ВСЕ пункты, включая пустые (пустой → пустой буллит
+        # «- »), единообразно с превью и DOCX (пользователь выбрал не прятать).
         for item in items:
-            if item.strip():
-                lines.append(f"- {item}")
+            lines.append(f"- {item}")
         lines.append("")
 
     def _add_additional_content(self, lines: list[str], additional_content: dict):

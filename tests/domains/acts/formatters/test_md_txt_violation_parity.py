@@ -2,7 +2,8 @@
 
 descriptionList — ПОЛНЫЙ список пунктов (не сводка «N метрик»), БЕЗ заголовка
 «Описание» (#12): только маркированный список (MD «- …», TXT «  • …»).
-Обязательные Нарушено/Установлено выводят метку даже при пустом теле (#14);
+Пустые пункты списка тоже рендерятся — пустым буллитом (#15/Q1), единообразно
+с превью и DOCX. Обязательные Нарушено/Установлено выводят метку даже при пустом теле (#14);
 кейсы нумеруются сквозняком включая пустые, сброс на не-кейсе (#9/Q1); в MD
 картинка встраивается markdown-разметкой (#16). Если кто-то «оптимизирует»
 вывод — эти тесты укажут на дрейф.
@@ -58,6 +59,25 @@ def test_disabled_description_list_not_rendered():
     violation = dict(_VIOLATION, descriptionList={"enabled": False, "items": ["скрытая"]})
     assert "скрытая" not in _md()._format_violation(violation)
     assert "скрытая" not in _txt()._format_violation(violation)
+
+
+# --- #15/Q1: пустые пункты списка описаний рендерятся (единообразие с превью/DOCX) ---
+
+
+def test_markdown_renders_empty_description_bullets():
+    """Пустой пункт descriptionList → пустой буллит «- » (не отфильтровывается)."""
+    violation = dict(_VIOLATION, descriptionList={"enabled": True, "items": ["A", "", "B"]})
+    lines = _md()._format_violation(violation).split("\n")
+    bullets = [ln for ln in lines if ln.startswith("- ")]
+    assert bullets == ["- A", "- ", "- B"]
+
+
+def test_text_renders_empty_description_bullets():
+    """Пустой пункт descriptionList → пустой буллит «  • » (не отфильтровывается)."""
+    violation = dict(_VIOLATION, descriptionList={"enabled": True, "items": ["A", "", "B"]})
+    lines = _txt()._format_violation(violation).split("\n")
+    bullets = [ln for ln in lines if ln.lstrip().startswith("•")]
+    assert bullets == ["  • A", "  • ", "  • B"]
 
 
 # --- #9/Q1: нумерация всех кейсов, сброс на не-кейсе (паритет с DOCX/превью) ---
