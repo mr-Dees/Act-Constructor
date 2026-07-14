@@ -149,10 +149,10 @@ Object.assign(ViolationManager.prototype, {
             textarea.readOnly = true;
             textarea.classList.add('read-only');
         } else {
-            textarea.addEventListener('input', () => {
-                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-                this.setContentItemField(violation, item, 'content', textarea.value);
-                wrapper.classList.toggle('content-item-wrapper--empty', !textarea.value.trim());
+            // #18-А: Escape-откат/Enter-переход как у остальных полей нарушения.
+            this.setupTextareaHandlers(textarea, (value) => {
+                this.setContentItemField(violation, item, 'content', value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !value.trim());
             });
         }
 
@@ -215,10 +215,11 @@ Object.assign(ViolationManager.prototype, {
             captionInput.readOnly = true;
             captionInput.classList.add('read-only');
         } else {
-            captionInput.addEventListener('input', () => {
-                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-                this.setContentItemField(violation, item, 'caption', captionInput.value);
-            });
+            // #18-А: подпись — однострочный input, multiline=false
+            // (Shift+Enter для неё бессмыслен). Escape откатывает подпись.
+            this.setupTextareaHandlers(captionInput, (value) => {
+                this.setContentItemField(violation, item, 'caption', value);
+            }, false);
         }
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
@@ -294,10 +295,10 @@ Object.assign(ViolationManager.prototype, {
             textarea.readOnly = true;
             textarea.classList.add('read-only');
         } else {
-            textarea.addEventListener('input', () => {
-                // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-                this.setContentItemField(violation, item, 'content', textarea.value);
-                wrapper.classList.toggle('content-item-wrapper--empty', !textarea.value.trim());
+            // #18-А: Escape-откат/Enter-переход как у остальных полей нарушения.
+            this.setupTextareaHandlers(textarea, (value) => {
+                this.setContentItemField(violation, item, 'content', value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !value.trim());
             });
         }
 
