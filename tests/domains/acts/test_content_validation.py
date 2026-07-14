@@ -122,6 +122,94 @@ def test_complete_table_no_issues():
     assert issues == []
 
 
+# ── Нарушения (Q1, wave 2): мягкое предупреждение о незаполненных полях ──
+
+def _act_with_violation(violation: dict, node_extra: dict | None = None):
+    """Валидный акт с одним узлом-нарушением в разделе 1."""
+    sections = _base_sections()
+    node = {
+        "id": "vnode1", "label": "Нарушение", "type": "violation",
+        "violationId": "v1", "children": [],
+    }
+    if node_extra:
+        node.update(node_extra)
+    sections[0]["children"] = [node]
+    return ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        violations={"v1": violation},
+        saveType="manual",
+    )
+
+
+def test_violation_empty_fields_is_warning():
+    """Пустые violated/established (дефолты схемы) → мягкое замечание."""
+    data = _act_with_violation({"id": "v1", "nodeId": "vnode1"})
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+    issue = next(i for i in issues if i["code"] == "violation_incomplete")
+    assert issue["severity"] == "warning"
+    assert issue["ref"] == "v1"
+    assert status_from_issues(issues) == "warning"
+
+
+def test_violation_complete_no_issue():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" not in _codes(issues)
+    assert issues == []
+
+
+def test_violation_empty_description_item_is_warning():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "descriptionList": {"enabled": True, "items": ["пункт 1", "  "]},
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+
+
+def test_violation_empty_additional_content_case_is_warning():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "additionalContent": {
+            "enabled": True,
+            "items": [{"id": "c1", "type": "case", "content": ""}],
+        },
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+
+
+def test_violation_optional_fields_empty_not_counted():
+    """Опциональные поля (причины/последствия/ответственные/рекомендации)
+    пустыми НЕ считаются — вне scope находки о пустых обязательных полях."""
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "reasons": {"enabled": True, "content": ""},
+        "consequences": {"enabled": True, "content": ""},
+        "responsible": {"enabled": True, "content": ""},
+        "recommendations": {"enabled": True, "content": ""},
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" not in _codes(issues)
+
+
+def test_violation_uses_custom_label_in_message():
+    data = _act_with_violation(
+        {"id": "v1", "nodeId": "vnode1"},
+        node_extra={"customLabel": "Нарушение по кассе"},
+    )
+    issues = collect_validation_issues(data)
+    issue = next(i for i in issues if i["code"] == "violation_incomplete")
+    assert "Нарушение по кассе" in issue["message"]
+
+
 # ── Сервисный уровень: статус сохраняется и шлётся уведомление (#8) ──
 
 import pytest
@@ -306,4 +394,21 @@ async def test_warning_act_manual_save_does_not_notify():
         result = await svc.save_content(act_id=1, data=data, username="12345")
     assert result["validation_status"] == "warning"
     assert saved["validation_status"] == "warning"
+    emit.assert_not_called()
+
+
+async def test_violation_incomplete_manual_save_not_blocked():
+    """Незаполненное нарушение (Q1, wave 2): акт СОХРАНЯЕТСЯ (не 422/исключение),
+    статус помечается 'warning', уведомление НЕ шлётся — симметрично пустой
+    таблице (table_no_data)."""
+    svc, saved = _svc()
+    data = _act_with_violation({"id": "v1", "nodeId": "vnode1"})
+    with patch(
+        "app.domains.acts.services.notifications_producer.emit_act_notification",
+        new=AsyncMock(),
+    ) as emit:
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+    assert result["validation_status"] == "warning"
+    assert saved["validation_status"] == "warning"
+    assert any(i["code"] == "violation_incomplete" for i in result["validation_issues"])
     emit.assert_not_called()
