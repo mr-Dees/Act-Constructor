@@ -4,6 +4,10 @@
  */
 import { SafeHTML, renderActContent } from '../../shared/sanitize.js';
 import { iterateVisibleCells } from '../../constructor/table/grid-merges.js';
+import { CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../../constructor/violation/violation-fields.js';
+import { computeAdditionalContentNumbers } from '../../constructor/violation/violation-numbering.js';
+import { CONTENT_TYPE_CASE, CONTENT_TYPE_IMAGE } from '../../constructor/violation/violation-content-item.js';
+import { renderImageWithFallback, buildImagePlaceholder } from '../../constructor/violation/violation-image-render.js';
 
 export class DiffRenderer {
     /**
@@ -274,6 +278,22 @@ export class DiffRenderer {
             div.appendChild(fieldDiv);
         }
 
+        // Список описаний (descriptionList) — структурный под-дифф движка.
+        const dlDiff = violDiff.fieldDiffs?.descriptionList;
+        if (dlDiff?.changed) {
+            this._renderDescriptionListDiff(div, dlDiff);
+        }
+
+        // Доп.контент (additionalContent) — структурный под-дифф движка.
+        const acDiff = violDiff.fieldDiffs?.additionalContent;
+        if (acDiff?.changed) {
+            this._renderAdditionalContentDiff(
+                div, acDiff,
+                violDiff.oldData?.additionalContent?.items || [],
+                violDiff.newData?.additionalContent?.items || [],
+            );
+        }
+
         container.appendChild(div);
     }
 
@@ -281,8 +301,206 @@ export class DiffRenderer {
         const val = viol[field];
         if (!val) return '';
         if (typeof val === 'string') return val;
-        if (typeof val === 'object' && 'content' in val) return val.content || '';
+        if (typeof val === 'object' && 'content' in val) {
+            // Мируем движок: выключенное опц.поле не показываем (пропало из акта).
+            if ('enabled' in val && !val.enabled) return '';
+            return val.content || '';
+        }
         return '';
+    }
+
+    /**
+     * Строка diff-разметки из word-diff (ДЕФОЛТНЫЙ профиль SafeHTML.set):
+     * _escapeHtml + обёртки <ins>/<del>, как в word-diff-ветке текстблока.
+     * Профиль acts срезал бы <ins>/<del> (вне acts-allowlist) — см. тех-долг
+     * diff-renderer-textblock-profile.test.mjs.
+     */
+    static _wordDiffToHtml(wordDiff) {
+        return (wordDiff || []).map((part) => {
+            const escaped = this._escapeHtml(part.text);
+            if (part.type === 'insert') return `<ins>${escaped}</ins>`;
+            if (part.type === 'delete') return `<del>${escaped}</del>`;
+            return escaped;
+        }).join(' ');
+    }
+
+    /**
+     * Рендер диффа списка описаний: <ul> с пер-элементной подсветкой
+     * added/removed/modified. Заголовка нет (паритет с collectViolationLines —
+     * descriptionList без метки, решение #12).
+     */
+    static _renderDescriptionListDiff(container, dlDiff) {
+        const ul = document.createElement('ul');
+        ul.className = 'diff-desclist';
+        for (const item of dlDiff.items || []) {
+            const li = document.createElement('li');
+            li.className = `diff-desclist-item diff-${item.status}`;
+            if (item.status === 'added') {
+                const ins = document.createElement('ins');
+                ins.textContent = item.new || '';
+                li.appendChild(ins);
+            } else if (item.status === 'removed') {
+                const del = document.createElement('del');
+                del.textContent = item.old || '';
+                li.appendChild(del);
+            } else if (item.status === 'modified') {
+                SafeHTML.set(li, this._wordDiffToHtml(item.wordDiff));
+            } else {
+                li.textContent = item.new ?? item.old ?? '';
+            }
+            ul.appendChild(li);
+        }
+        container.appendChild(ul);
+    }
+
+    /**
+     * Рендер диффа доп.контента. Метки/нумерация — зеркало collectViolationLines:
+     * «Кейс N» через computeAdditionalContentNumbers, свободный текст без метки,
+     * картинки — превью с подписью. Номер кейса берётся из новой версии (для
+     * удалённых — из старой).
+     */
+    static _renderAdditionalContentDiff(container, acDiff, oldItems, newItems) {
+        const newNums = computeAdditionalContentNumbers(newItems);
+        const oldNums = computeAdditionalContentNumbers(oldItems);
+        const newNumById = new Map();
+        newItems.forEach((it, i) => { if (it && it.id != null) newNumById.set(it.id, newNums[i]?.number); });
+        const oldNumById = new Map();
+        oldItems.forEach((it, i) => { if (it && it.id != null) oldNumById.set(it.id, oldNums[i]?.number); });
+
+        for (const entry of acDiff.entries || []) {
+            const caseNumber = entry.newItem
+                ? newNumById.get(entry.newItem.id)
+                : oldNumById.get(entry.oldItem?.id);
+            this._renderContentEntry(container, entry, caseNumber);
+        }
+    }
+
+    /** Рендер одного элемента доп.контента (кейс / свободный текст / картинка). */
+    static _renderContentEntry(container, entry, caseNumber) {
+        const item = entry.newItem || entry.oldItem;
+        if (!item) return;
+
+        const itemDiv = document.createElement('div');
+        itemDiv.className = `diff-violation-item diff-${entry.status}`;
+
+        if (item.type === CONTENT_TYPE_IMAGE) {
+            this._appendContentHeader(itemDiv, '', entry);
+            this._renderImageEntry(itemDiv, entry);
+            container.appendChild(itemDiv);
+            return;
+        }
+
+        const baseLabel = item.type === CONTENT_TYPE_CASE
+            ? CASE_LABEL_TEMPLATE.replace('{n}', caseNumber != null ? caseNumber : '')
+            : FREE_TEXT_LABEL;
+        this._appendContentHeader(itemDiv, baseLabel, entry);
+
+        const body = document.createElement('div');
+        body.className = 'diff-violation-item-body';
+        if (entry.status === 'added') {
+            const ins = document.createElement('ins');
+            ins.textContent = entry.newItem?.content || '';
+            body.appendChild(ins);
+        } else if (entry.status === 'removed') {
+            const del = document.createElement('del');
+            del.textContent = entry.oldItem?.content || '';
+            body.appendChild(del);
+        } else if (entry.status === 'modified' && entry.wordDiff) {
+            SafeHTML.set(body, this._wordDiffToHtml(entry.wordDiff));
+        } else {
+            body.textContent = (entry.newItem || entry.oldItem)?.content || '';
+        }
+        itemDiv.appendChild(body);
+        container.appendChild(itemDiv);
+    }
+
+    /** Метка элемента доп.контента + маркер добавления/удаления/перестановки. */
+    static _appendContentHeader(itemDiv, baseLabel, entry) {
+        let marker = '';
+        if (entry.status === 'added') marker = ' (ДОБАВЛЕНО)';
+        else if (entry.status === 'removed') marker = ' (УДАЛЕНО)';
+        else if (entry.reordered) marker = ' (порядок изменён)';
+        if (!baseLabel && !marker) return;
+        const el = document.createElement('strong');
+        el.className = 'diff-violation-item-label';
+        el.textContent = baseLabel ? `${baseLabel}${marker}: ` : `${marker.trim()} `;
+        itemDiv.appendChild(el);
+    }
+
+    /** Рендер картинки-элемента: превью старой/новой + текст изменённых атрибутов. */
+    static _renderImageEntry(itemDiv, entry) {
+        if (entry.status === 'added') {
+            this._appendImagePreview(itemDiv, entry.newItem);
+            return;
+        }
+        if (entry.status === 'removed') {
+            this._appendImagePreview(itemDiv, entry.oldItem);
+            return;
+        }
+
+        const fields = entry.fields || {};
+        if (fields.url) {
+            this._appendSublabel(itemDiv, 'Было:');
+            this._appendImagePreview(itemDiv, entry.oldItem);
+            this._appendSublabel(itemDiv, 'Стало:');
+            this._appendImagePreview(itemDiv, entry.newItem);
+        } else {
+            this._appendImagePreview(itemDiv, entry.newItem || entry.oldItem);
+        }
+
+        const attrLabels = { caption: 'Подпись', filename: 'Файл', width: 'Ширина' };
+        for (const key of ['caption', 'filename', 'width']) {
+            if (!fields[key]) continue;
+            const line = document.createElement('div');
+            line.className = 'diff-violation-field diff-field-changed';
+            const strong = document.createElement('strong');
+            strong.textContent = `${attrLabels[key]}: `;
+            line.appendChild(strong);
+            const del = document.createElement('del');
+            del.textContent = String(fields[key].old ?? '');
+            line.appendChild(del);
+            line.appendChild(document.createTextNode(' → '));
+            const ins = document.createElement('ins');
+            ins.textContent = String(fields[key].new ?? '');
+            line.appendChild(ins);
+            itemDiv.appendChild(line);
+        }
+    }
+
+    static _appendSublabel(container, text) {
+        const el = document.createElement('div');
+        el.className = 'diff-violation-sublabel';
+        el.textContent = text;
+        container.appendChild(el);
+    }
+
+    /**
+     * Превью картинки нарушения с fallback на текстовый плейсхолдер (общее ядро
+     * с превью/редактором — violation-image-render.js). Пустой url → плейсхолдер.
+     */
+    static _appendImagePreview(container, item) {
+        const wrap = document.createElement('div');
+        wrap.className = 'diff-violation-image';
+        const placeholderText = `Изображение: ${(item && item.filename) || ''}`;
+        const placeholderClassName = 'diff-violation-image-placeholder';
+        if (!item || !item.url) {
+            wrap.appendChild(buildImagePlaceholder(placeholderText, placeholderClassName));
+        } else {
+            renderImageWithFallback(wrap, {
+                src: item.url,
+                alt: item.caption || item.filename || '',
+                imgClassName: 'diff-violation-image-img',
+                placeholderText,
+                placeholderClassName,
+            });
+        }
+        container.appendChild(wrap);
+        if (item && item.caption) {
+            const cap = document.createElement('div');
+            cap.className = 'diff-violation-caption';
+            cap.textContent = item.caption;
+            container.appendChild(cap);
+        }
     }
 
     static _escapeHtml(str) {
