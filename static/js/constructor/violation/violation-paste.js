@@ -11,6 +11,49 @@ import {
     CONTENT_TYPE_FREE_TEXT,
 } from './violation-content-item.js';
 
+/**
+ * Строгий маркер кейса: «Кейс» + номер + разделитель в начале строки.
+ * Флаг i ловит «кейс» в любом регистре; класс разделителей —
+ * точка / двоеточие / скобка / дефис / en-dash / em-dash. Требует РОВНО
+ * такой префикс: «Кейсы …», «Кейс 7 без разделителя» — уже не кейс.
+ */
+const CASE_PREFIX_RE = /^Кейс\s*\d+\s*[.:)\-–—]/i;
+
+/**
+ * Определяет тип вставляемого из буфера текста и очищает содержимое.
+ * Кейс — только при строгом совпадении CASE_PREFIX_RE; тогда снимается
+ * РОВНО совпавший префикс (не фиксированные 4 символа). Иначе — произвольный
+ * текст без изменений.
+ *
+ * @param {string} textContent - Оригинальный текст буфера (ожидается .trim()'нутым)
+ * @returns {{type: string, content: string}}
+ */
+export function parseClipboardText(textContent) {
+    if (CASE_PREFIX_RE.test(textContent)) {
+        return {
+            type: CONTENT_TYPE_CASE,
+            content: textContent.replace(CASE_PREFIX_RE, '').trim(),
+        };
+    }
+    return { type: CONTENT_TYPE_FREE_TEXT, content: textContent };
+}
+
+/**
+ * true, если стандартную вставку в этот target перехватывать НЕЛЬЗЯ:
+ * поле ввода (textarea/input) или contenteditable-редактор (текстблок).
+ * Иначе Ctrl+V в редакторе, когда мышь/фокус рядом с зоной нарушения,
+ * ушёл бы в дополнительный контент (#19).
+ *
+ * @param {EventTarget} target - e.target события paste
+ * @returns {boolean}
+ */
+export function pasteTargetIsEditable(target) {
+    if (!target) return false;
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return true;
+    if (target.closest && target.closest('[contenteditable="true"]')) return true;
+    return false;
+}
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**
@@ -96,25 +139,12 @@ Object.assign(ViolationManager.prototype, {
                 if (textContent) {
                     e.preventDefault();
 
-                    // Определяем тип: кейс или текст
-                    const normalizedText = textContent.toLowerCase();
-                    const startsWithCase = normalizedText.startsWith('кейс');
-
-                    let type, content, message;
-
-                    if (startsWithCase) {
-                        type = CONTENT_TYPE_CASE;
-                        // Убираем "кейс" (4 символа) и затем номер с разделителем
-                        content = textContent
-                            .substring(4)
-                            .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')
-                            .trim();
-                        message = 'Кейс добавлен из буфера обмена';
-                    } else {
-                        type = CONTENT_TYPE_FREE_TEXT;
-                        content = textContent;
-                        message = 'Текст добавлен из буфера обмена';
-                    }
+                    // Строгий маркер кейса (#5): «Кейс N<разделитель>» снимается
+                    // ровно по совпадению, иначе — произвольный текст как есть.
+                    const { type, content } = parseClipboardText(textContent);
+                    const message = type === CONTENT_TYPE_CASE
+                        ? 'Кейс добавлен из буфера обмена'
+                        : 'Текст добавлен из буфера обмена';
 
                     // Единый гейт лимита (#4) уже мог отказать (Notifications.warning
                     // показан внутри) — тогда false, и success не зовём, чтобы не
