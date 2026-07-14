@@ -205,6 +205,20 @@ export class DiffEngine {
                 }
             }
 
+            // Список описаний (descriptionList) — структурный под-дифф.
+            const descDiff = this._diffDescriptionList(oldV, newV);
+            if (descDiff.changed) {
+                fieldDiffs.descriptionList = descDiff;
+                hasFieldChanges = true;
+            }
+
+            // Доп.контент (additionalContent) — структурный под-дифф с матчингом по id.
+            const addDiff = this._diffAdditionalContent(oldV, newV);
+            if (addDiff.changed) {
+                fieldDiffs.additionalContent = addDiff;
+                hasFieldChanges = true;
+            }
+
             result[id] = {
                 status: hasFieldChanges ? 'modified' : 'unchanged',
                 fieldDiffs,
@@ -220,8 +234,143 @@ export class DiffEngine {
         const val = viol[field];
         if (val === null || val === undefined) return '';
         if (typeof val === 'string') return val;
-        if (typeof val === 'object' && 'content' in val) return val.content || '';
+        if (typeof val === 'object' && 'content' in val) {
+            // Выключенное опц.поле (enabled=false) канонизируем как пустое:
+            // поле пропало из акта, даже если старый content сохранён. Так
+            // выключение поля при неизменном content видно как изменение.
+            if ('enabled' in val && !val.enabled) return '';
+            return val.content || '';
+        }
         return String(val);
+    }
+
+    /**
+     * Структурный дифф списка описаний (descriptionList: {enabled, items:[str]}).
+     * Выключенный список канонизируется как пустой (в акте не показан).
+     * Пер-элементный diff по позиции: added/removed/modified (modified → word-diff).
+     * @returns {{kind, changed, enabled, oldEnabled, items: Array}}
+     */
+    static _diffDescriptionList(oldV, newV) {
+        const oldDl = (oldV && oldV.descriptionList) || {};
+        const newDl = (newV && newV.descriptionList) || {};
+        const oldEnabled = !!oldDl.enabled;
+        const newEnabled = !!newDl.enabled;
+        const oldItems = oldEnabled && Array.isArray(oldDl.items) ? oldDl.items : [];
+        const newItems = newEnabled && Array.isArray(newDl.items) ? newDl.items : [];
+
+        const maxLen = Math.max(oldItems.length, newItems.length);
+        const items = [];
+        let changed = false;
+        for (let i = 0; i < maxLen; i++) {
+            const hasOld = i < oldItems.length;
+            const hasNew = i < newItems.length;
+            const oldItem = hasOld ? String(oldItems[i] ?? '') : null;
+            const newItem = hasNew ? String(newItems[i] ?? '') : null;
+            if (!hasOld) {
+                items.push({ status: 'added', new: newItem });
+                changed = true;
+            } else if (!hasNew) {
+                items.push({ status: 'removed', old: oldItem });
+                changed = true;
+            } else if (oldItem !== newItem) {
+                items.push({ status: 'modified', old: oldItem, new: newItem, wordDiff: this._wordDiff(oldItem, newItem) });
+                changed = true;
+            } else {
+                items.push({ status: 'unchanged', old: oldItem, new: newItem });
+            }
+        }
+        return { kind: 'list', changed, enabled: newEnabled, oldEnabled, items };
+    }
+
+    /**
+     * Структурный дифф доп.контента (additionalContent: {enabled, items:[{id,type,...}]}).
+     * Выключенный контент канонизируется как пустой. Матчинг элементов по item.id
+     * (стабилен в пределах истории ОДНОГО акта). Классификация:
+     * added/removed/modified/reordered. case/freeText → word-diff по content;
+     * image → строковое сравнение url/caption/filename/width (base64-url НЕ через
+     * word-diff). reordered — по относительному порядку общих id (устойчив к
+     * вставкам/удалениям).
+     * @returns {{kind, changed, enabled, oldEnabled, entries: Array}}
+     */
+    static _diffAdditionalContent(oldV, newV) {
+        const oldAc = (oldV && oldV.additionalContent) || {};
+        const newAc = (newV && newV.additionalContent) || {};
+        const oldEnabled = !!oldAc.enabled;
+        const newEnabled = !!newAc.enabled;
+        const oldItems = oldEnabled && Array.isArray(oldAc.items) ? oldAc.items : [];
+        const newItems = newEnabled && Array.isArray(newAc.items) ? newAc.items : [];
+
+        const oldById = new Map();
+        oldItems.forEach((it, idx) => { if (it && it.id != null) oldById.set(it.id, idx); });
+        const newById = new Map();
+        newItems.forEach((it, idx) => { if (it && it.id != null) newById.set(it.id, idx); });
+
+        // Ранги в последовательности ОБЩИХ id (для устойчивого reorder-сигнала).
+        const oldRank = new Map();
+        oldItems.forEach((it) => { if (it && it.id != null && newById.has(it.id)) oldRank.set(it.id, oldRank.size); });
+        const newRank = new Map();
+        newItems.forEach((it) => { if (it && it.id != null && oldById.has(it.id)) newRank.set(it.id, newRank.size); });
+
+        const entries = [];
+        let changed = false;
+
+        // Порядок отображения — новая версия; потом дописываем удалённые.
+        newItems.forEach((newItem) => {
+            const id = newItem && newItem.id;
+            if (id == null || !oldById.has(id)) {
+                entries.push({ status: 'added', newItem });
+                changed = true;
+                return;
+            }
+            const oldItem = oldItems[oldById.get(id)];
+            const itemChange = this._diffContentItem(oldItem, newItem);
+            const reordered = oldRank.get(id) !== newRank.get(id);
+            let status;
+            if (itemChange.changed) status = 'modified';
+            else if (reordered) status = 'reordered';
+            else status = 'unchanged';
+            if (status !== 'unchanged') changed = true;
+            entries.push({ status, reordered, oldItem, newItem, ...itemChange.detail });
+        });
+
+        oldItems.forEach((oldItem) => {
+            const id = oldItem && oldItem.id;
+            if (id == null || !newById.has(id)) {
+                entries.push({ status: 'removed', oldItem });
+                changed = true;
+            }
+        });
+
+        return { kind: 'additional', changed, enabled: newEnabled, oldEnabled, entries };
+    }
+
+    /**
+     * Сравнение пары элементов доп.контента одного id.
+     * image → строковое сравнение метаданных (url — многомегабайтный data-URL,
+     * сравнивается СТРОКОЙ, НЕ через word-diff). case/freeText → word-diff по content.
+     * @returns {{changed: boolean, detail: Object}}
+     */
+    static _diffContentItem(oldItem, newItem) {
+        if ((newItem && newItem.type) === 'image') {
+            const fields = {};
+            let changed = false;
+            for (const key of ['url', 'caption', 'filename', 'width']) {
+                const oldFv = (oldItem && oldItem[key] != null) ? oldItem[key] : '';
+                const newFv = (newItem && newItem[key] != null) ? newItem[key] : '';
+                if (String(oldFv) !== String(newFv)) {
+                    fields[key] = { old: oldFv, new: newFv };
+                    changed = true;
+                }
+            }
+            return { changed, detail: { fields } };
+        }
+        const oldContent = (oldItem && oldItem.content) || '';
+        const newContent = (newItem && newItem.content) || '';
+        const typeChanged = (oldItem && oldItem.type) !== (newItem && newItem.type);
+        if (oldContent === newContent && !typeChanged) {
+            return { changed: false, detail: {} };
+        }
+        return { changed: true, detail: { typeChanged, wordDiff: this._wordDiff(oldContent, newContent) } };
     }
 
     /**
