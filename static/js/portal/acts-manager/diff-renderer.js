@@ -182,12 +182,20 @@ export class DiffRenderer {
         const data = tableDiff.newData || tableDiff.oldData;
         if (!data?.grid) return;
 
+        // Сводка структурных изменений (ширины/размер сетки/объединения/заголовки).
+        this._renderTableStructureSummary(wrapper, tableDiff.structure);
+
         // Строим set изменённых ячеек
         const changedCells = new Map();
         if (tableDiff.cellDiffs) {
             for (const cd of tableDiff.cellDiffs) {
                 changedCells.set(`${cd.row}-${cd.col}`, cd);
             }
+        }
+        // Ячейки с изменёнными структурными атрибутами (объединение/заголовок).
+        const attrCells = new Set();
+        for (const ca of tableDiff.structure?.cellAttrs || []) {
+            attrCells.add(`${ca.row}-${ca.col}`);
         }
 
         const table = document.createElement('table');
@@ -225,6 +233,8 @@ export class DiffRenderer {
                 } else {
                     td.textContent = cell.content || '';
                 }
+                // Подсветка ячейки с изменёнными объединением/заголовком.
+                if (attrCells.has(key)) td.classList.add('diff-cell-attr-changed');
 
                 tr.appendChild(td);
             });
@@ -233,6 +243,34 @@ export class DiffRenderer {
 
         wrapper.appendChild(table);
         container.appendChild(wrapper);
+    }
+
+    /**
+     * Сводка структурных изменений таблицы (флаги, не попиксельное выравнивание):
+     * ширины колонок, размер сетки, объединения/заголовки ячеек.
+     */
+    static _renderTableStructureSummary(container, structure) {
+        if (!structure?.changed) return;
+        const notes = [];
+        if (structure.gridResized) {
+            const g = structure.gridResized;
+            notes.push(`Размер сетки: ${g.oldRows}×${g.oldCols} → ${g.newRows}×${g.newCols}`);
+        }
+        if (structure.colWidths) notes.push('Ширины колонок изменены');
+        if (structure.cellAttrs?.length) {
+            notes.push(`Объединения/заголовки ячеек изменены: ${structure.cellAttrs.length}`);
+        }
+        if (!notes.length) return;
+
+        const box = document.createElement('div');
+        box.className = 'diff-table-structure';
+        for (const text of notes) {
+            const line = document.createElement('div');
+            line.className = 'diff-table-structure-note';
+            line.textContent = text;
+            box.appendChild(line);
+        }
+        container.appendChild(box);
     }
 
     /**
