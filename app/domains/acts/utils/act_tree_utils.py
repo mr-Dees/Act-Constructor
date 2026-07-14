@@ -66,28 +66,3 @@ class ActTreeUtils:
             for child in node.get('children', []):
                 stack.append((child, current_item_id))
         return None
-
-    @staticmethod
-    def calculate_tree_depth(tree: dict, current_depth: int = 0) -> int:
-        """
-        Вычисляет максимальную глубину дерева (итеративный обход).
-
-        Args:
-            tree: Узел дерева с полем 'children'
-            current_depth: Начальная глубина
-
-        Returns:
-            Максимальная глубина дерева
-        """
-        max_depth = current_depth
-        # Элементы стека: (node, depth)
-        stack = [(tree, current_depth)]
-        while stack:
-            node, depth = stack.pop()
-            children = node.get('children', [])
-            if not children:
-                max_depth = max(max_depth, depth)
-            else:
-                for child in children:
-                    stack.append((child, depth + 1))
-        return max_depth

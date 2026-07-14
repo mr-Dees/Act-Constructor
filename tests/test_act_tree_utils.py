@@ -57,11 +57,6 @@ def sample_tree():
     }
 
 
-@pytest.fixture
-def flat_tree():
-    """Дерево без дочерних узлов."""
-    return {"id": "root", "label": "Акт", "number": "0", "children": []}
-
 
 # ── extract_node_number ──
 
@@ -123,29 +118,3 @@ class TestFindParentItemNodeId:
     def test_not_found(self, sample_tree):
         result = ActTreeUtils.find_parent_item_node_id(sample_tree, "missing")
         assert result is None
-
-
-# ── calculate_tree_depth ──
-
-
-class TestCalculateTreeDepth:
-
-    def test_flat(self, flat_tree):
-        assert ActTreeUtils.calculate_tree_depth(flat_tree) == 0
-
-    def test_sample_tree(self, sample_tree):
-        # root -> "1" -> node_...7a4k9b2 -> node_...table_... = глубина 3
-        assert ActTreeUtils.calculate_tree_depth(sample_tree) == 3
-
-    def test_custom_start_depth(self, sample_tree):
-        assert ActTreeUtils.calculate_tree_depth(sample_tree, current_depth=5) == 8
-
-    def test_single_node(self):
-        assert ActTreeUtils.calculate_tree_depth({"id": "x"}) == 0
-
-    def test_wide_tree(self):
-        tree = {
-            "id": "root",
-            "children": [{"id": f"c{i}", "children": []} for i in range(10)],
-        }
-        assert ActTreeUtils.calculate_tree_depth(tree) == 1

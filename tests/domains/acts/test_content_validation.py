@@ -379,6 +379,41 @@ async def test_tables_per_node_limit_raises_validation_error():
     assert exc_info.value.status_code == 400
 
 
+def test_validate_tree_single_pass_traversal():
+    """#14 код-ревью: глубина и три per-node лимита считаются за ОДИН обход
+    дерева, не за 4 отдельных (было: calculate_tree_depth + 3×
+    _validate_children_per_node, каждый со своим stack.pop()-обходом).
+
+    Проверяем spy-обёрткой над root-узлом: обход root.get("children") должен
+    случиться ровно один раз."""
+    svc, _saved = _svc()
+    svc.acts_settings.textblocks.per_node = 5
+    svc.acts_settings.violations.per_node = 5
+    svc.acts_settings.tables.per_node = 5
+
+    access_log = []
+
+    class SpyDict(dict):
+        def get(self, key, *args):
+            if key == "children":
+                access_log.append(1)
+            return super().get(key, *args)
+
+    root = SpyDict(id="root", label="Акт", children=_base_sections())
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    # Прямое присвоение обходит pydantic-нормализацию поля tree (иначе
+    # field_validator пересоздаёт дерево через ActItemSchema.model_dump(),
+    # и spy-обёртка root-узла теряется).
+    data.tree = root
+
+    svc._validate_tree(data)
+
+    assert len(access_log) == 1
+
+
 async def test_warning_act_manual_save_does_not_notify():
     """Статус warning (только пустые таблицы) портальное уведомление НЕ шлёт —
     даже при ручном сохранении: warning не критичен (решение пользователя)."""
