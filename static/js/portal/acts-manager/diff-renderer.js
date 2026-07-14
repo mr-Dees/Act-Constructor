@@ -285,6 +285,16 @@ export class DiffRenderer {
         } else if (tbDiff.status === 'removed') {
             renderActContent(div, tbDiff.oldContent || '');
         } else if (tbDiff.status === 'modified' && tbDiff.wordDiff) {
+            // Правка только форматирования (видимый текст тот же) — word-diff пуст,
+            // поэтому показываем бейдж, иначе изменение выглядело бы «пустым».
+            // Бейдж уходит в container ДО текстблока, чтобы не тронуть innerHTML
+            // корневого div (на нём держится подсветка <ins>/<del>).
+            if (tbDiff.formattingOnly) {
+                const badge = document.createElement('div');
+                badge.className = 'diff-textblock-format-badge';
+                badge.textContent = 'Изменено форматирование';
+                container.appendChild(badge);
+            }
             div.className += ' diff-text';
             // Профиль по умолчанию (НЕ 'acts'): здесь рендерится diff-разметка
             // <ins>/<del> поверх уже pre-stripped plain text (_stripHtml в

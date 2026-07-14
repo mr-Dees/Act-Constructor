@@ -326,6 +326,18 @@ h5.version-preview-heading { font-size: 13px; }
     line-height: 1.6;
 }
 
+/* Бейдж «изменено форматирование» (видимый текст тот же, разный HTML) */
+.diff-textblock-format-badge {
+    display: inline-block;
+    margin: 4px 0 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    border-radius: 4px;
+}
+
 /* Diff violation */
 .diff-violation {
     margin: 8px 0;
