@@ -212,6 +212,42 @@ h5.version-preview-heading { font-size: 13px; }
     display: none;
 }
 
+/* Маркеры изменения атрибутов узла (number/label/customLabel/kind) */
+.diff-node-attr-change {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 12px;
+    font-weight: normal;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
+.diff-node-attr-change del {
+    color: #dc2626;
+    text-decoration: line-through;
+}
+
+.diff-node-attr-change ins {
+    color: #16a34a;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+/* Бейдж «перемещён» */
+.diff-node-moved-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
 /* Diff table wrapper */
 .diff-table-wrapper {
     margin: 8px 0;

@@ -45,10 +45,12 @@ export class DiffRenderer {
         const diffStatus = node._diff || 'unchanged';
         const type = node.type || 'item';
 
-        // Определяем, есть ли изменения в содержимом этого узла
+        // Определяем, есть ли изменения в содержимом этого узла или его атрибутах
         const hasContentChanges = this._nodeHasContentChanges(node, diffResult);
-        const effectiveStatus = diffStatus === 'unchanged' && hasContentChanges ? 'modified' : diffStatus;
-        const isUnchanged = effectiveStatus === 'unchanged' && !hasContentChanges;
+        const nodeAttrChanged = !!node._fieldChanges || !!node._moved;
+        const effectiveStatus = diffStatus === 'unchanged' && (hasContentChanges || nodeAttrChanged)
+            ? 'modified' : diffStatus;
+        const isUnchanged = effectiveStatus === 'unchanged' && !hasContentChanges && !nodeAttrChanged;
 
         // Контейнер узла
         const nodeDiv = document.createElement('div');
@@ -64,6 +66,7 @@ export class DiffRenderer {
             heading.textContent = `${number}${node.label || ''}`;
             if (effectiveStatus === 'added') heading.textContent += ' (ДОБАВЛЕНО)';
             if (effectiveStatus === 'removed') heading.textContent += ' (УДАЛЕНО)';
+            this._appendNodeChangeBadges(heading, node);
             nodeDiv.appendChild(heading);
         }
 
@@ -74,6 +77,7 @@ export class DiffRenderer {
                 const label = document.createElement('div');
                 label.className = 'version-preview-label';
                 label.textContent = node.customLabel || node.label || 'Таблица';
+                this._appendNodeChangeBadges(label, node);
                 nodeDiv.appendChild(label);
 
                 if (tableDiff.status !== 'unchanged' || !onlyChanges) {
@@ -89,6 +93,7 @@ export class DiffRenderer {
                 const label = document.createElement('div');
                 label.className = 'version-preview-label';
                 label.textContent = node.customLabel || node.label || 'Текстовый блок';
+                this._appendNodeChangeBadges(label, node);
                 nodeDiv.appendChild(label);
 
                 if (tbDiff.status !== 'unchanged' || !onlyChanges) {
@@ -104,6 +109,7 @@ export class DiffRenderer {
                 const label = document.createElement('div');
                 label.className = 'version-preview-label';
                 label.textContent = node.customLabel || node.label || 'Нарушение';
+                this._appendNodeChangeBadges(label, node);
                 nodeDiv.appendChild(label);
 
                 if (violDiff.status !== 'unchanged' || !onlyChanges) {
@@ -127,6 +133,43 @@ export class DiffRenderer {
         if (node.textBlockId && diffResult.textblocks[node.textBlockId]?.status !== 'unchanged') return true;
         if (node.violationId && diffResult.violations[node.violationId]?.status !== 'unchanged') return true;
         return false;
+    }
+
+    /**
+     * Добавляет к заголовку/метке узла маркеры изменения его атрибутов
+     * (number/label/customLabel/kind old→new) и бейдж «перемещён».
+     * Для added/removed узлов атрибуты не детализируем — узел и так помечен
+     * цветом целиком.
+     */
+    static _appendNodeChangeBadges(el, node) {
+        const status = node._diff || 'unchanged';
+        const changes = node._fieldChanges;
+        if (changes && status !== 'added' && status !== 'removed') {
+            const labels = { number: 'Номер', label: 'Название', customLabel: 'Метка', kind: 'Подвид', type: 'Тип' };
+            for (const field of ['number', 'label', 'customLabel', 'kind', 'type']) {
+                const ch = changes[field];
+                if (!ch) continue;
+                const span = document.createElement('span');
+                span.className = 'diff-node-attr-change';
+                const strong = document.createElement('strong');
+                strong.textContent = `${labels[field] || field}: `;
+                span.appendChild(strong);
+                const del = document.createElement('del');
+                del.textContent = String(ch.old ?? '') || '∅';
+                span.appendChild(del);
+                span.appendChild(document.createTextNode(' → '));
+                const ins = document.createElement('ins');
+                ins.textContent = String(ch.new ?? '') || '∅';
+                span.appendChild(ins);
+                el.appendChild(span);
+            }
+        }
+        if (node._moved) {
+            const badge = document.createElement('span');
+            badge.className = 'diff-node-moved-badge';
+            badge.textContent = 'перемещён';
+            el.appendChild(badge);
+        }
     }
 
     /**
