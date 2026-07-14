@@ -511,6 +511,17 @@ class TestRestoreVersionPreSnapshot:
                 "verification_status": "verified",
             },
         ]
+        # Реальное состояние фактур ПОСЛЕ restore (перечитывается из репозитория):
+        # фактура версии прикреплена, verification_status сброшен в 'pending'.
+        post_restore_rows = [
+            {
+                "node_id": "n7", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t7",
+                "metrics": {"m": 1}, "node_number": "1.1",
+                "process": None, "profile_div": None,
+                "verification_status": "pending",
+            },
+        ]
 
         with patch(
             "app.domains.acts.services.audit_log_service.ActContentRepository"
@@ -522,8 +533,10 @@ class TestRestoreVersionPreSnapshot:
             content_inst.get_content = AsyncMock(return_value=current_content)
 
             invoice_inst = invoice_cls.return_value
+            # 1-й вызов — pre-снимок (текущие фактуры), 2-й — post-снимок
+            # (реальное состояние после restore, перечитанное из репозитория).
             invoice_inst.get_invoices_for_act = AsyncMock(
-                return_value=current_invoice_rows
+                side_effect=[current_invoice_rows, post_restore_rows]
             )
             invoice_inst.save_invoice = AsyncMock()
 
@@ -545,8 +558,10 @@ class TestRestoreVersionPreSnapshot:
         post_call = versions_repo.create_version.await_args_list[1]
         # Pre — реальные текущие фактуры акта (keyed by node_id).
         assert pre_call.kwargs["invoices"] == {"n5": current_invoice_rows[0]}
-        # Post — фактуры восстановленной версии (не {}).
-        assert post_call.kwargs["invoices"] == version_invoices
+        # Post — реальное состояние фактур после restore (перечитано из БД):
+        # n7 прикреплена, статус сброшен в 'pending' (не сырой снимок версии,
+        # и не {}).
+        assert post_call.kwargs["invoices"] == {"n7": post_restore_rows[0]}
 
     async def test_pre_snapshot_sanitized_before_write(self):
         """pbe-6: pre-snapshot чистится той же санитизацией, что и post.

@@ -135,11 +135,18 @@ class AuditLogService:
                 "version_id": version_id,
             })
 
+            # Реальное состояние фактур ПОСЛЕ restore перечитываем из репозитория
+            # (как обычное сохранение): verification_status уже 'pending' после
+            # save_invoice, номера/аудит-поля освежены _sync_invoices, лишние
+            # удалены. Иначе снимок разошёлся бы с БД и дифф сразу после restore
+            # показал бы фантомную смену статуса verified→pending.
+            post_rows = await invoice_repo.get_invoices_for_act(act_id)
+            post_restore_invoices = {r["node_id"]: r for r in post_rows}
+
             # Снимок после восстановления берём из уже санитизированного
             # restore_data, а не из сырых данных версии — иначе в историю
             # попал бы несанитизированный HTML, который при повторном restore
-            # вернул бы stored XSS. Фактуры — снимок восстановленной версии
-            # (реальное состояние после restore), а не {}.
+            # вернул бы stored XSS.
             await self.versions_repo.create_version(
                 act_id=act_id,
                 username=username,
@@ -148,7 +155,7 @@ class AuditLogService:
                 tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
                 textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
                 violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
-                invoices=invoices_snapshot,
+                invoices=post_restore_invoices,
             )
 
         logger.info(
