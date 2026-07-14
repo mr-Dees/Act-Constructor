@@ -42,8 +42,9 @@ Object.assign(ViolationManager.prototype, {
             if (temp) temp.remove();
         }, 0);
 
-        // Сбрасываем последний индекс при начале перетаскивания
+        // Сбрасываем последний индекс и флаг коммита при начале перетаскивания.
         this.lastDragOverIndex = null;
+        this._dropCommitted = false;
     },
 
     /**
@@ -127,12 +128,10 @@ Object.assign(ViolationManager.prototype, {
 
         this.lastDragOverIndex = targetPosition;
 
-        // Физически перемещаем элемент в DOM
-        if (isTopHalf) {
-            container.insertBefore(draggingElement, currentElement);
-        } else {
-            container.insertBefore(draggingElement, currentElement.nextSibling);
-        }
+        // Рисуем индикатор позиции вместо физического сдвига элемента (#6):
+        // DOM больше не переставляется оптимистично, порядок вычисляется в
+        // handleDrop index-based'ом. При Esc/промахе нечего откатывать.
+        this.updateInsertIndicator(container, targetPosition);
     },
 
     /**
@@ -157,22 +156,29 @@ Object.assign(ViolationManager.prototype, {
         const draggingElement = document.querySelector('.dragging');
         if (!draggingElement) return;
 
-        // Получаем все элементы в текущем визуальном порядке
-        const allWrappers = [...container.querySelectorAll('.content-item-wrapper')];
+        const items = violation.additionalContent.items;
+        const draggedId = draggingElement.dataset.itemId;
+        const fromIndex = items.findIndex(item => item.id === draggedId);
+        if (fromIndex === -1) return;
 
-        // Создаем новый массив items в визуальном порядке по ID
-        const newItems = allWrappers.map(wrapper => {
-            const itemId = wrapper.dataset.itemId;
-            return violation.additionalContent.items.find(item => item.id === itemId);
-        }).filter(item => item !== undefined);
+        // Позиция вставки: точная из dragover (учитывает верх/низ половину
+        // элемента), иначе — индекс элемента под курсором (fallback без dragover).
+        let toIndex = this.lastDragOverIndex !== null ? this.lastDragOverIndex : targetIndex;
 
-        // Заменяем массив items новым упорядоченным массивом
-        violation.additionalContent.items = newItems;
+        // Index-based перестановка (#6): DOM больше НЕ сдвинут оптимистично, порядок
+        // считаем из данных. Поправка на удаление исходной позиции при движении вниз.
+        const [moved] = items.splice(fromIndex, 1);
+        if (fromIndex < toIndex) toIndex -= 1;
+        toIndex = Math.max(0, Math.min(toIndex, items.length));
+        items.splice(toIndex, 0, moved);
 
         // Обновляем order для всех элементов
-        violation.additionalContent.items.forEach((item, idx) => {
+        items.forEach((item, idx) => {
             item.order = idx;
         });
+
+        // Коммит состоялся — handleDragEnd не должен перерисовывать повторно.
+        this._dropCommitted = true;
 
         // Перерисовываем с обновленными индексами
         this.renderContentItems(violation, container);
@@ -183,18 +189,25 @@ Object.assign(ViolationManager.prototype, {
     /**
      * Обработчик окончания перетаскивания
      * @param {Event} e - Событие dragend
+     * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер элементов
      */
-    handleDragEnd(e, container) {
+    handleDragEnd(e, violation, container) {
         e.target.classList.remove('dragging');
 
-        // Удаляем все индикаторы перетаскивания
-        const allWrappers = container.querySelectorAll('.content-item-wrapper');
-        allWrappers.forEach(w => {
-            w.classList.remove('drag-over-top', 'drag-over-bottom');
-        });
+        // Снимаем индикатор позиции.
+        this.removeInsertIndicators(container);
 
-        // Сбрасываем последний индекс
+        // Если drop не зафиксировал новый порядок (Esc/промах мимо зоны) —
+        // восстанавливаем DOM из данных: фантома от прежнего оптимистичного
+        // сдвига больше нет, но re-render идемпотентно гарантирует чистоту
+        // (в т.ч. после внутреннего drop через контейнер файлов).
+        if (!this._dropCommitted) {
+            this.renderContentItems(violation, container);
+        }
+
+        // Сбрасываем флаг коммита и последний индекс для следующего drag.
+        this._dropCommitted = false;
         this.lastDragOverIndex = null;
     }
 });

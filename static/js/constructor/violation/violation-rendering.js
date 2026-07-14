@@ -68,7 +68,7 @@ Object.assign(ViolationManager.prototype, {
                     itemElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
                     itemElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
                     itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
-                    itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, container));
+                    itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, violation, container));
                 }
 
                 container.appendChild(itemElement);
