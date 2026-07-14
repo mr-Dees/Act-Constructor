@@ -313,7 +313,7 @@ export class TreeDragDrop {
 
     /**
      * Обработчик сброса элемента
-     * Выполняет перемещение узла с валидацией и обновлением UI
+     * Делегирует перемещение в moveProgrammatically (общий путь с клавиатурным reorder).
      * @param {DragEvent} e - Событие drop
      */
     async handleDrop(e) {
@@ -333,14 +333,34 @@ export class TreeDragDrop {
             return;
         }
 
+        await this.moveProgrammatically(this.draggedNode.id, this.dropTargetNode.id, this.dropPosition);
+
+        this.cleanup();
+    }
+
+    /**
+     * Перемещает узел в новую позицию поверх AppState.moveNode: валидация +
+     * рендер-побочка (точечная пересборка поддеревьев/полный render, обновление
+     * превью и items-панели, тост об успехе/ошибке). Единый путь для
+     * drag-and-drop (handleDrop) и клавиатурного reorder (TreeManager._reorderViaKeyboard,
+     * Alt+стрелки, находка #34) — минимизирует дрейф между двумя способами
+     * перемещения.
+     * @param {string} nodeId - ID перемещаемого узла
+     * @param {string} targetId - ID целевого узла
+     * @param {'before'|'after'|'child'} position - Позиция относительно целевого узла
+     * @returns {Promise<Object>} Результат AppState.moveNode (valid, message)
+     */
+    async moveProgrammatically(nodeId, targetId, position) {
+        const draggedNode = AppState.findNodeById(nodeId);
+
         // Захватываем oldParent ДО move; newParent вычисляется из target+position
         // (target сам становится новым родителем для 'child', иначе — родитель target'а).
-        const oldParent = AppState.findParentNode(this.draggedNode.id);
+        const oldParent = AppState.findParentNode(nodeId);
         const oldParentId = oldParent ? oldParent.id : null;
 
-        const newParentId = this.dropPosition === 'child'
-            ? this.dropTargetNode.id
-            : (AppState.findParentNode(this.dropTargetNode.id)?.id ?? null);
+        const newParentId = position === 'child'
+            ? targetId
+            : (AppState.findParentNode(targetId)?.id ?? null);
 
         // Осознанный fallback на полный render дерева: перемещения, способные
         // затронуть DOM за пределами поддеревьев старого/нового родителя —
@@ -351,15 +371,11 @@ export class TreeDragDrop {
             !oldParentId || !newParentId ||
             oldParentId === 'root' || newParentId === 'root' ||
             oldParentId === '5' || newParentId === '5' ||
-            this._hasRiskTablesInSubtree(this.draggedNode) ||
+            this._hasRiskTablesInSubtree(draggedNode) ||
             (oldParent && TreeUtils.isUnderSection5(oldParent)) ||
             (newParentNode && TreeUtils.isUnderSection5(newParentNode));
 
-        const result = await AppState.moveNode(
-            this.draggedNode.id,
-            this.dropTargetNode.id,
-            this.dropPosition
-        );
+        const result = await AppState.moveNode(nodeId, targetId, position);
 
         if (result.valid) {
             this._renderTreeAfterDrop(oldParentId, newParentId, needsFullTreeRender);
@@ -383,7 +399,7 @@ export class TreeDragDrop {
             Notifications.error(result.message);
         }
 
-        this.cleanup();
+        return result;
     }
 
     /**
