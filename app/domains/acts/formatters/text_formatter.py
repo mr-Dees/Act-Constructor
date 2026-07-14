@@ -10,6 +10,16 @@ from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
 from .tree_walker import WalkContext, collect_blocks, walk
 from .utils import HTMLUtils, TableUtils
+from .violation_render import (
+    add_additional_content,
+    add_case,
+    add_description_list,
+    add_free_text,
+    add_labeled_section,
+    add_required_pair,
+    format_violation,
+    wrap_plain,
+)
 
 
 class TextFormatter(BaseFormatter):
@@ -167,20 +177,13 @@ class TextFormatter(BaseFormatter):
         Returns:
             Текстовое представление нарушения
         """
-        lines = []
-
-        # #14: обязательные поля — метка выводится всегда, даже при пустом
-        # content (паритет с DOCX-эталоном «метка + пустое тело»).
-        self._add_required_pair(lines, "Нарушено", violation_data.get('violated', ''))
-        self._add_required_pair(lines, "Установлено", violation_data.get('established', ''))
-        self._add_description_list(lines, violation_data.get('descriptionList', {}))
-        self._add_additional_content(lines, violation_data.get('additionalContent', {}))
-        self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
-        self._add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
-        self._add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
-        self._add_labeled_section(lines, "Рекомендации", violation_data.get('recommendations', {}))
-
-        return "\n".join(lines)
+        return format_violation(
+            violation_data,
+            add_required_pair=self._add_required_pair,
+            add_description_list=self._add_description_list,
+            add_additional_content=self._add_additional_content,
+            add_labeled_section=self._add_labeled_section,
+        )
 
     def _add_required_pair(self, lines: list[str], label: str, content: str):
         """
@@ -192,8 +195,7 @@ class TextFormatter(BaseFormatter):
             label: Текст метки
             content: Текст поля (может быть пустым)
         """
-        lines.append(f"{label}: {content}".rstrip())
-        lines.append("")
+        add_required_pair(lines, label, content, wrap_plain)
 
     def _add_labeled_section(self, lines: list[str], label: str, data: dict):
         """
@@ -205,13 +207,7 @@ class TextFormatter(BaseFormatter):
             label: Текст метки
             data: Данные секции (dict с enabled/content)
         """
-        if not data.get('enabled', False):
-            return
-        content = data.get('content', '')
-
-        if content:
-            lines.append(f"{label}: {content}")
-            lines.append("")
+        add_labeled_section(lines, label, data, wrap_plain)
 
     def _add_description_list(self, lines: list[str], desc_list: dict):
         """
@@ -221,19 +217,7 @@ class TextFormatter(BaseFormatter):
             lines: Список строк для добавления
             desc_list: Данные списка с items
         """
-        if not desc_list.get('enabled', False):
-            return
-
-        items = desc_list.get('items', [])
-        if not items:
-            return
-
-        # #12: заголовок «Описание» убран — только маркированный список.
-        # #15/Q1: рендерятся ВСЕ пункты, включая пустые (пустой → пустой буллит
-        # «  • »), единообразно с превью и DOCX (пользователь выбрал не прятать).
-        for item in items:
-            lines.append(f"  • {item}")
-        lines.append("")
+        add_description_list(lines, desc_list, "  • ")
 
     def _add_additional_content(self, lines: list[str], additional_content: dict):
         """
@@ -243,23 +227,9 @@ class TextFormatter(BaseFormatter):
             lines: Список строк для добавления
             additional_content: Данные с items разных типов
         """
-        if not additional_content.get('enabled', False):
-            return
-
-        items = additional_content.get('items', [])
-        case_number = 1
-
-        for item in items:
-            item_type = item.get('type')
-
-            if item_type == 'case':
-                case_number = self._add_case(lines, item, case_number)
-            elif item_type == 'image':
-                self._add_image(lines, item)
-                case_number = 1
-            elif item_type == 'freeText':
-                self._add_free_text(lines, item)
-                case_number = 1
+        add_additional_content(
+            lines, additional_content, self._add_case, self._add_image, self._add_free_text,
+        )
 
     def _add_case(self, lines: list[str], item: dict, case_number: int) -> int:
         """
@@ -273,12 +243,7 @@ class TextFormatter(BaseFormatter):
         Returns:
             Следующий номер кейса
         """
-        # #9/Q1: нумеруются ВСЕ кейсы, включая пустые (метка + пустое тело);
-        # счётчик всегда двигается вперёд.
-        content = item.get('content', '')
-        lines.append(f"Кейс {case_number}: {content}".rstrip())
-        lines.append("")
-        return case_number + 1
+        return add_case(lines, item, case_number, wrap_plain)
 
     def _add_image(self, lines: list[str], item: dict):
         """
@@ -305,10 +270,7 @@ class TextFormatter(BaseFormatter):
             lines: Список строк для добавления
             item: Данные с текстом
         """
-        content = item.get('content', '')
-        if content:
-            lines.append(content)
-            lines.append("")
+        add_free_text(lines, item)
 
 
 class _TextTreeVisitor:
