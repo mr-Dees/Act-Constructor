@@ -14,7 +14,6 @@ import { formatValidationDetail } from './api-errors.js';
 import { sanitizeActContent } from '../constructor/state/act-content-sanitizer.js';
 import { shouldOfferRestore } from '../constructor/state/draft-restore.js';
 import { normalizePinnedOrder, reconcileTableKind } from '../constructor/table/table-kind.js';
-import { ViolationAudit } from '../constructor/violation/violation-audit.js';
 
 // Constructor-зона: lazy-доступ через window.
 // Прямые import'ы из ../constructor/* тянули весь constructor граф
@@ -578,7 +577,10 @@ export class APIClient {
             // ветках (пустой акт / загруженный контент). Снимок не клонирует
             // base64-байты картинок (см. ViolationAudit). Новый load
             // переустанавливает эталон целиком → корректен при switch'е акта.
-            ViolationAudit.snapshot(AppState.violations);
+            // Lazy-доступ через window (как ItemsRenderer/PreviewManager ниже):
+            // ViolationAudit публикуется constructor entry (violation-init.js),
+            // без статического import'а constructor-графа в api.js.
+            if (window.ViolationAudit) window.ViolationAudit.snapshot(AppState.violations);
 
             // Обновляем интерфейс
             if (typeof treeManager !== 'undefined') {

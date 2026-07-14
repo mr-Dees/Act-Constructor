@@ -13,9 +13,8 @@
  * обработчиков: scheduleTypingBlock — для печатного ввода (текст/подпись),
  * updateBlock — для дискретных действий (тумблеры, add/remove пункта, ширина).
  *
- * Changelog (аудит правок) здесь НЕ трогается — он переезжает в слой
- * diff-at-save отдельной задачей; существующие вызовы ChangelogTracker
- * остаются рядом в обработчиках.
+ * Changelog (аудит правок) здесь НЕ трогается: правки нарушений фиксируются
+ * diff-ом при сохранении (violation-audit.js, pre-flush hook), а не per-keystroke.
  */
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
