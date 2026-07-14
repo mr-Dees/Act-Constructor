@@ -12,6 +12,17 @@ import { AppConfig } from '../../shared/app-config.js';
 import { getBlockType } from '../block-types.js';
 import { getStructureLimits } from '../violation/violation-image-validator.js';
 
+// #8: тип узла → рантайм-ключ структурных лимитов (/acts/limits). Общий для
+// _validateContentLimits (гейт кнопки «Добавить …») и canInsertSubtree (гейт
+// вставки готового поддерева) — раньше _validateContentLimits знал только про
+// textBlocks, из-за чего кнопка добавления нарушений/таблиц не учитывала
+// сниженный админом рантайм-лимит и упиралась в захардкоженные 10.
+const RUNTIME_LIMIT_KEY_BY_TYPE = {
+    [AppConfig.nodeTypes.TEXTBLOCK]: 'textBlocksPerNode',
+    [AppConfig.nodeTypes.VIOLATION]: 'violationsPerNode',
+    [AppConfig.nodeTypes.TABLE]: 'tablesPerNode',
+};
+
 export const ValidationTree = {
     /**
      * Проверяет возможность добавления дочернего узла
@@ -140,12 +151,12 @@ export const ValidationTree = {
         const spec = getBlockType(contentType);
         const existingCount = TreeUtils.countChildrenByType(node, contentType);
         let limit = spec ? spec.limitPerNode : undefined;
-        // B-13: лимит текстблоков — из рантайм-настроек (/acts/limits, синхронно
-        // с серверной валидацией), фолбэк — захардкоженный реестр block-types.
-        if (spec && spec.dictName === 'textBlocks') {
-            const runtime = getStructureLimits().textBlocksPerNode;
-            if (typeof runtime === 'number') limit = runtime;
-        }
+        // #8: лимит — из рантайм-настроек (/acts/limits, синхронно с серверной
+        // валидацией) для всех лимитируемых типов (текстблоки/нарушения/таблицы),
+        // фолбэк — захардкоженный реестр block-types.
+        const runtimeKey = RUNTIME_LIMIT_KEY_BY_TYPE[contentType];
+        const runtime = runtimeKey ? getStructureLimits()[runtimeKey] : undefined;
+        if (typeof runtime === 'number') limit = runtime;
         const limitName = AppConfig.content.limitNames[contentType];
 
         return ValidationCore.validateLimit(existingCount, limit, limitName);
@@ -186,12 +197,6 @@ export const ValidationTree = {
     canInsertSubtree(parentId, node) {
         const { TEXTBLOCK, VIOLATION, TABLE } = AppConfig.nodeTypes;
         const structure = getStructureLimits();
-        // Тип → рантайм-ключ структурных лимитов (/acts/limits).
-        const runtimeKeyByType = {
-            [TEXTBLOCK]: 'textBlocksPerNode',
-            [VIOLATION]: 'violationsPerNode',
-            [TABLE]: 'tablesPerNode',
-        };
 
         const parent = AppState.findNodeById(parentId);
 
@@ -200,7 +205,7 @@ export const ValidationTree = {
             // из /acts/limits (как в _validateContentLimits add-пути).
             const spec = getBlockType(type);
             let limit = spec ? spec.limitPerNode : undefined;
-            const runtime = structure[runtimeKeyByType[type]];
+            const runtime = structure[RUNTIME_LIMIT_KEY_BY_TYPE[type]];
             if (typeof runtime === 'number') limit = runtime;
             if (typeof limit !== 'number') continue;
 
