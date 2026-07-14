@@ -51,7 +51,7 @@ class TestImagesSettingsDefaults:
             "image/jpeg", "image/png", "image/gif",
         ]
         assert s.max_items_per_violation == 50
-        assert s.preview_max_height_percent == 40
+        assert s.image_max_height_percent == 40
 
     def test_acts_settings_includes_images(self):
         s = ActsSettings()
@@ -180,7 +180,7 @@ class TestActsLimitsEndpoint:
                 "image/jpeg", "image/png", "image/gif",
             ],
             "max_items_per_violation": 50,
-            "preview_max_height_percent": 40,
+            "image_max_height_percent": 40,
         }
         # Границы таблиц/шрифта — из настроек ACTS__TABLES__/TEXTBLOCKS__
         assert body["tables"] == {

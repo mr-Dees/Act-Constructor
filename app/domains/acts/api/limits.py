@@ -48,7 +48,7 @@ async def get_acts_limits(
             "max_total_size_per_act": images.max_total_size_per_act,
             "allowed_mime_types": images.allowed_mime_types,
             "max_items_per_violation": images.max_items_per_violation,
-            "preview_max_height_percent": images.preview_max_height_percent,
+            "image_max_height_percent": images.image_max_height_percent,
         },
         "tables": {
             "max_rows": tables.max_rows,

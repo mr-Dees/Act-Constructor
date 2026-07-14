@@ -4,7 +4,7 @@
  * Тестируем чистые части рендерера: collectViolationLines (полные тексты,
  * полный descriptionList, нумерация кейсов со сбросом — семантика
  * docx/builders/violation.py) и imagePresentationStyle (маппинг
- * item.width / preview_max_height_percent → CSS, Б-1.4/Б-1.6).
+ * item.width / image_max_height_percent → CSS, Б-1.4/Б-1.6).
  */
 import './_browser-stub.mjs';
 import { test } from 'node:test';
@@ -213,7 +213,7 @@ test('width отсутствует у старых актов → авто', () 
     assert.equal(style.width, '');
 });
 
-test('кастомный preview_max_height_percent учитывается', () => {
+test('кастомный image_max_height_percent учитывается', () => {
     const style = imagePresentationStyle({ width: 25 }, 50);
     assert.equal(style.width, '25%');
     assert.equal(style.maxHeight, '148.5mm');

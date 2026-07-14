@@ -116,7 +116,9 @@ class ImagesSettings(BaseModel):
         default=["image/jpeg", "image/png", "image/gif"]
     )
     max_items_per_violation: int = Field(default=50, gt=0)
-    preview_max_height_percent: int = Field(default=40, gt=0, le=100)
+    # Потолок высоты картинки нарушения (% полезной высоты листа A4). Управляет
+    # и превью (maxHeight), и DOCX-экспортом (_scale_picture, #13).
+    image_max_height_percent: int = Field(default=40, gt=0, le=100)
 
 
 class TablesSettings(BaseModel):

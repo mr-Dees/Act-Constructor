@@ -3151,7 +3151,7 @@ def test_chat_settings_defaults():
 | `ACTS__IMAGES__MAX_TOTAL_SIZE_PER_ACT` | int | `31457280` | Суммарный размер картинок на акт (байт) |
 | `ACTS__IMAGES__ALLOWED_MIME_TYPES` | list | `jpeg/png/gif` | Whitelist MIME картинок (без SVG; без webp — python-docx не встраивает его в DOCX) |
 | `ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION` | int | `50` | Макс. элементов additionalContent на нарушение |
-| `ACTS__IMAGES__PREVIEW_MAX_HEIGHT_PERCENT` | int | `40` | Макс. высота картинки в превью (% листа A4) |
+| `ACTS__IMAGES__IMAGE_MAX_HEIGHT_PERCENT` | int | `40` | Макс. высота картинки нарушения (% листа A4) — превью и DOCX |
 | `ACTS__TABLES__MAX_ROWS` | int | `64` | Макс. строк таблицы |
 | `ACTS__TABLES__MAX_COLS` | int | `16` | Макс. колонок таблицы |
 | `ACTS__TABLES__MIN_COL_WIDTH_PX` | int | `80` | Мин. ширина колонки (px) |
@@ -3842,7 +3842,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
 ```json
 {
   "images":     { "max_file_size", "max_total_size_per_act", "allowed_mime_types",
-                  "max_items_per_violation", "preview_max_height_percent" },
+                  "max_items_per_violation", "image_max_height_percent" },
   "tables":     { "max_rows", "max_cols", "min_col_width_px" },
   "textblocks": { "font_size_min", "font_size_max" }
 }

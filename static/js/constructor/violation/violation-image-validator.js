@@ -23,7 +23,7 @@ export const DEFAULT_IMAGE_LIMITS = {
     maxTotalSizePerAct: 5 * 1024 * 1024,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 50,
-    previewMaxHeightPercent: 40,
+    imageMaxHeightPercent: 40,
 };
 
 /**
@@ -73,7 +73,7 @@ export function loadImageLimits() {
                     _limits.allowedMimeTypes = img.allowed_mime_types;
                 }
                 if (typeof img.max_items_per_violation === 'number') _limits.maxItemsPerViolation = img.max_items_per_violation;
-                if (typeof img.preview_max_height_percent === 'number') _limits.previewMaxHeightPercent = img.preview_max_height_percent;
+                if (typeof img.image_max_height_percent === 'number') _limits.imageMaxHeightPercent = img.image_max_height_percent;
             }
             const tbl = data && data.tables;
             if (tbl) {

@@ -83,12 +83,12 @@ export function collectViolationLines(violation) {
  * Чистый маппинг item.width / лимита высоты → inline-стиль картинки превью.
  *
  * @param {Object} item - Элемент типа image (поле width: 0 — авто)
- * @param {number} previewMaxHeightPercent - Лимит высоты, % высоты листа
+ * @param {number} imageMaxHeightPercent - Лимит высоты, % высоты листа
  * @returns {{width: string, maxHeight: string}} Значения CSS-свойств
  */
-export function imagePresentationStyle(item, previewMaxHeightPercent) {
+export function imagePresentationStyle(item, imageMaxHeightPercent) {
     const width = item && item.width > 0 ? `${item.width}%` : '';
-    const heightMm = SHEET_HEIGHT_MM * (previewMaxHeightPercent || 40) / 100;
+    const heightMm = SHEET_HEIGHT_MM * (imageMaxHeightPercent || 40) / 100;
     // Округление до 0.1 мм, без хвоста «.0».
     const maxHeight = `${parseFloat(heightMm.toFixed(1))}mm`;
     return { width, maxHeight };
@@ -188,7 +188,7 @@ export class PreviewViolationRenderer {
         const img = document.createElement('img');
         img.className = 'preview-violation-image';
         img.alt = item.caption || item.filename || '';
-        const style = imagePresentationStyle(item, getImageLimits().previewMaxHeightPercent);
+        const style = imagePresentationStyle(item, getImageLimits().imageMaxHeightPercent);
         // Явная ширина — рендерим ровно как DOCX (_scale_picture задаёт только
         // ширину, без потолка высоты). Авторазмер (width=0) — ограничиваем
         // высоту долей листа, чтобы огромная картинка не разнесла скролл (Б-1.6).

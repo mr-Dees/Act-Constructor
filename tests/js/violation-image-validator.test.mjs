@@ -21,7 +21,7 @@ const LIMITS = {
     maxTotalSizePerAct: 3000,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 3,
-    previewMaxHeightPercent: 40,
+    imageMaxHeightPercent: 40,
 };
 
 function file(overrides = {}) {
@@ -100,7 +100,7 @@ test('дефолтные лимиты зеркалят ACTS__IMAGES__* (4МБ/5�
     assert.equal(DEFAULT_IMAGE_LIMITS.maxFileSize, 4 * 1024 * 1024);
     assert.equal(DEFAULT_IMAGE_LIMITS.maxTotalSizePerAct, 5 * 1024 * 1024);
     assert.equal(DEFAULT_IMAGE_LIMITS.maxItemsPerViolation, 50);
-    assert.equal(DEFAULT_IMAGE_LIMITS.previewMaxHeightPercent, 40);
+    assert.equal(DEFAULT_IMAGE_LIMITS.imageMaxHeightPercent, 40);
     assert.deepEqual(
         DEFAULT_IMAGE_LIMITS.allowedMimeTypes,
         ['image/jpeg', 'image/png', 'image/gif'],
