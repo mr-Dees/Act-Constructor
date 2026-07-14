@@ -5,22 +5,30 @@
 export class DiffEngine {
     /**
      * Полный diff двух снэпшотов.
-     * @param {Object} oldData - {tree_data, tables_data, textblocks_data, violations_data}
-     * @param {Object} newData - {tree, tables, textBlocks, violations}
-     * @returns {Object} {tree, tables, textblocks, violations, hasChanges}
+     * @param {Object} oldData - {tree_data, tables_data, textblocks_data, violations_data, invoices_data}
+     * @param {Object} newData - {tree, tables, textBlocks, violations, invoices}
+     * @returns {Object} {tree, tables, textblocks, violations, invoices, hasChanges}
      */
     static compute(oldData, newData) {
         const treeDiff = this._diffTree(oldData.tree_data, newData.tree);
         const tablesDiff = this._diffTables(oldData.tables_data || {}, newData.tables || {});
         const textblocksDiff = this._diffTextBlocks(oldData.textblocks_data || {}, newData.textBlocks || {});
         const violationsDiff = this._diffViolations(oldData.violations_data || {}, newData.violations || {});
+        // Снимки, созданные до миграции invoices_data, блоба не несут → {} →
+        // все текущие фактуры покажутся added (обратная совместимость данных
+        // снимков не требуется, решение Q2).
+        const invoicesDiff = this._diffInvoices(oldData.invoices_data || {}, newData.invoices || {});
 
         const hasChanges = treeDiff.hasChanges
             || Object.values(tablesDiff).some(t => t.status !== 'unchanged')
             || Object.values(textblocksDiff).some(t => t.status !== 'unchanged')
-            || Object.values(violationsDiff).some(v => v.status !== 'unchanged');
+            || Object.values(violationsDiff).some(v => v.status !== 'unchanged')
+            || Object.values(invoicesDiff).some(i => i.status !== 'unchanged');
 
-        return { tree: treeDiff, tables: tablesDiff, textblocks: textblocksDiff, violations: violationsDiff, hasChanges };
+        return {
+            tree: treeDiff, tables: tablesDiff, textblocks: textblocksDiff,
+            violations: violationsDiff, invoices: invoicesDiff, hasChanges,
+        };
     }
 
     /**
@@ -340,6 +348,67 @@ export class DiffEngine {
         }
 
         return result;
+    }
+
+    /**
+     * Diff фактур по привязке node_id → реквизиты. Обе стороны — {node_id: инвойс}
+     * одной формы (старая = блоб снимка, новая = поле invoices из /content).
+     * Возвращает {node_id: {status, fieldDiffs, oldData, newData}}.
+     * Сравниваются только реквизиты (не id/created_at/updated_at/created_by):
+     * смена служебных полей не должна выглядеть как правка фактуры.
+     * @returns {Object} node_id → результат диффа фактуры.
+     */
+    static _diffInvoices(oldInvoices, newInvoices) {
+        const result = {};
+        const allKeys = new Set([...Object.keys(oldInvoices), ...Object.keys(newInvoices)]);
+        const fields = ['db_type', 'schema_name', 'table_name', 'node_number',
+                        'profile_div', 'verification_status', 'metrics', 'process'];
+
+        for (const nodeId of allKeys) {
+            const oldInv = oldInvoices[nodeId];
+            const newInv = newInvoices[nodeId];
+
+            if (!oldInv) {
+                result[nodeId] = { status: 'added', newData: newInv };
+                continue;
+            }
+            if (!newInv) {
+                result[nodeId] = { status: 'removed', oldData: oldInv };
+                continue;
+            }
+
+            const fieldDiffs = {};
+            let changed = false;
+            for (const field of fields) {
+                const oldVal = this._invoiceFieldValue(oldInv, field);
+                const newVal = this._invoiceFieldValue(newInv, field);
+                if (oldVal !== newVal) {
+                    fieldDiffs[field] = { old: oldVal, new: newVal };
+                    changed = true;
+                }
+            }
+
+            result[nodeId] = {
+                status: changed ? 'modified' : 'unchanged',
+                fieldDiffs,
+                oldData: oldInv,
+                newData: newInv,
+            };
+        }
+
+        return result;
+    }
+
+    /**
+     * Нормализованное строковое значение реквизита фактуры для сравнения.
+     * Массивы/объекты (metrics/process) — через JSON.stringify (порядок ключей
+     * стабилен: инвойсы строятся из одинаковых источников), скаляры — String().
+     */
+    static _invoiceFieldValue(inv, field) {
+        const val = inv ? inv[field] : undefined;
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'object') return JSON.stringify(val);
+        return String(val);
     }
 
     static _getViolationFieldValue(viol, field) {
