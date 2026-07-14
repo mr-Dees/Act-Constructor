@@ -166,6 +166,16 @@ class FakeFileReader {
     }
 }
 
+/** Файл-стаб картинки с рабочим slice() (для magic-sniff #26). PNG → ресайз пропускается. */
+function imgFile(name, size = 100) {
+    return {
+        name,
+        type: 'image/png',
+        size,
+        slice: () => new Blob([new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])]),
+    };
+}
+
 test('insertImageFilesInOrder: гейт срабатывает в середине пачки — цикл останавливается, addedCount не завышен', async () => {
     reset(2); // лимит: максимум 2 элемента на нарушение
     globalThis.FileReader = FakeFileReader;
@@ -174,11 +184,7 @@ test('insertImageFilesInOrder: гейт срабатывает в середин
     const vm = new ViolationManager();
     const container = makeContainer();
 
-    const files = [
-        { name: 'a.png', type: 'image/png', size: 100 },
-        { name: 'b.png', type: 'image/png', size: 100 },
-        { name: 'c.png', type: 'image/png', size: 100 },
-    ];
+    const files = [imgFile('a.png'), imgFile('b.png'), imgFile('c.png')];
 
     await vm.insertImageFilesInOrder(violation, container, 1, files);
 
@@ -203,10 +209,7 @@ test('insertImageFilesInOrder: лимит не достигнут — все ф�
     const vm = new ViolationManager();
     const container = makeContainer();
 
-    const files = [
-        { name: 'a.png', type: 'image/png', size: 100 },
-        { name: 'b.png', type: 'image/png', size: 100 },
-    ];
+    const files = [imgFile('a.png'), imgFile('b.png')];
 
     await vm.insertImageFilesInOrder(violation, container, 0, files);
 

@@ -11,12 +11,19 @@ import { Notifications } from '../../shared/notifications.js';
 import { AppState } from '../state/state-core.js';
 import {
     estimateActImageBytes,
+    estimateDataUrlBytes,
     getImageLimits,
     loadImageLimits,
-    validateImageFile,
+    validateImageType,
+    validateImageBytes,
 } from './violation-image-validator.js';
 import { CONTENT_TYPE_IMAGE, createContentItem } from './violation-content-item.js';
-import { readFilesInOrder } from './violation-file-reading.js';
+import { sniffImageMagic } from './violation-file-reading.js';
+import { downscaleImage } from './violation-image-resize.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+
+/** localStorage-ключ предвыбора режима качества (Q3 всё равно спрашивает каждый раз). */
+const IMAGE_QUALITY_MODE_KEY = 'violation_image_quality_mode';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -311,33 +318,31 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Валидирует пачку файлов картинок ДО чтения в base64 (H6).
+     * Валидирует ТИП пачки файлов ДО чтения (H6/#26).
      *
      * Общая точка для всех трёх способов приёма (выбор файлов, drag&drop,
-     * Ctrl+V). Лимиты (MIME/размер/суммарный по акту/число элементов) —
-     * с GET /acts/limits, см. violation-image-validator.js. Отказ каждого
-     * файла сопровождается Notifications.warning с причиной.
+     * Ctrl+V). Здесь — только тип (MIME), число элементов и абсурдный сырой
+     * потолок; magic-байты (#26) и РАЗМЕРНЫЙ гейт (#2) перенесены в
+     * асинхронный конвейер insertImageFilesInOrder — размер считается ПОСЛЕ
+     * ресайза по ужатым байтам, иначе крупное фото отклонилось бы раньше, чем
+     * успело ужаться. Отказ каждого файла — Notifications.warning с причиной.
      *
      * @param {File[]} files - Файлы-кандидаты
      * @param {Object} violation - Нарушение, в которое добавляются картинки
-     * @returns {File[]} Прошедшие валидацию файлы
+     * @returns {File[]} Прошедшие тип-валидацию файлы
      */
     filterAcceptedImageFiles(files, violation) {
-        let runningBytes = estimateActImageBytes(AppState.violations);
+        const lim = getImageLimits();
         let runningCount = (violation.additionalContent?.items || []).length;
         const accepted = [];
 
         for (const file of files) {
-            const result = validateImageFile(file, {
-                existingTotalBytes: runningBytes,
-                itemsCount: runningCount,
-            });
+            const result = validateImageType(file, { itemsCount: runningCount, limits: lim });
             if (!result.ok) {
                 Notifications.warning(result.reason);
                 continue;
             }
             accepted.push(file);
-            runningBytes += file.size;
             runningCount += 1;
         }
 
@@ -345,28 +350,66 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Вставляет пачку картинок в детерминированном порядке выбора файлов
-     * (violation-4): файлы читаются параллельно, но вставка идёт строго
-     * по порядку списка после завершения всех чтений. Нечитаемые файлы
-     * пропускаются с Notifications.error, порядок остальных сохраняется.
+     * Читает, пережимает и вставляет пачку картинок (порядок выбора — violation-4).
+     *
+     * Конвейер на каждый файл (порядок пачки сохранён через Promise.all):
+     *  1. magic-байты (#26) — тип по содержимому ДО ресайза; мусор пропускаем;
+     *  2. ресайз (#25) — downscaleImage по выбранному режиму (JPEG-сжатие;
+     *     GIF/прозрачные PNG/original — оригинал);
+     *  3. размерный гейт (#2) — per-file + накопительный суммарный лимит акта
+     *     по УЖАТЫМ байтам dataUrl; over-budget пропускаем с warning'ом.
+     * Затем bulk-вставка (#29): один splice/render/updateBlock. Лимит числа
+     * (#4) и read-only (#1) — внутри _insertContentItemsBulk.
      *
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
      * @param {number} insertIndex - Позиция для вставки первой картинки
-     * @param {File[]} files - Прошедшие валидацию файлы в порядке выбора
+     * @param {File[]} files - Прошедшие тип-валидацию файлы в порядке выбора
+     * @param {string} [mode='high'] - Режим качества ('high'|'medium'|'original')
      */
-    async insertImageFilesInOrder(violation, container, insertIndex, files) {
-        const results = await readFilesInOrder(files);
+    async insertImageFilesInOrder(violation, container, insertIndex, files, mode = 'high') {
+        const lim = getImageLimits();
 
-        // Собираем элементы только из успешно прочитанных файлов, сохраняя
-        // порядок выбора (violation-4). Нечитаемые пропускаем с ошибкой.
+        // #26 + ресайз параллельно, порядок пачки сохраняется (violation-4).
+        const processed = await Promise.all(files.map(async (file) => {
+            try {
+                const okMagic = await sniffImageMagic(file, lim.allowedMimeTypes);
+                if (!okMagic) return { ok: false, file, reason: 'magic' };
+                const url = await downscaleImage(file, { mode });
+                return { ok: true, file, url };
+            } catch (error) {
+                return { ok: false, file, reason: 'read', error };
+            }
+        }));
+
+        // #2 размерный гейт ПОСЛЕ ресайза — по ужатым байтам, накопительно.
+        let runningBytes = estimateActImageBytes(AppState.violations);
         const items = [];
-        for (const result of results) {
+        for (const result of processed) {
             if (!result.ok) {
-                console.error('Ошибка при чтении файла:', result.file.name, result.error);
-                Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                if (result.reason === 'magic') {
+                    Notifications.warning(
+                        `Файл «${result.file.name}» не является изображением PNG/JPEG/GIF и не добавлен.`,
+                    );
+                } else {
+                    console.error('Ошибка при чтении файла:', result.file.name, result.error);
+                    Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                }
                 continue;
             }
+
+            const bytes = estimateDataUrlBytes(result.url);
+            const sizeCheck = validateImageBytes(bytes, {
+                existingTotalBytes: runningBytes,
+                name: result.file.name,
+                limits: lim,
+            });
+            if (!sizeCheck.ok) {
+                Notifications.warning(sizeCheck.reason);
+                continue;
+            }
+
+            runningBytes += bytes;
             items.push(createContentItem(CONTENT_TYPE_IMAGE, insertIndex, {
                 url: result.url,
                 filename: result.file.name,
@@ -387,6 +430,73 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
+     * Показывает диалог качества (Q3) один раз на пачку и вставляет картинки
+     * выбранным режимом. Единая точка для всех трёх путей приёма (выбор /
+     * drag&drop / Ctrl+V). Отмена диалога (Escape/клик вне) → ничего не вставляем.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первой картинки
+     * @param {File[]} files - Прошедшие тип-валидацию файлы в порядке выбора
+     */
+    async promptQualityThenInsertImages(violation, container, insertIndex, files) {
+        const mode = await this.promptImageQualityMode();
+        if (mode === null) return; // пользователь отменил вставку
+        await this.insertImageFilesInOrder(violation, container, insertIndex, files, mode);
+    },
+
+    /**
+     * Диалог выбора режима сжатия (Q3): три кнопки «Сжатие» (по умолч.) /
+     * «Среднее» / «Исходное». Последний выбор запоминается в localStorage как
+     * ПРЕДВЫБОР (подсвеченная кнопка), но диалог показывается на КАЖДУЮ вставку.
+     *
+     * @returns {Promise<'high'|'medium'|'original'|null>} Режим или null при отмене
+     */
+    async promptImageQualityMode() {
+        let preselect = 'high';
+        try {
+            const saved = localStorage.getItem(IMAGE_QUALITY_MODE_KEY);
+            if (saved === 'high' || saved === 'medium' || saved === 'original') preselect = saved;
+        } catch (_) { /* приватный режим — дефолт «Сжатие» */ }
+
+        const OPTIONS = [
+            { mode: 'high', label: 'Сжатие' },
+            { mode: 'medium', label: 'Среднее' },
+            { mode: 'original', label: 'Исходное' },
+        ];
+
+        const result = await DialogManager.show({
+            title: 'Качество изображений',
+            message: 'Выберите режим для вставляемых картинок. Сжатие уменьшает вес акта; '
+                + 'GIF и прозрачные PNG не пережимаются.',
+            icon: '🖼️',
+            type: 'info',
+            hideConfirm: true,
+            hideCancel: true,
+            onMount: ({ overlay, close }) => {
+                const dialog = overlay.querySelector('.custom-dialog');
+                if (!dialog) return;
+                const row = document.createElement('div');
+                row.className = 'dialog-buttons';
+                for (const opt of OPTIONS) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `btn ${opt.mode === preselect ? 'btn-primary' : 'btn-secondary'}`;
+                    btn.textContent = opt.label;
+                    btn.addEventListener('click', () => {
+                        try { localStorage.setItem(IMAGE_QUALITY_MODE_KEY, opt.mode); } catch (_) { /* noop */ }
+                        close(opt.mode);
+                    });
+                    row.appendChild(btn);
+                }
+                dialog.appendChild(row);
+            },
+        });
+
+        return (result === 'high' || result === 'medium' || result === 'original') ? result : null;
+    },
+
+    /**
      * Инициирует выбор файлов изображений с указанием позиции
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
@@ -402,12 +512,12 @@ Object.assign(ViolationManager.prototype, {
         fileInput.addEventListener('change', (e) => {
             if (!e.target.files || e.target.files.length === 0) return;
 
-            // Валидация ДО readAsDataURL (H6) — отказники отсеяны с warning'ом.
+            // Тип-валидация ДО чтения (H6/#26); отказники отсеяны с warning'ом.
             const files = this.filterAcceptedImageFiles(Array.from(e.target.files), violation);
             if (files.length === 0) return;
 
-            // Вставка в порядке выбора файлов (violation-4).
-            this.insertImageFilesInOrder(violation, container, insertIndex, files);
+            // Диалог качества (Q3) → ресайз → вставка в порядке выбора (violation-4).
+            this.promptQualityThenInsertImages(violation, container, insertIndex, files);
         });
 
         document.body.appendChild(fileInput);

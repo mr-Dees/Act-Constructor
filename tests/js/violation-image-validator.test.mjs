@@ -1,19 +1,23 @@
 /**
- * Валидатор приёма картинок нарушений (H6).
+ * Валидатор приёма картинок нарушений (H6) — разнесён на тип (ДО чтения) и
+ * размер (ПОСЛЕ ресайза, #2/#25).
  *
- * Все ветки отказа (MIME, размер файла, суммарный лимит акта, число
- * элементов) + ok-ветка + оценка байтов по data-URL. Лимиты передаются
- * явно — fetch /acts/limits в node-тестах не дёргается.
+ * validateImageType: MIME, число элементов, абсурдный сырой потолок.
+ * validateImageBytes: per-file и суммарный лимит акта по УЖАТЫМ байтам.
+ * Плюс оценка байтов по data-URL. Лимиты передаются явно — fetch /acts/limits
+ * в node-тестах не дёргается.
  */
 import './_browser-stub.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    ABSURD_RAW_MAX_BYTES,
     DEFAULT_IMAGE_LIMITS,
     estimateActImageBytes,
     estimateDataUrlBytes,
-    validateImageFile,
+    validateImageType,
+    validateImageBytes,
 } from '../../static/js/constructor/violation/violation-image-validator.js';
 
 const LIMITS = {
@@ -28,72 +32,81 @@ function file(overrides = {}) {
     return Object.assign({ name: 'img.png', type: 'image/png', size: 500 }, overrides);
 }
 
-test('валидный файл проходит', () => {
-    const res = validateImageFile(file(), { existingTotalBytes: 0, itemsCount: 0, limits: LIMITS });
+// --- validateImageType (ДО чтения: тип + число + абсурдный потолок) ---
+
+test('валидный тип проходит', () => {
+    const res = validateImageType(file(), { itemsCount: 0, limits: LIMITS });
     assert.equal(res.ok, true);
     assert.equal(res.reason, '');
 });
 
 test('SVG отклоняется (XSS-вектор, нет в whitelist)', () => {
-    const res = validateImageFile(file({ type: 'image/svg+xml', name: 'evil.svg' }), { limits: LIMITS });
+    const res = validateImageType(file({ type: 'image/svg+xml', name: 'evil.svg' }), { limits: LIMITS });
     assert.equal(res.ok, false);
     assert.match(res.reason, /Недопустимый тип/);
 });
 
 test('не-картинка (pdf) и пустой MIME отклоняются', () => {
-    assert.equal(validateImageFile(file({ type: 'application/pdf' }), { limits: LIMITS }).ok, false);
-    assert.equal(validateImageFile(file({ type: '' }), { limits: LIMITS }).ok, false);
+    assert.equal(validateImageType(file({ type: 'application/pdf' }), { limits: LIMITS }).ok, false);
+    assert.equal(validateImageType(file({ type: '' }), { limits: LIMITS }).ok, false);
 });
 
-test('файл больше лимита отклоняется с причиной про размер', () => {
-    const res = validateImageFile(file({ size: 1001 }), { limits: LIMITS });
-    assert.equal(res.ok, false);
-    assert.match(res.reason, /слишком большой/);
-});
-
-test('файл ровно в лимит проходит', () => {
-    assert.equal(validateImageFile(file({ size: 1000 }), { limits: LIMITS }).ok, true);
-});
-
-test('превышение суммарного лимита акта отклоняется', () => {
-    const res = validateImageFile(file({ size: 600 }), {
-        existingTotalBytes: 2500, itemsCount: 0, limits: LIMITS,
-    });
-    assert.equal(res.ok, false);
-    assert.match(res.reason, /Суммарный размер/);
-});
-
-test('суммарный лимит впритык проходит', () => {
-    const res = validateImageFile(file({ size: 500 }), {
-        existingTotalBytes: 2500, itemsCount: 0, limits: LIMITS,
-    });
+test('validateImageType НЕ проверяет обычный размер — крупный сырой файл проходит по типу', () => {
+    // 10 МБ сырого JPEG проходит тип-гейт: реальный размерный гейт — после ресайза.
+    const res = validateImageType(file({ type: 'image/jpeg', size: 10 * 1024 * 1024 }), { limits: LIMITS });
     assert.equal(res.ok, true);
 });
 
-test('интеграция: existingTotalBytes (estimateActImageBytes) и file.size — одна единица (raw bytes)', () => {
-    // base64-payload длиной 2667 символов оценивается в ~2000 сырых байт
-    // (2667 * 0.75 = 2000.25 → округление до 2000). Если бы existingTotalBytes
-    // считался в длине base64-строки, а не в сырых байтах, сумма с новым
-    // файлом (2667 + 900 = 3567) ложно превысила бы лимит акта (3000) —
-    // акт бы ошибочно отклонял валидную картинку (или наоборот, пропускал
-    // бы лишнее при обратной путанице единиц).
-    const url = `data:image/png;base64,${'A'.repeat(2667)}`;
-    const violations = { v1: { additionalContent: { items: [{ type: 'image', url }] } } };
-    const existingTotalBytes = estimateActImageBytes(violations);
-    assert.equal(existingTotalBytes, 2000);
-
-    const res = validateImageFile(file({ size: 900 }), { existingTotalBytes, limits: LIMITS });
-    assert.equal(res.ok, true);
+test('абсурдный сырой потолок отсекает гигантский файл до чтения', () => {
+    const res = validateImageType(file({ size: ABSURD_RAW_MAX_BYTES + 1 }), { limits: LIMITS });
+    assert.equal(res.ok, false);
+    assert.match(res.reason, /для обработки/);
 });
 
 test('достигнут лимит элементов на нарушение → отказ', () => {
-    const res = validateImageFile(file(), { itemsCount: 3, limits: LIMITS });
+    const res = validateImageType(file(), { itemsCount: 3, limits: LIMITS });
     assert.equal(res.ok, false);
     assert.match(res.reason, /лимит элементов/);
 });
 
 test('отсутствующий файл → отказ без исключения', () => {
-    assert.equal(validateImageFile(null, { limits: LIMITS }).ok, false);
+    assert.equal(validateImageType(null, { limits: LIMITS }).ok, false);
+});
+
+// --- validateImageBytes (ПОСЛЕ ресайза: per-file + суммарный по акту) ---
+
+test('ужатый файл больше per-file лимита отклоняется с причиной про размер', () => {
+    const res = validateImageBytes(1001, { name: 'a.jpg', limits: LIMITS });
+    assert.equal(res.ok, false);
+    assert.match(res.reason, /слишком большой/);
+});
+
+test('ужатый файл ровно в per-file лимит проходит', () => {
+    assert.equal(validateImageBytes(1000, { limits: LIMITS }).ok, true);
+});
+
+test('превышение суммарного лимита акта отклоняется', () => {
+    const res = validateImageBytes(600, { existingTotalBytes: 2500, name: 'a.jpg', limits: LIMITS });
+    assert.equal(res.ok, false);
+    assert.match(res.reason, /Суммарный размер/);
+});
+
+test('суммарный лимит впритык проходит', () => {
+    const res = validateImageBytes(500, { existingTotalBytes: 2500, limits: LIMITS });
+    assert.equal(res.ok, true);
+});
+
+test('интеграция: existingTotalBytes (estimateActImageBytes) и ужатые байты — одна единица', () => {
+    // base64-payload длиной 2667 символов оценивается в ~2000 сырых байт
+    // (2667 * 0.75 = 2000.25 → округление до 2000). existingTotalBytes и байты
+    // нового файла — обе величины в сырых байтах, единица одна.
+    const url = `data:image/png;base64,${'A'.repeat(2667)}`;
+    const violations = { v1: { additionalContent: { items: [{ type: 'image', url }] } } };
+    const existingTotalBytes = estimateActImageBytes(violations);
+    assert.equal(existingTotalBytes, 2000);
+
+    const res = validateImageBytes(900, { existingTotalBytes, limits: LIMITS });
+    assert.equal(res.ok, true);
 });
 
 test('дефолтные лимиты зеркалят ACTS__IMAGES__* (4МБ/5МБ/50)', () => {

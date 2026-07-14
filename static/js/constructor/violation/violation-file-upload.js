@@ -151,13 +151,14 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            // Валидация ДО readAsDataURL (H6): MIME/размер/суммарный лимит/число
-            // элементов; отказники отсеяны с Notifications.warning.
+            // Тип-валидация ДО чтения (H6/#26): MIME/число элементов/абсурдный
+            // потолок; отказники отсеяны с Notifications.warning. Размер (#2) —
+            // после ресайза в конвейере.
             const acceptedFiles = this.filterAcceptedImageFiles(imageFiles, violation);
             if (acceptedFiles.length === 0) return;
 
-            // Вставка строго в порядке перетащенных файлов (violation-4).
-            this.insertImageFilesInOrder(violation, contentContainer, insertPosition, acceptedFiles);
+            // Диалог качества (Q3) → ресайз → вставка в порядке перетащенных (violation-4).
+            this.promptQualityThenInsertImages(violation, contentContainer, insertPosition, acceptedFiles);
         });
 
         // Дополнительная защита: сбрасываем состояние при любом завершении drag

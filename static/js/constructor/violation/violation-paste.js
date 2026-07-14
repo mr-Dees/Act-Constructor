@@ -76,18 +76,18 @@ Object.assign(ViolationManager.prototype, {
             }
 
             // Картинки идут ТЕМ ЖЕ конвейером, что drop/upload (#28):
-            // filterAcceptedImageFiles → insertImageFilesInOrder (bulk, #29).
+            // filterAcceptedImageFiles → диалог качества (Q3) → ресайз → bulk (#29).
             // Собственного FileReader и логики «только последняя картинка» больше нет.
             if (imageFiles.length > 0) {
                 e.preventDefault();
 
-                // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
+                // Тип-валидация ДО чтения (H6/#26) — warning с причиной отказа.
                 const accepted = this.filterAcceptedImageFiles(imageFiles, violation);
                 if (accepted.length === 0) return;
 
                 // insertIndex зафиксирован синхронно ДО async-чтения (приемлемо);
                 // тост об успехе с верным числом покажет insertImageFilesInOrder.
-                this.insertImageFilesInOrder(violation, targetContainer, insertIndex, accepted);
+                this.promptQualityThenInsertImages(violation, targetContainer, insertIndex, accepted);
             }
             // Текст обрабатываем только если картинок в буфере нет.
             else if (textItem) {

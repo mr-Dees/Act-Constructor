@@ -71,8 +71,14 @@ function makeContainer(violationId = 'v1') {
     };
 }
 
+/** Файл-стаб картинки с рабочим slice() (для magic-sniff #26). PNG → ресайз пропускается. */
 function imgFile(name, size = 100) {
-    return { name, type: 'image/png', size };
+    return {
+        name,
+        type: 'image/png',
+        size,
+        slice: () => new Blob([new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])]),
+    };
 }
 
 /**
@@ -115,15 +121,16 @@ test('#28 Ctrl+V с несколькими картинками: ВСЕ идут
     vm.cursorInsertPosition = 0;
 
     // Спай конвейера: захватываем, что реально передали (после filterAcceptedImageFiles).
+    // Единая точка входа из paste — promptQualityThenInsertImages (диалог Q3 → ресайз).
     let captured = null;
-    vm.insertImageFilesInOrder = (v, c, idx, files) => {
+    vm.promptQualityThenInsertImages = (v, c, idx, files) => {
         captured = { v, c, idx, files };
     };
 
     const handler = capturePasteHandler(vm);
     await handler(makeClipboardEvent([imgFile('a.png'), imgFile('b.png'), imgFile('c.png')]));
 
-    assert.ok(captured, 'конвейер insertImageFilesInOrder вызван');
+    assert.ok(captured, 'конвейер promptQualityThenInsertImages вызван');
     assert.equal(captured.files.length, 3, 'переданы ВСЕ три картинки, не только последняя');
     assert.deepEqual(captured.files.map((f) => f.name), ['a.png', 'b.png', 'c.png'], 'порядок сохранён');
     assert.equal(captured.idx, 0, 'insertIndex зафиксирован из позиции курсора синхронно');
@@ -142,7 +149,7 @@ test('#1 read-only: Ctrl+V не запускает конвейер вставк
     vm.cursorInsertPosition = 0;
 
     let called = false;
-    vm.insertImageFilesInOrder = () => {
+    vm.promptQualityThenInsertImages = () => {
         called = true;
     };
 

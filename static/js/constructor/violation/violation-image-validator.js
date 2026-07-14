@@ -176,18 +176,26 @@ export function estimateActImageBytes(violations) {
 }
 
 /**
- * Валидирует файл картинки до чтения в base64.
+ * Абсурдный сырой потолок: не читаем/не декодируем гигантские файлы ДО ресайза.
+ * Реальный размерный гейт (#2) работает ПОСЛЕ ресайза по ужатым байтам —
+ * validateImageBytes.
+ */
+export const ABSURD_RAW_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Проверяет ТИП файла ДО чтения/ресайза (#26 magic-sniff — отдельно, async).
+ * Размер (per-file/суммарный) сюда НЕ входит: он считается ПОСЛЕ ресайза по
+ * ужатым байтам (validateImageBytes), иначе крупное фото отклонилось бы раньше,
+ * чем успело ужаться.
  *
  * @param {File} file - Принимаемый файл
  * @param {Object} [context] - Контекст приёма
- * @param {number} [context.existingTotalBytes=0] - Суммарный размер уже
- *        добавленных картинок акта (включая принятые ранее в этой пачке)
  * @param {number} [context.itemsCount=0] - Текущее число элементов
  *        дополнительного контента нарушения
  * @param {Object} [context.limits] - Явные лимиты (для тестов)
  * @returns {{ok: boolean, reason: string}} Результат с причиной отказа
  */
-export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0, limits = null } = {}) {
+export function validateImageType(file, { itemsCount = 0, limits = null } = {}) {
     const lim = limits || _limits;
     if (!file) {
         return { ok: false, reason: 'Файл не передан' };
@@ -199,13 +207,6 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
                 + 'Разрешены: JPEG, PNG, GIF.',
         };
     }
-    if (file.size > lim.maxFileSize) {
-        return {
-            ok: false,
-            reason: `Файл «${file.name || ''}» слишком большой (${formatMb(file.size)} МБ). `
-                + `Лимит на файл — ${formatMb(lim.maxFileSize)} МБ.`,
-        };
-    }
     if (itemsCount >= lim.maxItemsPerViolation) {
         return {
             ok: false,
@@ -213,11 +214,41 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
                 + `(${lim.maxItemsPerViolation}).`,
         };
     }
-    if (existingTotalBytes + file.size > lim.maxTotalSizePerAct) {
+    if (typeof file.size === 'number' && file.size > ABSURD_RAW_MAX_BYTES) {
+        return {
+            ok: false,
+            reason: `Файл «${file.name || ''}» слишком большой (${formatMb(file.size)} МБ) для обработки.`,
+        };
+    }
+    return { ok: true, reason: '' };
+}
+
+/**
+ * Проверяет РАЗМЕР картинки ПОСЛЕ ресайза (#2): per-file + накопительный
+ * суммарный лимит акта — по УЖАТЫМ байтам dataUrl (estimateDataUrlBytes).
+ *
+ * @param {number} bytes - Размер ужатой картинки в байтах
+ * @param {Object} [context] - Контекст приёма
+ * @param {number} [context.existingTotalBytes=0] - Суммарный размер уже
+ *        добавленных картинок акта (включая принятые ранее в этой пачке)
+ * @param {string} [context.name] - Имя файла для сообщения об отказе
+ * @param {Object} [context.limits] - Явные лимиты (для тестов)
+ * @returns {{ok: boolean, reason: string}} Результат с причиной отказа
+ */
+export function validateImageBytes(bytes, { existingTotalBytes = 0, name = '', limits = null } = {}) {
+    const lim = limits || _limits;
+    if (bytes > lim.maxFileSize) {
+        return {
+            ok: false,
+            reason: `Файл «${name}» слишком большой (${formatMb(bytes)} МБ) даже после сжатия. `
+                + `Лимит на файл — ${formatMb(lim.maxFileSize)} МБ.`,
+        };
+    }
+    if (existingTotalBytes + bytes > lim.maxTotalSizePerAct) {
         return {
             ok: false,
             reason: `Суммарный размер картинок акта превысит лимит ${formatMb(lim.maxTotalSizePerAct)} МБ. `
-                + `Файл «${file.name || ''}» не добавлен.`,
+                + `Файл «${name}» не добавлен.`,
         };
     }
     return { ok: true, reason: '' };
@@ -228,7 +259,8 @@ window.ViolationImageValidator = {
     loadImageLimits,
     getImageLimits,
     getStructureLimits,
-    validateImageFile,
+    validateImageType,
+    validateImageBytes,
     estimateDataUrlBytes,
     estimateActImageBytes,
 };
