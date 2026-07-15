@@ -6,6 +6,7 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { AppState } from '../state/state-core.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
 import { Notifications } from '../../shared/notifications.js';
 import { FormalizerPopover } from '../text-actions/formalizer-popover.js';
@@ -210,7 +211,10 @@ export class ViolationManager {
 
         // Формализация: раскладка свободного текста по полям карточки (не в RO-режиме).
         if (!isReadOnly) {
-            this._addFormalizeButton(section, violation, {
+            // Номер пункта нарушения — это номер РОДИТЕЛЬСКОГО пункта (у самого
+            // violation-узла number вида «Нарушение N», не «5.x»).
+            const pointNumber = AppState.findParentNode(node?.id)?.number || '';
+            this._addFormalizeButton(section, violation, pointNumber, {
                 violated: violatedTextarea,
                 established: establishedTextarea,
                 reasons: reasonsField,
@@ -228,9 +232,10 @@ export class ViolationManager {
      * Открывает панель-заполнитель; применение раскладывает извлечённые поля.
      * @param {HTMLElement} section - Секция нарушения
      * @param {Object} violation - Объект нарушения
+     * @param {string} pointNumber - Номер пункта (для заголовка панели)
      * @param {Object} controls - Ссылки на DOM-контролы полей карточки
      */
-    _addFormalizeButton(section, violation, controls) {
+    _addFormalizeButton(section, violation, pointNumber, controls) {
         const bar = document.createElement('div');
         bar.className = 'violation-formalize-bar';
 
@@ -242,6 +247,7 @@ export class ViolationManager {
         btn.addEventListener('click', () => {
             FormalizerPopover.open({
                 violation,
+                pointNumber,
                 apply: (fields) => this._applyFormalized(violation, controls, fields),
             });
         });

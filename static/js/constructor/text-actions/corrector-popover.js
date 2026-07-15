@@ -36,7 +36,7 @@ export const CorrectorPopover = {
     _sourceText: '',
     _corrected: '',
     _destructive: false,
-    _mode: 'fix',
+    _mode: null,
     _hasRequested: false,
 
     /**
@@ -48,7 +48,10 @@ export const CorrectorPopover = {
         this._range = range;
         this._sourceText = text;
         this._corrected = '';
-        this._mode = 'fix';
+        // Ни один режим не выбран заранее — иначе кнопка «Исправить ошибки»
+        // горела бы активной ещё до запроса (обработки-то нет). Подсветка
+        // появляется по клику на нужный режим.
+        this._mode = null;
         this._hasRequested = false;
         this._syncModeButtons();
         this._destructive = this._detectDestructiveCapsules(range);
@@ -80,7 +83,7 @@ export const CorrectorPopover = {
                 <button type="button" class="corrector-close" data-role="close" title="Закрыть">✕</button>
             </div>
             <div class="corrector-modes" data-role="modes">
-                <button type="button" class="corrector-mode active" data-mode="fix">Исправить ошибки</button>
+                <button type="button" class="corrector-mode" data-mode="fix">Исправить ошибки</button>
                 <button type="button" class="corrector-mode" data-mode="readability">Улучшить читаемость</button>
             </div>
             <div class="corrector-body" data-role="body"></div>

@@ -2,13 +2,20 @@
  * Плавающая панель «Формализация нарушения».
  *
  * Тот же оконный chrome, что у CorrectorPopover (перетаскивание за заголовок,
- * ресайз, Esc, персист позиции/размера), но другой поток: аналитик вставляет
- * свободный текст → «Формализовать» → превью извлечённых полей → «Применить»
- * раскладывает их по полям карточки нарушения (что LLM не нашла — поле пустое).
+ * ресайз, Esc, персист позиции/размера), но другой поток: свободный текст →
+ * «Формализовать» → превью извлечённых полей → «Применить» раскладывает их по
+ * полям карточки нарушения (что LLM не нашла — поле НЕ трогаем, см. violation-core).
  *
- * Открывается кнопкой на панели нарушения; заголовок — «Корректор отклонения/
- * проблемы по пункту 5.*». Применение делает callback `apply(fields)`, который
- * знает, как обновить объект нарушения и его DOM-контролы (см. violation-core.js).
+ * Свободный текст при открытии ПРЕДЗАПОЛНЯЕТСЯ содержимым уже заполненных полей
+ * карточки (`_gatherSource`) — чтобы формализовать/переформализовать имеющееся, а
+ * не набирать заново. Это чтение: ячейки карточки НЕ очищаются, перезапись только
+ * по «Применить». Собираем плоским текстом без ярлыков полей: формализатор сам
+ * раскладывает норм-документ/суть/причины, а ярлыки «Нарушено/Установлено» сбили
+ * бы его (у него своя раскладка norm_doc→«Нарушено», суть→«Установлено»).
+ *
+ * Открывается кнопкой на панели нарушения; заголовок содержит реальный номер
+ * пункта нарушения (`по пункту 5.x`). Применение делает callback `apply(fields)`,
+ * который знает, как обновить объект нарушения и его DOM-контролы.
  */
 import { Notifications } from '../../shared/notifications.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
@@ -37,18 +44,44 @@ export const FormalizerPopover = {
     _fields: null,
 
     /**
-     * @param {{violation: Object, apply: (fields: Object) => void}} opts
+     * @param {{violation: Object, apply: (fields: Object) => void,
+     *          pointNumber?: string}} opts
      */
-    open({ violation, apply }) {
+    open({ violation, apply, pointNumber }) {
         this._build();
         this._apply = apply;
         this._fields = null;
-        this._els.source.value = '';
+        // Предзаполняем свободный текст собранными полями карточки (если заполнены).
+        this._els.source.value = this._gatherSource(violation);
         this._els.preview.innerHTML = '';
         this._els.accept.disabled = true;
+        const suffix = pointNumber ? ` по пункту ${pointNumber}` : '';
+        this._els.title.textContent = `✨ Корректор отклонения/проблемы${suffix}`;
         this._el.classList.remove('hidden');
         if (!this._escUnsub) this._escUnsub = EscapeStack.push(() => this.close());
         this._els.source.focus();
+    },
+
+    /**
+     * Собирает свободный текст нарушения из уже заполненных полей карточки для
+     * (пере)формализации. Порядок — как в карточке; плоский текст без ярлыков
+     * полей (формализатор раскладывает сам). Опциональные блоки берём только
+     * включёнными и непустыми; «Нарушено»/«Установлено» — если непусты.
+     * Чтение: карточку НЕ меняет.
+     * @param {Object} violation
+     * @returns {string}
+     */
+    _gatherSource(violation) {
+        if (!violation) return '';
+        const parts = [];
+        const push = (s) => { const t = (s || '').trim(); if (t) parts.push(t); };
+        push(violation.violated);
+        push(violation.established);
+        for (const key of ['reasons', 'measures', 'consequences', 'responsible']) {
+            const f = violation[key];
+            if (f && f.enabled) push(f.content);
+        }
+        return parts.join('\n\n');
     },
 
     close() {
@@ -71,7 +104,7 @@ export const FormalizerPopover = {
         el.setAttribute('aria-label', 'Формализация нарушения');
         el.innerHTML = `
             <div class="corrector-header" data-role="header">
-                <span class="corrector-title">✨ Корректор отклонения/проблемы по пункту 5.*</span>
+                <span class="corrector-title" data-role="title">✨ Корректор отклонения/проблемы</span>
                 <button type="button" class="corrector-close" data-role="close" title="Закрыть">✕</button>
             </div>
             <div class="corrector-body formalizer-body" data-role="body">
@@ -91,6 +124,7 @@ export const FormalizerPopover = {
         this._el = el;
         this._els = {
             header: el.querySelector('[data-role="header"]'),
+            title: el.querySelector('[data-role="title"]'),
             source: el.querySelector('[data-role="source"]'),
             run: el.querySelector('[data-role="run"]'),
             preview: el.querySelector('[data-role="preview"]'),
