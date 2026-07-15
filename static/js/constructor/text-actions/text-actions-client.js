@@ -38,8 +38,10 @@ window.correctText = correctText;
  * @param {string} text — свободный текст нарушения.
  * @param {{signal?: AbortSignal}} [opts]
  * @returns {Promise<{violated:string, established:string, reasons:string,
- *   measures:string, responsible:string, consequences:string}>} извлечённые поля
- *   (пустые — что LLM не нашла; `measures` — «Принятые меры», поле карточки под «Причинами»).
+ *   measures:string, responsible:string, consequences:string,
+ *   recommendations:string[]}>} извлечённые поля (пустые — что LLM не нашла;
+ *   `measures` — «Принятые меры», поле карточки под «Причинами»; `recommendations` —
+ *   дисплей-онли подсказки «чего не хватает», в карточку/экспорт НЕ идут).
  */
 export async function formalizeViolation(text, { signal } = {}) {
     const res = await fetch(

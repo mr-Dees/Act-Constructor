@@ -153,6 +153,18 @@ underline}` **вырезан целиком** (директива владель
 | `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Последствия»              |
 | `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Ответственные»            |
 
+Текстовые поля нарушения (`violated`/`established`/`reasons`/`responsible`/
+`consequences`/`measures`) можно автозаполнить из свободного описания — кнопка
+«✨ Формализовать текст» на карточке нарушения зовёт формализатор
+(`app/domains/chat/services/text_actions/formalizer_service.py`, эндпоинт
+`POST /api/v1/chat/text-actions/formalize-violation`): 4 экстрактора D17 разбирают
+текст параллельно и раскладывают его по полям (что не извлеклось — поле пустое; уже
+заполненное поле пустым ответом не затирается). Заголовок панели подставляет реальный
+номер родительского пункта, свободный текст предзаполняется текущими полями карточки.
+Вторым этапом (по извлечённым полям) формализатор возвращает `recommendations` —
+дисплей-онли подсказки «чего не хватает в описании»: показываются в панели рядом с
+превью, но в карточку и экспорт НЕ пишутся (кнопка «Применить» их не трогает).
+
 `ViolationContentItemSchema` (`act_content.py::ViolationContentItemSchema`) — элемент additionalContent:
 
 | Поле       | Тип                                | Назначение                                |

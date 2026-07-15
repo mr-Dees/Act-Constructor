@@ -40,6 +40,9 @@ _BY_PROMPT = {
     "аналитик корректирующих мер": json.dumps({
         "measures": ["досоздан контроль", "проведён аудит"],
     }),
+    "аудитор процессов": json.dumps({
+        "recommendations": ["Уточните дату выдачи.", "Укажите ответственных лиц."],
+    }),
 }
 
 
@@ -75,6 +78,9 @@ async def test_formalize_maps_all_fields():
     assert out.responsible == "Иванов И.И., кредитный инспектор; Отдел кредитования"
     assert out.consequences == "Финансовый ущерб 5 млн руб."
     assert out.measures == "досоздан контроль; проведён аудит"  # вычислено
+    assert out.recommendations == [
+        "Уточните дату выдачи.", "Укажите ответственных лиц.",
+    ]
 
 
 async def test_formalize_temperature_deterministic():
@@ -84,7 +90,8 @@ async def test_formalize_temperature_deterministic():
         return_value=client,
     ):
         await ViolationFormalizerService(_settings()).formalize("текст")
-    assert client.chat.completions.create.call_count == 4  # 4 экстрактора параллельно
+    # 4 экстрактора параллельно + 2-й этап рекомендаций.
+    assert client.chat.completions.create.call_count == 5
     for call in client.chat.completions.create.call_args_list:
         assert call.kwargs["temperature"] == 0.01
 
@@ -104,6 +111,33 @@ async def test_formalize_extractor_failure_leaves_field_empty():
     assert out.responsible == ""
     assert out.violated == "П. 3.1 Регламента"  # остальные не пострадали
     assert out.consequences == "Финансовый ущерб 5 млн руб."
+
+
+async def test_formalize_recommendations_failure_returns_empty():
+    """Сбой рекомендаций → пустой список, поля карточки не страдают."""
+    client = _client_by_prompt({"аудитор процессов": "не json вообще"})
+    with patch(
+        "app.domains.chat.services.text_actions.formalizer_service.build_llm_client",
+        return_value=client,
+    ):
+        out = await ViolationFormalizerService(_settings()).formalize("текст")
+
+    assert out.recommendations == []
+    assert out.violated == "П. 3.1 Регламента"  # экстракторы отработали
+
+
+async def test_formalize_recommendations_cleaned_and_capped():
+    """Пустые строки отсекаются, список режется до 5 (страховка над промптом)."""
+    client = _client_by_prompt({"аудитор процессов": json.dumps({
+        "recommendations": ["", "  ", "r1", "r2", "r3", "r4", "r5", "r6", "r7"],
+    })})
+    with patch(
+        "app.domains.chat.services.text_actions.formalizer_service.build_llm_client",
+        return_value=client,
+    ):
+        out = await ViolationFormalizerService(_settings()).formalize("текст")
+
+    assert out.recommendations == ["r1", "r2", "r3", "r4", "r5"]
 
 
 async def test_formalize_rejects_empty():

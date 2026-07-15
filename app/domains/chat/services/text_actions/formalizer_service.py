@@ -6,8 +6,13 @@
 раскладываются в поле карточки под «Причинами»). Структуру JSON получаем
 провайдер-агностично (промпт → JSON → разбор), БЕЗ ``response_format``.
 
-Отказ отдельного экстрактора не роняет формализацию: поле просто останется пустым
-(«что LLM выделила — заполняем, что не смогла — пусто»).
+После экстракторов — 2-й этап: рекомендации «чего не хватает» (промпт D17 берёт на
+вход уже извлечённые поля). Это дисплей-онли подсказки аналитику — едут в ответе,
+но в карточку/экспорт НЕ пишутся (фронт их не применяет).
+
+Отказ отдельного экстрактора/рекомендаций не роняет формализацию: поле просто
+останется пустым, а список рекомендаций — пустым («что LLM выделила — заполняем,
+что не смогла — пусто»).
 """
 
 import asyncio
@@ -24,11 +29,16 @@ from app.domains.chat.services.text_actions.formalizer_prompts import (
     CONSEQUENCES_SYSTEM,
     ESSENCE_SYSTEM,
     MEASURES_SYSTEM,
+    RECOMMENDATIONS_SYSTEM,
+    RECOMMENDATIONS_USER_TEMPLATE,
 )
 from app.domains.chat.services.text_actions.llm_utils import run_json_call
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger(__name__)
+
+# Промпт D17 обещает не более 5 рекомендаций — режем на нашей стороне как страховку.
+_MAX_RECOMMENDATIONS = 5
 
 
 # --- Разобранный вывод экстракторов D17 (зеркало schema.py; поля с дефолтами
@@ -51,6 +61,10 @@ class ConsequencesParsed(BaseModel):
 
 class MeasuresParsed(BaseModel):
     measures: list[str] = Field(default_factory=list)
+
+
+class RecommendationsParsed(BaseModel):
+    recommendations: list[str] = Field(default_factory=list)
 
 
 def _join(items: list[str]) -> str:
@@ -89,7 +103,10 @@ class ViolationFormalizerService:
 
     async def formalize(self, text: str) -> FormalizeResponse:
         """Разложить текст по полям карточки. Кидает ``TextActionValidationError``
-        на пустой/слишком длинный ввод. Сбой отдельного экстрактора → пустое поле."""
+        на пустой/слишком длинный ввод. Сбой отдельного экстрактора → пустое поле.
+
+        После 4 экстракторов — 2-й этап: рекомендации «чего не хватает» по уже
+        извлечённым полям (дисплей-онли, в карточку/экспорт не пишутся)."""
         if not text or not text.strip():
             raise TextActionValidationError("Пустой текст для формализации")
         if len(text) > self._max_chars:
@@ -103,6 +120,9 @@ class ViolationFormalizerService:
             self._extract(client, ConsequencesParsed, CONSEQUENCES_SYSTEM, text),
             self._extract(client, MeasuresParsed, MEASURES_SYSTEM, text),
         )
+        recommendations = await self._recommend(
+            client, essence, causes, consequences, measures,
+        )
         return FormalizeResponse(
             violated=essence.norm_doc.strip(),
             established=_established_from(essence),
@@ -110,6 +130,7 @@ class ViolationFormalizerService:
             responsible=_join(causes.persons),
             consequences=consequences.consequences.strip(),
             measures=_join(measures.measures),
+            recommendations=recommendations,
         )
 
     async def _extract(self, client, schema_cls, system: str, text: str):
@@ -131,3 +152,42 @@ class ViolationFormalizerService:
                 "Экстрактор %s не дал результата: %s", schema_cls.__name__, e,
             )
             return schema_cls()
+
+    async def _recommend(
+        self,
+        client,
+        essence: EssenceParsed,
+        causes: CausesParsed,
+        consequences: ConsequencesParsed,
+        measures: MeasuresParsed,
+    ) -> list[str]:
+        """2-й этап: подсказки аналитику «чего не хватает» по извлечённым полям.
+
+        Дисплей-онли — в карточку/экспорт не идут (фронт их не применяет). Сбой не
+        роняет формализацию: возвращаем пустой список. Отсекаем пустые и режем до
+        ``_MAX_RECOMMENDATIONS``."""
+        user = RECOMMENDATIONS_USER_TEMPLATE.format(
+            essence=essence.essence,
+            norm_doc=essence.norm_doc,
+            metrics=essence.metrics,
+            causes=causes.causes,
+            persons=causes.persons,
+            consequences=consequences.consequences,
+            measures=measures.measures,
+        )
+        try:
+            raw = await run_json_call(
+                client,
+                model=self._model,
+                temperature=self._temperature,
+                system=RECOMMENDATIONS_SYSTEM,
+                user=user,
+                retry_call=self._retry_call,
+                timeout=self._timeout,
+            )
+            parsed = RecommendationsParsed.model_validate(raw)
+        except Exception as e:  # noqa: BLE001 — подсказки необязательны, не роняем поток
+            logger.warning("Рекомендации не получены: %s", e)
+            return []
+        cleaned = [r.strip() for r in parsed.recommendations if r and r.strip()]
+        return cleaned[:_MAX_RECOMMENDATIONS]

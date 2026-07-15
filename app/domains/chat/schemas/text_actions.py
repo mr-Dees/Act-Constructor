@@ -32,6 +32,9 @@ class FormalizeResponse(BaseModel):
     """Поля карточки нарушения, извлечённые из текста (пустые — что LLM не нашла).
 
     ``measures`` («Принятые меры») раскладывается в поле карточки под «Причинами».
+    ``recommendations`` — дисплей-онли подсказки аналитику «чего не хватает в
+    описании»: показываются в панели-формализаторе, но в карточку и экспорт НЕ
+    пишутся (фронт их не применяет).
     """
 
     violated: str = ""
@@ -40,3 +43,4 @@ class FormalizeResponse(BaseModel):
     measures: str = ""
     responsible: str = ""
     consequences: str = ""
+    recommendations: list[str] = Field(default_factory=list)

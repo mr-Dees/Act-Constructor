@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { FormalizerPopover } from '../../static/js/constructor/text-actions/formalizer-popover.js';
 
 test('FormalizerPopover: экспортирован объект с ключевыми методами', () => {
-  for (const m of ['open', 'close', '_build', '_run', '_renderPreview', '_accept', '_gatherSource']) {
+  for (const m of ['open', 'close', '_build', '_run', '_renderPreview', '_renderRecommendations', '_accept', '_enterRecommendationsView', '_gatherSource']) {
     assert.equal(typeof FormalizerPopover[m], 'function', `метод ${m}`);
   }
 });

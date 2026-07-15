@@ -6,6 +6,13 @@
  * «Формализовать» → превью извлечённых полей → «Применить» раскладывает их по
  * полям карточки нарушения (что LLM не нашла — поле НЕ трогаем, см. violation-core).
  *
+ * Под превью — дисплей-онли рекомендации «чего не хватает» (подсказки аналитику от
+ * экстрактора D17). Показываются рядом с превью, но «Применить» их НЕ пишет: в
+ * карточку и экспорт не идут, это только ориентир, что доописать во входном тексте.
+ * После «Применить» поля уходят в карточку, а окно НЕ закрывается: ввод и превью
+ * скрываются, остаётся только блок «чего не хватает», чтобы аналитик держал
+ * подсказки перед глазами. Если рекомендаций нет — окно закрывается как раньше.
+ *
  * Свободный текст при открытии ПРЕДЗАПОЛНЯЕТСЯ содержимым уже заполненных полей
  * карточки (`_gatherSource`) — чтобы формализовать/переформализовать имеющееся, а
  * не набирать заново. Это чтение: ячейки карточки НЕ очищаются, перезапись только
@@ -54,7 +61,11 @@ export const FormalizerPopover = {
         // Предзаполняем свободный текст собранными полями карточки (если заполнены).
         this._els.source.value = this._gatherSource(violation);
         this._els.preview.innerHTML = '';
+        this._clearRecommendations();
         this._els.accept.disabled = true;
+        // Сброс возможного пост-применения из прошлого открытия.
+        this._el.classList.remove('formalizer-applied');
+        this._els.reject.textContent = 'Отмена';
         const suffix = pointNumber ? ` по пункту ${pointNumber}` : '';
         this._els.title.textContent = `✨ Корректор отклонения/проблемы${suffix}`;
         this._el.classList.remove('hidden');
@@ -113,6 +124,7 @@ export const FormalizerPopover = {
                     placeholder="Вставьте или введите описание нарушения…"></textarea>
                 <button type="button" class="corrector-btn formalizer-run" data-role="run">Формализовать</button>
                 <div class="formalizer-preview" data-role="preview"></div>
+                <div class="formalizer-recommendations hidden" data-role="recs"></div>
             </div>
             <div class="corrector-actions">
                 <button type="button" class="corrector-btn corrector-reject" data-role="reject">Отмена</button>
@@ -128,6 +140,7 @@ export const FormalizerPopover = {
             source: el.querySelector('[data-role="source"]'),
             run: el.querySelector('[data-role="run"]'),
             preview: el.querySelector('[data-role="preview"]'),
+            recs: el.querySelector('[data-role="recs"]'),
             accept: el.querySelector('[data-role="accept"]'),
             reject: el.querySelector('[data-role="reject"]'),
             close: el.querySelector('[data-role="close"]'),
@@ -166,15 +179,18 @@ export const FormalizerPopover = {
         this._els.run.disabled = true;
         this._els.accept.disabled = true;
         this._els.preview.innerHTML = '<div class="corrector-status">Обрабатываю…</div>';
+        this._clearRecommendations();
         try {
             const fields = await formalizeViolation(text, { signal: this._controller.signal });
             this._fields = fields;
             this._renderPreview(fields);
+            this._renderRecommendations(fields.recommendations);
             this._els.accept.disabled = false;
         } catch (e) {
             if (e && e.name === 'AbortError') return;
             this._fields = null;
             this._els.preview.innerHTML = '';
+            this._clearRecommendations();
             const msg = document.createElement('div');
             msg.className = 'corrector-status corrector-error';
             msg.textContent = (e && e.message) ? e.message : 'Ошибка формализации';
@@ -202,11 +218,63 @@ export const FormalizerPopover = {
         }
     },
 
+    /**
+     * Рендерит дисплей-онли рекомендации «чего не хватает» под превью. Пустой/не-
+     * массив список → секция скрыта. Эти подсказки в карточку/экспорт НЕ идут —
+     * «Применить» их не трогает (см. violation-core `_applyFormalized`).
+     * @param {string[]} recs
+     */
+    _renderRecommendations(recs) {
+        const box = this._els.recs;
+        box.innerHTML = '';
+        const items = Array.isArray(recs)
+            ? recs.map((r) => (r || '').trim()).filter(Boolean)
+            : [];
+        if (!items.length) { box.classList.add('hidden'); return; }
+        const lab = document.createElement('div');
+        lab.className = 'formalizer-recs-label';
+        lab.textContent = 'Чего не хватает в описании';
+        const ul = document.createElement('ul');
+        ul.className = 'formalizer-recs-list';
+        for (const r of items) {
+            const li = document.createElement('li');
+            li.textContent = r;
+            ul.appendChild(li);
+        }
+        box.appendChild(lab);
+        box.appendChild(ul);
+        box.classList.remove('hidden');
+    },
+
+    _clearRecommendations() {
+        this._els.recs.innerHTML = '';
+        this._els.recs.classList.add('hidden');
+    },
+
     _accept() {
         if (!this._fields || typeof this._apply !== 'function') { this.close(); return; }
         this._apply(this._fields);
         Notifications.success('Поля карточки заполнены');
-        this.close();
+        // Есть рекомендации → окно остаётся открытым только с этим блоком.
+        // Нет — закрываемся, показывать нечего.
+        if (this._els.recs.classList.contains('hidden')) {
+            this.close();
+        } else {
+            this._enterRecommendationsView();
+        }
+    },
+
+    /**
+     * Пост-применение: ввод/превью/«Применить» скрыты, в окне остаётся только блок
+     * «чего не хватает». Показ этих подсказок — единственная задача окна после того,
+     * как поля уже уехали в карточку. Сброс — в `open()` при следующем открытии.
+     */
+    _enterRecommendationsView() {
+        this._fields = null;
+        this._els.source.value = '';
+        this._els.preview.innerHTML = '';
+        this._els.reject.textContent = 'Закрыть';
+        this._el.classList.add('formalizer-applied');
     },
 };
 

@@ -514,6 +514,55 @@
     font-style: italic;
 }
 
+/* Рекомендации D17 «чего не хватает» — дисплей-онли, в карточку/экспорт не идут. */
+.formalizer-recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    padding-top: var(--spacing-sm);
+    border-top: var(--border-width-thin) solid var(--input-border);
+}
+
+.formalizer-recommendations.hidden {
+    display: none;
+}
+
+.formalizer-recs-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.formalizer-recs-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.formalizer-recs-list li {
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+}
+
+/* После «Применить»: окно открыто, но виден только блок «чего не хватает». */
+.formalizer-popover.formalizer-applied .formalizer-hint,
+.formalizer-popover.formalizer-applied .formalizer-source,
+.formalizer-popover.formalizer-applied .formalizer-run,
+.formalizer-popover.formalizer-applied .formalizer-preview,
+.formalizer-popover.formalizer-applied .corrector-accept {
+    display: none;
+}
+
+/* Без превью сверху разделительная линия/отступ блока не нужны. */
+.formalizer-popover.formalizer-applied .formalizer-recommendations {
+    padding-top: 0;
+    border-top: none;
+}
+
 /* Кнопка формализации на панели нарушения. */
 .violation-formalize-bar {
     display: flex;
