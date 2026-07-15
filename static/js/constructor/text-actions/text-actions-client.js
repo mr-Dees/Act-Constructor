@@ -5,16 +5,16 @@
 import { AppConfig } from '../../shared/app-config.js';
 
 /**
- * Исправить орфографию/пунктуацию текста.
+ * Обработать текст: орфография/пунктуация (`fix`) или улучшение читаемости (`readability`).
  * @param {string} text — исходный текст выделения.
- * @param {{signal?: AbortSignal}} [opts]
- * @returns {Promise<string>} исправленный текст.
+ * @param {{signal?: AbortSignal, mode?: 'fix'|'readability'}} [opts]
+ * @returns {Promise<string>} обработанный текст.
  */
-export async function correctText(text, { signal } = {}) {
+export async function correctText(text, { signal, mode = 'fix' } = {}) {
     const res = await fetch(AppConfig.api.getUrl('/api/v1/chat/text-actions/correct'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, mode }),
         signal,
     });
     if (!res.ok) {

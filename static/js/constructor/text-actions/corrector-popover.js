@@ -3,6 +3,8 @@
  *
  * Перетаскиваемая (за заголовок) и ресайзабельная панель по образцу строки поиска:
  * базовое положение — слева вверху (поиск — справа), позиция/размер персистятся.
+ * Два режима обработки (тумблер в шапке): «Исправить ошибки» (орфография/пунктуация)
+ * и «Улучшить читаемость» (структура/связность) — оба возвращают диф.
  * Показывает диф исправленного текста в одном из трёх режимов (в строку / 2 окна /
  * 3 окна — из настроек конструктора). «Принять» заменяет выделение с сохранением
  * переносов строк (`\n`→`<br>`); при наличии в выделении ссылок/сносок — предупреждает,
@@ -32,6 +34,7 @@ export const CorrectorPopover = {
     _sourceText: '',
     _corrected: '',
     _destructive: false,
+    _mode: 'fix',
 
     /**
      * @param {{editor: HTMLElement, range: Range, text: string}} opts
@@ -42,6 +45,8 @@ export const CorrectorPopover = {
         this._range = range;
         this._sourceText = text;
         this._corrected = '';
+        this._mode = 'fix';
+        this._syncModeButtons();
         this._destructive = this._detectDestructiveCapsules(range);
         this._el.classList.remove('hidden');
         if (!this._escUnsub) this._escUnsub = EscapeStack.push(() => this.close());
@@ -69,6 +74,10 @@ export const CorrectorPopover = {
                 <span class="corrector-title">✨ Корректор</span>
                 <button type="button" class="corrector-close" data-role="close" title="Закрыть">✕</button>
             </div>
+            <div class="corrector-modes" data-role="modes">
+                <button type="button" class="corrector-mode active" data-mode="fix">Исправить ошибки</button>
+                <button type="button" class="corrector-mode" data-mode="readability">Улучшить читаемость</button>
+            </div>
             <div class="corrector-body" data-role="body"></div>
             <div class="corrector-actions">
                 <button type="button" class="corrector-btn corrector-regen" data-role="regen" title="Перегенерировать">↻</button>
@@ -81,6 +90,7 @@ export const CorrectorPopover = {
         this._el = el;
         this._els = {
             header: el.querySelector('[data-role="header"]'),
+            modes: el.querySelector('[data-role="modes"]'),
             body: el.querySelector('[data-role="body"]'),
             accept: el.querySelector('[data-role="accept"]'),
             reject: el.querySelector('[data-role="reject"]'),
@@ -93,6 +103,12 @@ export const CorrectorPopover = {
         [this._els.accept, this._els.reject, this._els.regen, this._els.close].forEach((b) => {
             b.addEventListener('mousedown', (e) => e.preventDefault());
             b.addEventListener('pointerdown', (e) => e.preventDefault());
+        });
+        // Тумблер режимов: не воруем выделение (как кнопки выше), клик → смена режима.
+        this._els.modes.querySelectorAll('[data-mode]').forEach((b) => {
+            b.addEventListener('mousedown', (e) => e.preventDefault());
+            b.addEventListener('pointerdown', (e) => e.preventDefault());
+            b.addEventListener('click', () => this._setMode(b.dataset.mode));
         });
         this._els.accept.addEventListener('click', () => this._accept());
         this._els.reject.addEventListener('click', () => this.close());
@@ -121,6 +137,21 @@ export const CorrectorPopover = {
         this._els.regen.disabled = busy;
     },
 
+    // Переключение режима: обновляет активную кнопку и перезапрашивает результат.
+    _setMode(mode) {
+        if (mode === this._mode || (mode !== 'fix' && mode !== 'readability')) return;
+        this._mode = mode;
+        this._syncModeButtons();
+        this._request();
+    },
+
+    _syncModeButtons() {
+        if (!this._els || !this._els.modes) return;
+        this._els.modes.querySelectorAll('[data-mode]').forEach((b) => {
+            b.classList.toggle('active', b.dataset.mode === this._mode);
+        });
+    },
+
     async _request() {
         this._abort();
         this._controller = new AbortController();
@@ -128,7 +159,7 @@ export const CorrectorPopover = {
         this._els.body.innerHTML = '<div class="corrector-status">Обрабатываю…</div>';
         try {
             const corrected = await correctText(
-                this._sourceText, { signal: this._controller.signal });
+                this._sourceText, { signal: this._controller.signal, mode: this._mode });
             this._corrected = corrected;
             this._render();
             this._setBusy(false);

@@ -56,6 +56,29 @@ def test_correct_ok():
     assert r.json()["corrected_text"] == "исправлено"
 
 
+def test_correct_forwards_mode():
+    svc = MagicMock()
+    svc.correct = AsyncMock(return_value="улучшено")
+    with TestClient(_app(svc)) as c:
+        r = c.post(
+            "/api/v1/chat/text-actions/correct",
+            json={"text": "текст", "mode": "readability"},
+        )
+    assert r.status_code == 200
+    svc.correct.assert_awaited_once_with("текст", "readability")
+
+
+def test_correct_rejects_bad_mode():
+    svc = MagicMock()
+    svc.correct = AsyncMock(return_value="x")
+    with TestClient(_app(svc)) as c:
+        r = c.post(
+            "/api/v1/chat/text-actions/correct",
+            json={"text": "текст", "mode": "bogus"},
+        )
+    assert r.status_code == 422  # Literal["fix","readability"] в CorrectRequest
+
+
 def test_correct_too_long_422():
     svc = MagicMock()
     svc.correct = AsyncMock(side_effect=TextActionValidationError("слишком длинно"))

@@ -1,7 +1,8 @@
 """Эндпоинты text-actions.
 
-Пока один: ``POST /chat/text-actions/correct`` — корректор орфографии и
-пунктуации выделенного текста (Фича «Корректор»).
+``POST /chat/text-actions/correct`` — обработка выделенного текста (Фича
+«Корректор») в одном из режимов: ``fix`` (орфография/пунктуация) или
+``readability`` (улучшение читаемости/структуры).
 """
 
 from fastapi import APIRouter, Depends
@@ -21,6 +22,7 @@ async def correct_text(
     body: CorrectRequest,
     service=Depends(get_text_corrector_service),
 ) -> CorrectResponse:
-    """Исправить орфографию/пунктуацию выделенного текста."""
-    corrected = await service.correct(body.text)
+    """Обработать выделенный текст: орфография/пунктуация (``fix``) или
+    улучшение читаемости/структуры (``readability``)."""
+    corrected = await service.correct(body.text, body.mode)
     return CorrectResponse(corrected_text=corrected)

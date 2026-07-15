@@ -293,6 +293,39 @@
     color: var(--primary);
 }
 
+/* Тумблер режимов обработки: «Исправить ошибки» / «Улучшить читаемость». */
+.corrector-modes {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.corrector-mode {
+    flex: 1 1 0;
+    background: transparent;
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-secondary);
+    transition: var(--transition-all);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.corrector-mode:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.corrector-mode.active {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
 .corrector-body {
     flex: 1 1 auto;
     overflow: auto;
