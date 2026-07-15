@@ -9,10 +9,12 @@
 
 from .html_utils import HTMLUtils
 from .json_utils import JSONUtils
+from .markdown_utils import MarkdownUtils
 from .table_utils import TableUtils
 
 __all__ = [
     "HTMLUtils",
     "TableUtils",
     "JSONUtils",
+    "MarkdownUtils",
 ]

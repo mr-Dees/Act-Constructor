@@ -173,6 +173,93 @@ test('regenerateIds: все id новые, ссылки и ключи слова
     assert.ok(payload.dicts.tables.T1);
 });
 
+test('regenerateIds: элементы additionalContent.items нарушения получают НОВЫЕ id (#22)', () => {
+    const payload = {
+        node: {
+            id: 'old_root', type: 'item', children: [
+                { id: 'old_v', type: 'violation', violationId: 'V1', children: [] },
+            ],
+        },
+        dicts: {
+            violations: {
+                V1: {
+                    id: 'V1', nodeId: 'old_v',
+                    additionalContent: {
+                        enabled: true,
+                        items: [
+                            { id: 'case_1', type: 'case', content: 'A' },
+                            { id: 'case_2', type: 'case', content: 'B' },
+                        ],
+                    },
+                },
+            },
+        },
+    };
+
+    let counter = 0;
+    const out = regenerateIds(payload, {
+        genNodeId: () => `n${++counter}`,
+        genContentId: (type) => `${type}_${++counter}`,
+    });
+
+    const vNode = out.node.children[0];
+    const newEntry = out.dicts.violations[vNode.violationId];
+    const newIds = newEntry.additionalContent.items.map(i => i.id);
+
+    assert.equal(newIds.length, 2);
+    assert.ok(!newIds.includes('case_1') && !newIds.includes('case_2'), 'старые id элементов заменены новыми');
+    assert.notEqual(newIds[0], newIds[1], 'id элементов уникальны между собой');
+    // Регенерируется только id — содержимое (тип/текст) элемента сохранено.
+    assert.equal(newEntry.additionalContent.items[0].type, 'case');
+    assert.equal(newEntry.additionalContent.items[0].content, 'A');
+    assert.equal(newEntry.additionalContent.items[1].content, 'B');
+
+    // Исходный payload (буфер) не мутирован.
+    assert.equal(payload.dicts.violations.V1.additionalContent.items[0].id, 'case_1');
+    assert.equal(payload.dicts.violations.V1.additionalContent.items[1].id, 'case_2');
+});
+
+test('regenerateIds: id элементов доп.контента уникальны даже при одинаковом Date.now() внутри цикла (#22)', () => {
+    const payload = {
+        node: { id: 'old_v', type: 'violation', violationId: 'V1', children: [] },
+        dicts: {
+            violations: {
+                V1: {
+                    id: 'V1', nodeId: 'old_v',
+                    additionalContent: {
+                        enabled: true,
+                        items: Array.from({ length: 20 }, (_, i) => (
+                            { id: `case_${i}`, type: 'case', content: `c${i}` }
+                        )),
+                    },
+                },
+            },
+        },
+    };
+
+    const out = regenerateIds(payload, { genNodeId: () => 'n1', genContentId: (type) => `${type}_x` });
+    const newEntry = out.dicts.violations[out.node.violationId];
+    const ids = newEntry.additionalContent.items.map(i => i.id);
+    assert.equal(new Set(ids).size, ids.length, 'генератор с индексом — все id уникальны');
+});
+
+test('regenerateIds: нарушение без additionalContent.items не падает (обычные поля не тронуты)', () => {
+    const payload = {
+        node: { id: 'old_v', type: 'violation', violationId: 'V1', children: [] },
+        dicts: {
+            violations: {
+                V1: { id: 'V1', nodeId: 'old_v', violated: 'x', established: 'y' },
+            },
+        },
+    };
+
+    const out = regenerateIds(payload, { genNodeId: () => 'n1', genContentId: (type) => `${type}_x` });
+    const newEntry = out.dicts.violations[out.node.violationId];
+    assert.equal(newEntry.violated, 'x');
+    assert.equal(newEntry.established, 'y');
+    assert.equal(newEntry.additionalContent, undefined);
+});
+
 // ── Чистое ядро: filterPinnedFromSubtree (КП-3) ────────────────────────────────
 
 test('filterPinnedFromSubtree: pinned-дети (metrics/risk) отброшены', () => {
@@ -377,11 +464,11 @@ test('КП-5: вставка отклонена при превышении ли
     const src = addItem('4', 'С картинкой');
     assert.ok(AppState.addViolationToNode(src.id).valid);
     const violationId = src.children.find(c => c.violationId)?.violationId;
-    // Большая картинка (~25 МБ base64-payload).
-    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(34 * 1024 * 1024);
+    // Картинка ~3 МБ (влезает в 5 МБ-лимит акта для ОДНОЙ; дубль при вставке → >5 МБ).
+    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
-        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
+        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl }],
     };
 
     assert.ok(NodeClipboard.copyNode(src.id));
@@ -399,12 +486,12 @@ test('КП-5: copyNode отклоняет фрагмент с картинкам
     const src = addItem('4', 'С большой картинкой');
     assert.ok(AppState.addViolationToNode(src.id).valid);
     const violationId = src.children.find(c => c.violationId)?.violationId;
-    // Лимит акта по умолчанию — 30 МБ. estimateDataUrlBytes ≈ длина*0.75,
-    // поэтому base64-payload 42 МБ символов ≈ 31.5 МБ байт > лимита.
-    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(42 * 1024 * 1024);
+    // Лимит акта по умолчанию — 5 МБ. estimateDataUrlBytes ≈ длина*0.75,
+    // поэтому base64-payload 8 МБ символов ≈ 6 МБ байт > лимита.
+    const bigUrl = 'data:image/png;base64,' + 'A'.repeat(8 * 1024 * 1024);
     AppState.violations[violationId].additionalContent = {
         enabled: true,
-        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl, order: 0 }],
+        items: [{ id: 'img1', type: CONTENT_TYPE_IMAGE, url: bigUrl }],
     };
 
     // Шпион за setItem: при отказе он не должен вызываться.

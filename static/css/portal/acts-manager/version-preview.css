@@ -212,6 +212,42 @@ h5.version-preview-heading { font-size: 13px; }
     display: none;
 }
 
+/* Маркеры изменения атрибутов узла (number/label/customLabel/kind) */
+.diff-node-attr-change {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 12px;
+    font-weight: normal;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
+.diff-node-attr-change del {
+    color: #dc2626;
+    text-decoration: line-through;
+}
+
+.diff-node-attr-change ins {
+    color: #16a34a;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+/* Бейдж «перемещён» */
+.diff-node-moved-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
 /* Diff table wrapper */
 .diff-table-wrapper {
     margin: 8px 0;
@@ -230,9 +266,29 @@ h5.version-preview-heading { font-size: 13px; }
     text-decoration: none;
 }
 
+/* Сводка структурных изменений таблицы */
+.diff-table-structure {
+    margin: 4px 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.08);
+    border-radius: 4px;
+}
+
+.diff-table-structure-note {
+    line-height: 1.5;
+}
+
 /* Diff table cells */
 .diff-cell-changed {
     background: rgba(245, 158, 11, 0.12) !important;
+}
+
+/* Ячейка с изменённым объединением/заголовком */
+.diff-cell-attr-changed {
+    outline: 2px dashed #7c3aed;
+    outline-offset: -2px;
 }
 
 .diff-cell-old {
@@ -270,6 +326,18 @@ h5.version-preview-heading { font-size: 13px; }
     line-height: 1.6;
 }
 
+/* Бейдж «изменено форматирование» (видимый текст тот же, разный HTML) */
+.diff-textblock-format-badge {
+    display: inline-block;
+    margin: 4px 0 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    border-radius: 4px;
+}
+
 /* Diff violation */
 .diff-violation {
     margin: 8px 0;
@@ -300,6 +368,108 @@ h5.version-preview-heading { font-size: 13px; }
     background: rgba(34, 197, 94, 0.1);
     border-radius: 2px;
     padding: 1px 3px;
+}
+
+/* Diff фактуры (привязка node → реквизиты) */
+.diff-invoice {
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 2px solid transparent;
+}
+
+.diff-invoice.diff-added { border-left-color: #22c55e; }
+.diff-invoice.diff-removed { border-left-color: #ef4444; }
+.diff-invoice.diff-modified { border-left-color: #f59e0b; }
+
+.diff-invoice-label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.diff-invoice-field {
+    margin: 3px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Diff: список описаний нарушения (descriptionList) */
+.diff-desclist {
+    margin: 4px 0 4px 20px;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.diff-desclist-item {
+    margin: 2px 0;
+}
+
+.diff-desclist-item ins,
+.diff-violation-item-body ins {
+    background: rgba(34, 197, 94, 0.2);
+    text-decoration: none;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+.diff-desclist-item del,
+.diff-violation-item-body del {
+    background: rgba(239, 68, 68, 0.2);
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+/* Diff: элемент доп.контента нарушения (кейс / свободный текст / картинка) */
+.diff-violation-item {
+    margin: 6px 0;
+    padding: 4px 8px;
+    border-left: 2px solid transparent;
+}
+
+.diff-violation-item.diff-added { border-left-color: #22c55e; }
+.diff-violation-item.diff-removed { border-left-color: #ef4444; }
+.diff-violation-item.diff-modified { border-left-color: #f59e0b; }
+.diff-violation-item.diff-reordered { border-left-color: #3b82f6; }
+
+.diff-violation-item-label {
+    font-size: 13px;
+}
+
+.diff-violation-item-body {
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.diff-violation-sublabel {
+    font-size: 12px;
+    color: #6b7280;
+    margin: 4px 0 2px;
+}
+
+.diff-violation-image {
+    margin: 4px 0;
+}
+
+.diff-violation-image-img {
+    max-width: 100%;
+    max-height: 180px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+}
+
+.diff-violation-image-placeholder {
+    font-size: 13px;
+    color: #6b7280;
+    font-style: italic;
+}
+
+.diff-violation-caption {
+    font-size: 12px;
+    color: #6b7280;
+    font-style: italic;
+    margin-bottom: 4px;
 }
 
 /* No changes message */

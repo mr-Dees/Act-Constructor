@@ -31,6 +31,7 @@ class ActContentVersionRepository(BaseRepository):
         tables: dict,
         textblocks: dict,
         violations: dict,
+        invoices: dict | None = None,
         max_versions: int = 50,
     ) -> int:
         """
@@ -50,21 +51,24 @@ class ActContentVersionRepository(BaseRepository):
             tables: Данные таблиц
             textblocks: Данные текстовых блоков
             violations: Данные нарушений
+            invoices: Данные фактур акта (привязка node_id → реквизиты); None → {}
             max_versions: Максимальное число версий (старые удаляются)
         """
         tree_json = json.dumps(tree, ensure_ascii=False, default=str)
         tables_json = json.dumps(tables, ensure_ascii=False, default=str)
         textblocks_json = json.dumps(textblocks, ensure_ascii=False, default=str)
         violations_json = json.dumps(violations, ensure_ascii=False, default=str)
+        invoices_json = json.dumps(invoices or {}, ensure_ascii=False, default=str)
 
         # Атомарный INSERT с вычислением version_number
         row = await self.conn.fetchrow(
             f"""
             INSERT INTO {self.versions_table}
                 (act_id, version_number, save_type, username,
-                 tree_data, tables_data, textblocks_data, violations_data)
+                 tree_data, tables_data, textblocks_data, violations_data,
+                 invoices_data)
             SELECT $1::bigint, COALESCE(MAX(version_number), 0) + 1, $2, $3,
-                   $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb
+                   $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb
             FROM {self.versions_table}
             WHERE act_id = $1
             RETURNING version_number
@@ -76,6 +80,7 @@ class ActContentVersionRepository(BaseRepository):
             tables_json,
             textblocks_json,
             violations_json,
+            invoices_json,
         )
         next_version = row["version_number"]
 
@@ -119,7 +124,7 @@ class ActContentVersionRepository(BaseRepository):
             f"""
             SELECT id, version_number, save_type, username,
                    tree_data, tables_data, textblocks_data, violations_data,
-                   created_at
+                   invoices_data, created_at
             FROM {self.versions_table}
             WHERE act_id = $1 AND id = $2
             """,
@@ -131,7 +136,8 @@ class ActContentVersionRepository(BaseRepository):
 
         result = dict(row)
         # Конвертируем JSONB-строки в dict при необходимости
-        for key in ("tree_data", "tables_data", "textblocks_data", "violations_data"):
+        for key in ("tree_data", "tables_data", "textblocks_data",
+                    "violations_data", "invoices_data"):
             val = result.get(key)
             if isinstance(val, str):
                 result[key] = json.loads(val)

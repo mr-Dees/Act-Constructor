@@ -37,6 +37,10 @@ def _make_tx_conn() -> AsyncMock:
     tx.__aenter__ = AsyncMock(return_value=tx)
     tx.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=tx)
+    # restore_version тянет текущие фактуры напрямую через ActInvoiceRepository
+    # (реальный репо на этом же conn в тестах без явного patch'а) — пустой
+    # fetch по умолчанию, чтобы get_invoices_for_act вернул [].
+    conn.fetch = AsyncMock(return_value=[])
     return conn
 
 
@@ -465,13 +469,108 @@ class TestRestoreVersionPreSnapshot:
         assert second_call.kwargs["save_type"] == "manual"
         assert second_call.kwargs["tree"]["label"] == "v1"
 
+    async def test_restore_reattaches_version_invoices(self):
+        """restore заново прикрепляет фактуры версии, а не стирает их.
+
+        Pre-снимок несёт РЕАЛЬНЫЕ текущие фактуры акта (get_invoices_for_act —
+        get_content их не отдаёт). Сам restore UPSERT'ит фактуры версии
+        (save_invoice на каждый узел снимка) и проставляет restore_data.
+        invoiceNodeIds — так _sync_invoices освежает строки, а не уходит в
+        ветку DELETE-всё. Post-снимок отражает восстановленные фактуры (не {}).
+        """
+        svc, versions_repo = self._make_service()
+        version_invoices = {
+            "n7": {
+                "node_id": "n7", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t7",
+                "metrics": {"m": 1}, "node_number": "1.1",
+                "process": None, "profile_div": None,
+                "verification_status": "verified",
+            },
+        }
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "label": "v1", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+            "invoices_data": version_invoices,
+        }
+        current_content = {
+            "tree": {"id": "root", "label": "v_current", "children": []},
+            "tables": {},
+            "textBlocks": {},
+            "violations": {},
+        }
+        # Реальные текущие фактуры акта ДО restore — источник pre-снимка.
+        current_invoice_rows = [
+            {
+                "node_id": "n5", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t5", "metrics": {},
+                "node_number": "2.1", "process": None, "profile_div": None,
+                "verification_status": "verified",
+            },
+        ]
+        # Реальное состояние фактур ПОСЛЕ restore (перечитывается из репозитория):
+        # фактура версии прикреплена, verification_status сброшен в 'pending'.
+        post_restore_rows = [
+            {
+                "node_id": "n7", "act_id": 42, "db_type": "hive",
+                "schema_name": "s", "table_name": "t7",
+                "metrics": {"m": 1}, "node_number": "1.1",
+                "process": None, "profile_div": None,
+                "verification_status": "pending",
+            },
+        ]
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls, patch(
+            "app.domains.acts.services.audit_log_service.ActInvoiceRepository"
+        ) as invoice_cls:
+            content_inst = content_cls.return_value
+            content_inst.save_content = AsyncMock()
+            content_inst.get_content = AsyncMock(return_value=current_content)
+
+            invoice_inst = invoice_cls.return_value
+            # 1-й вызов — pre-снимок (текущие фактуры), 2-й — post-снимок
+            # (реальное состояние после restore, перечитанное из репозитория).
+            invoice_inst.get_invoices_for_act = AsyncMock(
+                side_effect=[current_invoice_rows, post_restore_rows]
+            )
+            invoice_inst.save_invoice = AsyncMock()
+
+            await svc.restore_version(act_id=42, version_id=1, username="12345")
+
+        # Фактура версии заново прикреплена: save_invoice на узел снимка.
+        invoice_inst.save_invoice.assert_awaited_once()
+        saved_data = invoice_inst.save_invoice.await_args.args[0]
+        assert saved_data["act_id"] == 42
+        assert saved_data["node_id"] == "n7"
+        assert saved_data["table_name"] == "t7"
+
+        # save_content получил непустой invoiceNodeIds → _sync_invoices не
+        # уходит в ветку DELETE-всё (restore больше не стирает фактуры).
+        restore_data = content_inst.save_content.await_args.args[1]
+        assert restore_data.invoiceNodeIds == ["n7"]
+
+        pre_call = versions_repo.create_version.await_args_list[0]
+        post_call = versions_repo.create_version.await_args_list[1]
+        # Pre — реальные текущие фактуры акта (keyed by node_id).
+        assert pre_call.kwargs["invoices"] == {"n5": current_invoice_rows[0]}
+        # Post — реальное состояние фактур после restore (перечитано из БД):
+        # n7 прикреплена, статус сброшен в 'pending' (не сырой снимок версии,
+        # и не {}).
+        assert post_call.kwargs["invoices"] == {"n7": post_restore_rows[0]}
+
     async def test_pre_snapshot_sanitized_before_write(self):
         """pbe-6: pre-snapshot чистится той же санитизацией, что и post.
 
         Иначе несанитизированный HTML из текущего контента (записанного
         в обход save_content или до ужесточения) лёг бы в историю и при
         повторном restore такого снимка вернулся бы в БД (stored XSS).
-        Ячейки таблиц при этом НЕ трогаются (инвариант «всё на текст»).
+        Ячейки таблиц и plain-text поля нарушения при этом НЕ трогаются
+        (инвариант «всё на текст» / «нарушения хранятся дословно», #3).
         """
         svc, versions_repo = self._make_service()
         versions_repo.get_version.return_value = {
@@ -506,7 +605,7 @@ class TestRestoreVersionPreSnapshot:
                     "additionalContent": {"enabled": True, "items": [
                         {"id": "i1", "type": "image", "url": "data:image/png;base64,AAAA",
                          "content": "", "caption": "<b>подпись</b>",
-                         "filename": "<script>f</script>имя.png", "order": 0},
+                         "filename": "<script>f</script>имя.png"},
                     ]},
                     "reasons": {"enabled": True, "content": "<svg onload=x></svg>причина"},
                 },
@@ -531,20 +630,15 @@ class TestRestoreVersionPreSnapshot:
         tb = pre["textblocks"]["tb1"]
         assert "<iframe" not in tb["content"]
         assert "<b>жирный</b>" in tb["content"]
-        # Нарушение: HTML-поля чищены, plain-поля без тегов, url не тронут
+        # Нарушение: plain-text поля хранятся дословно (не HTML — не чистятся)
         v = pre["violations"]["v1"]
-        assert "onerror" not in v["violated"]
-        assert "текст" in v["violated"]
-        assert "<script" not in v["descriptionList"]["items"][0]
-        assert "пункт" in v["descriptionList"]["items"][0]
+        assert v["violated"] == '<img src=x onerror="alert(1)">текст'
+        assert v["descriptionList"]["items"][0] == "<script>x</script>пункт"
         item = v["additionalContent"]["items"][0]
-        assert "<b>" not in item["caption"]
-        assert "подпись" in item["caption"]
-        assert "<script" not in item["filename"]
-        assert "имя.png" in item["filename"]
+        assert item["caption"] == "<b>подпись</b>"
+        assert item["filename"] == "<script>f</script>имя.png"
         assert item["url"] == "data:image/png;base64,AAAA"
-        assert "<svg" not in v["reasons"]["content"]
-        assert "причина" in v["reasons"]["content"]
+        assert v["reasons"]["content"] == "<svg onload=x></svg>причина"
         # Ячейки таблиц — дословно (инвариант B8)
         cell = pre["tables"]["t1"]["grid"][0][0]
         assert cell["content"] == "<script>в ячейке — дословно</script>"

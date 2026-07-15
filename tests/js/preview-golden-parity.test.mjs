@@ -39,16 +39,15 @@ const goldenViolation = {
     additionalContent: {
         enabled: true,
         items: [
-            { id: 'ac1', type: 'case', content: 'GOLDEN_V_CASE_1', order: 0 },
-            { id: 'ac2', type: 'case', content: 'GOLDEN_V_CASE_2', order: 1 },
-            { id: 'ac3', type: 'freeText', content: 'GOLDEN_V_FREETEXT', order: 2 },
+            { id: 'ac1', type: 'case', content: 'GOLDEN_V_CASE_1' },
+            { id: 'ac2', type: 'case', content: 'GOLDEN_V_CASE_2' },
+            { id: 'ac3', type: 'freeText', content: 'GOLDEN_V_FREETEXT' },
             {
                 id: 'ac4',
                 type: 'image',
                 url: GOLDEN_PNG_DATA_URL,
                 caption: 'GOLDEN_V_IMG_CAPTION',
                 filename: 'golden_image.png',
-                order: 3,
                 width: 50,
             },
         ],
@@ -104,16 +103,32 @@ test('golden: все текстовые поля нарушения присут
     assert.deepEqual(missing, [], `превью потеряло маркеры: ${missing}`);
 });
 
-test('golden: descriptionList — все 3 пункта целиком, отдельным списком', () => {
+test('golden: descriptionList — все 3 пункта целиком, отдельным списком, без заголовка «В том числе» (#12)', () => {
     const list = collectViolationLines(goldenViolation).find(l => l.type === 'list');
     assert.ok(list, 'list-строка отсутствует');
     assert.deepEqual(list.items, ['GOLDEN_V_DESC_1', 'GOLDEN_V_DESC_2', 'GOLDEN_V_DESC_3']);
+    assert.equal(list.label, '', 'заголовок «В том числе» убран (#12)');
 });
 
 test('golden: кейсы нумеруются «Кейс 1»/«Кейс 2» (паритет DOCX/MD/TXT)', () => {
     const lines = collectViolationLines(goldenViolation);
     assert.equal(lines.find(l => l.label === 'Кейс 1').text, 'GOLDEN_V_CASE_1');
     assert.equal(lines.find(l => l.label === 'Кейс 2').text, 'GOLDEN_V_CASE_2');
+});
+
+test('golden: свободный текст рендерится без подписи «Текст N» (#10)', () => {
+    const lines = collectViolationLines(goldenViolation);
+    const freeTextLine = lines.find(l => l.type === 'line' && l.text === 'GOLDEN_V_FREETEXT');
+    assert.ok(freeTextLine, 'строка свободного текста отсутствует');
+    assert.equal(freeTextLine.label, '');
+    assert.ok(!lines.some(l => /^Текст \d+$/.test(l.label || '')), 'подписи «Текст N» не должно быть');
+});
+
+test('golden: подпись поля responsible — «Ответственные», не «Ответственный за решение проблем» (#11)', () => {
+    const lines = collectViolationLines(goldenViolation);
+    const line = lines.find(l => l.text === 'GOLDEN_V_RESPONSIBLE');
+    assert.ok(line, 'строка responsible отсутствует');
+    assert.equal(line.label, 'Ответственные');
 });
 
 test('golden: image-элемент попадает в модель строк целиком (url/caption/filename/width)', () => {

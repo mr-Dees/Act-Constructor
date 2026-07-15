@@ -179,7 +179,6 @@ def _make_export_fixture() -> dict:
                             "url": "",
                             "caption": "",
                             "filename": "",
-                            "order": 0,
                             "width": 0,
                         },
                         {
@@ -189,7 +188,6 @@ def _make_export_fixture() -> dict:
                             "url": "data:image/png;base64,AAAA",
                             "caption": "Скриншот",
                             "filename": "screen.png",
-                            "order": 1,
                             "width": 50,
                         },
                     ],

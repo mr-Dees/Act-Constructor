@@ -6,15 +6,24 @@
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
+import { ValidationCore } from '../validation/validation-core.js';
 import { Notifications } from '../../shared/notifications.js';
 import { AppState } from '../state/state-core.js';
 import {
     estimateActImageBytes,
+    estimateDataUrlBytes,
+    getImageLimits,
     loadImageLimits,
-    validateImageFile,
+    validateImageType,
+    validateImageBytes,
 } from './violation-image-validator.js';
 import { CONTENT_TYPE_IMAGE, createContentItem } from './violation-content-item.js';
-import { readFilesInOrder } from './violation-file-reading.js';
+import { sniffImageMagic } from './violation-file-reading.js';
+import { downscaleImage } from './violation-image-resize.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+
+/** localStorage-ключ предвыбора режима качества (Q3 всё равно спрашивает каждый раз). */
+const IMAGE_QUALITY_MODE_KEY = 'violation_image_quality_mode';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -23,7 +32,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} violation - Объект нарушения
      * @returns {HTMLElement} Контейнер с подсущностями
      */
-    createAdditionalContentField(violation) {
+    createAdditionalContentField(violation, isReadOnly = false) {
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field violation-additional-content';
 
@@ -42,18 +51,20 @@ Object.assign(ViolationManager.prototype, {
         checkbox.type = 'checkbox';
         checkbox.id = `${violation.id}-additionalContent`;
         checkbox.checked = violation.additionalContent.enabled;
+        checkbox.disabled = isReadOnly;
 
-        checkbox.addEventListener('change', () => {
-            violation.additionalContent.enabled = checkbox.checked;
-            contentContainer.style.display = checkbox.checked ? 'block' : 'none';
+        // В режиме просмотра чекбокс заблокирован, мутирующий слушатель не вешаем.
+        if (!isReadOnly) {
+            checkbox.addEventListener('change', () => {
+                this.setViolationField(violation, 'additionalContent.enabled', checkbox.checked);
+                contentContainer.style.display = checkbox.checked ? 'block' : 'none';
 
-            // Если выключаем - сбрасываем активный контейнер
-            if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
-                this._resetActiveZone();
-            }
-
-            PreviewManager.updateBlock('violation', violation.id);
-        });
+                // Если выключаем - сбрасываем активный контейнер
+                if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
+                    this._resetActiveZone();
+                }
+            });
+        }
 
         const checkboxLabel = document.createElement('label');
         checkboxLabel.htmlFor = checkbox.id;
@@ -111,35 +122,39 @@ Object.assign(ViolationManager.prototype, {
             }
         });
 
-        // Настраиваем Drag and Drop для файлов
-        this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
+        // В режиме просмотра — только чтение: без приёма файлов и без меню
+        // добавления/удаления элементов.
+        if (!isReadOnly) {
+            // Настраиваем Drag and Drop для файлов
+            this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
 
-        // Обработчик контекстного меню - используем новый ContextMenuManager
-        itemsContainer.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+            // Обработчик контекстного меню - используем новый ContextMenuManager
+            itemsContainer.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
 
-            // Вычисляем позицию для вставки на основе клика
-            const insertPosition = this.calculateCursorPosition(e, itemsContainer);
+                // Вычисляем позицию для вставки на основе клика
+                const insertPosition = this.calculateCursorPosition(e, itemsContainer);
 
-            // Проверяем, клик по элементу или по пустой области
-            const clickedWrapper = e.target.closest('.content-item-wrapper');
+                // Проверяем, клик по элементу или по пустой области
+                const clickedWrapper = e.target.closest('.content-item-wrapper');
 
-            const options = {
-                violation,
-                contentContainer,
-                itemId: clickedWrapper ? clickedWrapper.dataset.itemId : null,
-                insertPosition
-            };
+                const options = {
+                    violation,
+                    contentContainer,
+                    itemId: clickedWrapper ? clickedWrapper.dataset.itemId : null,
+                    insertPosition
+                };
 
-            // Используем новый единый ContextMenuManager
-            ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', options);
-        });
+                // Используем новый единый ContextMenuManager
+                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', options);
+            });
+        }
 
         contentContainer.appendChild(itemsContainer);
 
         // Рендерим существующие элементы
-        this.renderContentItems(violation, itemsContainer);
+        this.renderContentItems(violation, itemsContainer, isReadOnly);
 
         fieldContainer.appendChild(contentContainer);
         return fieldContainer;
@@ -220,69 +235,143 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Добавляет элемент контента в указанную позицию
+     * Добавляет ОДИН элемент контента в указанную позицию (меню / текст-паста).
+     * Обёртка над _insertContentItemsBulk — единой точкой гейта лимита (#4)
+     * и read-only-guard'а (#1) для всех путей вставки.
+     *
      * @param {Object} violation - Объект нарушения
      * @param {string} type - Тип элемента ('case', 'image', 'freeText')
      * @param {HTMLElement} container - Контейнер содержимого
      * @param {number} insertIndex - Позиция для вставки
      * @param {Object} extraData - Дополнительные данные элемента
+     * @returns {boolean} true при успешной вставке, false при отказе
+     *          (режим просмотра или достигнут лимит элементов, #4)
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
         // Фабрика создаёт только релевантные типу поля (violation-3):
         // кейс/текст — content; картинка — url/caption/filename/width.
-        const newItem = createContentItem(type, insertIndex, extraData);
+        const newItem = createContentItem(type, extraData);
+        return this._insertContentItemsBulk(violation, container, insertIndex, [newItem]) > 0;
+    },
 
-        // Вставляем элемент в нужную позицию
-        violation.additionalContent.items.splice(insertIndex, 0, newItem);
+    /**
+     * Вставляет пачку готовых элементов контента РАЗОМ: один splice, один
+     * renderContentItems, один updateBlock (#29). Единая точка гейтов для ВСЕХ
+     * путей приёма (меню / текст-паста / картинки paste/drop/upload):
+     *
+     * - read-only (#1): requireWrite-guard закрывает и программные пути;
+     * - лимит числа элементов (#4): вставляется ровно столько, сколько влезает
+     *   до maxItemsPerViolation; переполнение показывает ОДИН warning на всю
+     *   пачку, счётчик не завышается.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первого элемента
+     * @param {Object[]} items - Готовые элементы (createContentItem) в порядке вставки
+     * @returns {number} Сколько элементов реально вставлено (0 при отказе/лимите)
+     */
+    _insertContentItemsBulk(violation, container, insertIndex, items) {
+        // Guard закрывает и программные пути добавления в режиме просмотра (#1).
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return 0;
 
-        // Обновляем порядок всех элементов
-        violation.additionalContent.items.forEach((item, idx) => {
-            item.order = idx;
-        });
+        if (!items || items.length === 0) return 0;
+
+        // Единый гейт лимита числа элементов для ЛЮБОГО типа контента (#4):
+        // раньше лимит проверялся только для картинок, кейсы/текст добавлялись
+        // без счёта, и бэкенд резал >50 элементов сразу на весь акт (422).
+        // Вставляем ровно столько, сколько влезает; переполнение — один warning.
+        const maxItems = getImageLimits().maxItemsPerViolation;
+        const available = Math.max(0, maxItems - violation.additionalContent.items.length);
+        const toInsert = available >= items.length ? items : items.slice(0, available);
+
+        if (toInsert.length < items.length) {
+            Notifications.warning(
+                `Достигнут лимит элементов дополнительного контента на нарушение (${maxItems}).`,
+            );
+        }
+
+        if (toInsert.length === 0) return 0;
+
+        // Splice РАЗОМ на insertIndex — порядок элементов пачки сохраняется.
+        // Порядок задаётся позицией в массиве, отдельного поля order нет (#24).
+        violation.additionalContent.items.splice(insertIndex, 0, ...toInsert);
 
         const itemsContainer = container.querySelector('.additional-content-items');
 
-        // Сохраняем текущее состояние активности
+        // Сохраняем текущее состояние активности зоны.
         const wasActive = this.currentActiveContainer === container;
 
         this.renderContentItems(violation, itemsContainer);
 
-        // Восстанавливаем активность после перерисовки
+        // Восстанавливаем активность после перерисовки.
         if (wasActive) {
             this.currentActiveContainer = container;
         }
 
         PreviewManager.updateBlock('violation', violation.id);
+        return toInsert.length;
     },
 
     /**
-     * Валидирует пачку файлов картинок ДО чтения в base64 (H6).
+     * Удаляет ОДИН элемент дополнительного контента (меню «Удалить», #11).
+     * Раньше сплайс в context-menu-violation.js шёл БЕЗ read-only-guard'а:
+     * безопасно было только потому, что пункт меню не рендерится в режиме
+     * просмотра. Теперь гейт есть здесь — defense-in-depth для программных
+     * путей, как у остальных мутаций нарушения.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {string} itemId - id удаляемого элемента (additionalContent.items[].id)
+     * @param {HTMLElement} container - Контейнер содержимого (contentContainer)
+     * @returns {boolean} true — удалено; false — заблокировано read-only
+     *          либо элемент с таким id не найден
+     */
+    removeContentItem(violation, itemId, container) {
+        const guard = ValidationCore.requireWrite('cannotEdit');
+        if (guard) return false;
+
+        const itemIndex = violation.additionalContent.items.findIndex(
+            item => item.id === itemId
+        );
+        if (itemIndex === -1) return false;
+
+        violation.additionalContent.items.splice(itemIndex, 1);
+
+        const itemsContainer = container.querySelector('.additional-content-items');
+        if (itemsContainer) {
+            this.renderContentItems(violation, itemsContainer);
+        }
+
+        PreviewManager.updateBlock('violation', violation.id);
+        return true;
+    },
+
+    /**
+     * Валидирует ТИП пачки файлов ДО чтения (H6/#26).
      *
      * Общая точка для всех трёх способов приёма (выбор файлов, drag&drop,
-     * Ctrl+V). Лимиты (MIME/размер/суммарный по акту/число элементов) —
-     * с GET /acts/limits, см. violation-image-validator.js. Отказ каждого
-     * файла сопровождается Notifications.warning с причиной.
+     * Ctrl+V). Здесь — только тип (MIME), число элементов и абсурдный сырой
+     * потолок; magic-байты (#26) и РАЗМЕРНЫЙ гейт (#2) перенесены в
+     * асинхронный конвейер insertImageFilesInOrder — размер считается ПОСЛЕ
+     * ресайза по ужатым байтам, иначе крупное фото отклонилось бы раньше, чем
+     * успело ужаться. Отказ каждого файла — Notifications.warning с причиной.
      *
      * @param {File[]} files - Файлы-кандидаты
      * @param {Object} violation - Нарушение, в которое добавляются картинки
-     * @returns {File[]} Прошедшие валидацию файлы
+     * @returns {File[]} Прошедшие тип-валидацию файлы
      */
     filterAcceptedImageFiles(files, violation) {
-        let runningBytes = estimateActImageBytes(AppState.violations);
+        const lim = getImageLimits();
         let runningCount = (violation.additionalContent?.items || []).length;
         const accepted = [];
 
         for (const file of files) {
-            const result = validateImageFile(file, {
-                existingTotalBytes: runningBytes,
-                itemsCount: runningCount,
-            });
+            const result = validateImageType(file, { itemsCount: runningCount, limits: lim });
             if (!result.ok) {
                 Notifications.warning(result.reason);
                 continue;
             }
             accepted.push(file);
-            runningBytes += file.size;
             runningCount += 1;
         }
 
@@ -290,39 +379,76 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Вставляет пачку картинок в детерминированном порядке выбора файлов
-     * (violation-4): файлы читаются параллельно, но вставка идёт строго
-     * по порядку списка после завершения всех чтений. Нечитаемые файлы
-     * пропускаются с Notifications.error, порядок остальных сохраняется.
+     * Читает, пережимает и вставляет пачку картинок (порядок выбора — violation-4).
+     *
+     * Конвейер на каждый файл (порядок пачки сохранён через Promise.all):
+     *  1. magic-байты (#26) — тип по содержимому ДО ресайза; мусор пропускаем;
+     *  2. ресайз (#25) — downscaleImage по выбранному режиму (JPEG-сжатие;
+     *     GIF/прозрачные PNG/original — оригинал);
+     *  3. размерный гейт (#2) — per-file + накопительный суммарный лимит акта
+     *     по УЖАТЫМ байтам dataUrl; over-budget пропускаем с warning'ом.
+     * Затем bulk-вставка (#29): один splice/render/updateBlock. Лимит числа
+     * (#4) и read-only (#1) — внутри _insertContentItemsBulk.
      *
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
      * @param {number} insertIndex - Позиция для вставки первой картинки
-     * @param {File[]} files - Прошедшие валидацию файлы в порядке выбора
+     * @param {File[]} files - Прошедшие тип-валидацию файлы в порядке выбора
+     * @param {string} [mode='high'] - Режим качества ('high'|'medium'|'original')
      */
-    async insertImageFilesInOrder(violation, container, insertIndex, files) {
-        const results = await readFilesInOrder(files);
+    async insertImageFilesInOrder(violation, container, insertIndex, files, mode = 'high') {
+        const lim = getImageLimits();
 
-        let addedCount = 0;
-        for (const result of results) {
+        // #26 + ресайз параллельно, порядок пачки сохраняется (violation-4).
+        const processed = await Promise.all(files.map(async (file) => {
+            try {
+                const okMagic = await sniffImageMagic(file, lim.allowedMimeTypes);
+                if (!okMagic) return { ok: false, file, reason: 'magic' };
+                const url = await downscaleImage(file, { mode });
+                return { ok: true, file, url };
+            } catch (error) {
+                return { ok: false, file, reason: 'read', error };
+            }
+        }));
+
+        // #2 размерный гейт ПОСЛЕ ресайза — по ужатым байтам, накопительно.
+        let runningBytes = estimateActImageBytes(AppState.violations);
+        const items = [];
+        for (const result of processed) {
             if (!result.ok) {
-                console.error('Ошибка при чтении файла:', result.file.name, result.error);
-                Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                if (result.reason === 'magic') {
+                    Notifications.warning(
+                        `Файл «${result.file.name}» не является изображением PNG/JPEG/GIF и не добавлен.`,
+                    );
+                } else {
+                    console.error('Ошибка при чтении файла:', result.file.name, result.error);
+                    Notifications.error(`Ошибка при чтении ${result.file.name}`);
+                }
                 continue;
             }
 
-            this.addContentItemAtPosition(
-                violation,
-                CONTENT_TYPE_IMAGE,
-                container,
-                insertIndex + addedCount,
-                {
-                    url: result.url,
-                    filename: result.file.name,
-                },
-            );
-            addedCount++;
+            const bytes = estimateDataUrlBytes(result.url);
+            const sizeCheck = validateImageBytes(bytes, {
+                existingTotalBytes: runningBytes,
+                name: result.file.name,
+                limits: lim,
+            });
+            if (!sizeCheck.ok) {
+                Notifications.warning(sizeCheck.reason);
+                continue;
+            }
+
+            runningBytes += bytes;
+            items.push(createContentItem(CONTENT_TYPE_IMAGE, {
+                url: result.url,
+                filename: result.file.name,
+            }));
         }
+
+        // Bulk-вставка (#29): один splice, один render, один updateBlock. Лимит
+        // (#4) и read-only (#1) — внутри _insertContentItemsBulk. addedCount
+        // отражает реально вставленное: при обрезке по лимиту тост не соврёт.
+        const addedCount = this._insertContentItemsBulk(violation, container, insertIndex, items);
 
         if (addedCount > 0) {
             const message = addedCount === 1
@@ -330,6 +456,73 @@ Object.assign(ViolationManager.prototype, {
                 : `Добавлено изображений: ${addedCount}`;
             Notifications.success(message);
         }
+    },
+
+    /**
+     * Показывает диалог качества (Q3) один раз на пачку и вставляет картинки
+     * выбранным режимом. Единая точка для всех трёх путей приёма (выбор /
+     * drag&drop / Ctrl+V). Отмена диалога (Escape/клик вне) → ничего не вставляем.
+     *
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки первой картинки
+     * @param {File[]} files - Прошедшие тип-валидацию файлы в порядке выбора
+     */
+    async promptQualityThenInsertImages(violation, container, insertIndex, files) {
+        const mode = await this.promptImageQualityMode();
+        if (mode === null) return; // пользователь отменил вставку
+        await this.insertImageFilesInOrder(violation, container, insertIndex, files, mode);
+    },
+
+    /**
+     * Диалог выбора режима сжатия (Q3): три кнопки «Сжатие» (по умолч.) /
+     * «Среднее» / «Исходное». Последний выбор запоминается в localStorage как
+     * ПРЕДВЫБОР (подсвеченная кнопка), но диалог показывается на КАЖДУЮ вставку.
+     *
+     * @returns {Promise<'high'|'medium'|'original'|null>} Режим или null при отмене
+     */
+    async promptImageQualityMode() {
+        let preselect = 'high';
+        try {
+            const saved = localStorage.getItem(IMAGE_QUALITY_MODE_KEY);
+            if (saved === 'high' || saved === 'medium' || saved === 'original') preselect = saved;
+        } catch (_) { /* приватный режим — дефолт «Сжатие» */ }
+
+        const OPTIONS = [
+            { mode: 'high', label: 'Сжатие' },
+            { mode: 'medium', label: 'Среднее' },
+            { mode: 'original', label: 'Исходное' },
+        ];
+
+        const result = await DialogManager.show({
+            title: 'Качество изображений',
+            message: 'Выберите режим для вставляемых картинок. Сжатие уменьшает вес акта; '
+                + 'GIF и прозрачные PNG не пережимаются.',
+            icon: '🖼️',
+            type: 'info',
+            hideConfirm: true,
+            hideCancel: true,
+            onMount: ({ overlay, close }) => {
+                const dialog = overlay.querySelector('.custom-dialog');
+                if (!dialog) return;
+                const row = document.createElement('div');
+                row.className = 'dialog-buttons';
+                for (const opt of OPTIONS) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `btn ${opt.mode === preselect ? 'btn-primary' : 'btn-secondary'}`;
+                    btn.textContent = opt.label;
+                    btn.addEventListener('click', () => {
+                        try { localStorage.setItem(IMAGE_QUALITY_MODE_KEY, opt.mode); } catch (_) { /* noop */ }
+                        close(opt.mode);
+                    });
+                    row.appendChild(btn);
+                }
+                dialog.appendChild(row);
+            },
+        });
+
+        return (result === 'high' || result === 'medium' || result === 'original') ? result : null;
     },
 
     /**
@@ -348,12 +541,12 @@ Object.assign(ViolationManager.prototype, {
         fileInput.addEventListener('change', (e) => {
             if (!e.target.files || e.target.files.length === 0) return;
 
-            // Валидация ДО readAsDataURL (H6) — отказники отсеяны с warning'ом.
+            // Тип-валидация ДО чтения (H6/#26); отказники отсеяны с warning'ом.
             const files = this.filterAcceptedImageFiles(Array.from(e.target.files), violation);
             if (files.length === 0) return;
 
-            // Вставка в порядке выбора файлов (violation-4).
-            this.insertImageFilesInOrder(violation, container, insertIndex, files);
+            // Диалог качества (Q3) → ресайз → вставка в порядке выбора (violation-4).
+            this.promptQualityThenInsertImages(violation, container, insertIndex, files);
         });
 
         document.body.appendChild(fileInput);

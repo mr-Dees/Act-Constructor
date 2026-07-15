@@ -5,6 +5,7 @@
 
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { AppConfig } from '../../shared/app-config.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -15,6 +16,10 @@ Object.assign(ViolationManager.prototype, {
      * @param {HTMLElement} contentContainer - Родительский контейнер
      */
     setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
+        // Режим просмотра: приём файлов не навешиваем (#1). Defense-in-depth —
+        // в RO createAdditionalContentField этот метод уже не вызывает.
+        if (AppConfig.readOnlyMode?.isReadOnly) return;
+
         // Повторная установка поля для того же нарушения снимает прежний
         // document-слушатель drop — иначе он накапливался на каждый ре-рендер
         // и удерживал отсоединённые контейнеры. Abort также дергают
@@ -146,13 +151,14 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            // Валидация ДО readAsDataURL (H6): MIME/размер/суммарный лимит/число
-            // элементов; отказники отсеяны с Notifications.warning.
+            // Тип-валидация ДО чтения (H6/#26): MIME/число элементов/абсурдный
+            // потолок; отказники отсеяны с Notifications.warning. Размер (#2) —
+            // после ресайза в конвейере.
             const acceptedFiles = this.filterAcceptedImageFiles(imageFiles, violation);
             if (acceptedFiles.length === 0) return;
 
-            // Вставка строго в порядке перетащенных файлов (violation-4).
-            this.insertImageFilesInOrder(violation, contentContainer, insertPosition, acceptedFiles);
+            // Диалог качества (Q3) → ресайз → вставка в порядке перетащенных (violation-4).
+            this.promptQualityThenInsertImages(violation, contentContainer, insertPosition, acceptedFiles);
         });
 
         // Дополнительная защита: сбрасываем состояние при любом завершении drag

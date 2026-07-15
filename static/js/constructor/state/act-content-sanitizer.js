@@ -6,8 +6,12 @@
  * но записи, испорченные до появления этих гардов, могли остаться.
  *
  * Правила:
- *  (а) записи словарей tables/textBlocks/violations, чей nodeId не существует
- *      в дереве — отбрасываются;
+ *  (а) записи словарей tables/textBlocks/violations отбрасываются, если
+ *      nodeId не существует в дереве, ИЛИ ни один узел дерева реально не
+ *      ссылается на эту запись через своё поле-ссылку (обратная сверка,
+ *      находка #21: раньше проверялось только существование узла с таким
+ *      id — фантомная запись, чей "хозяин" на деле ссылается на другую
+ *      запись словаря, могла уцелеть);
  *  (б) листовой узел (tableId/textBlockId/violationId) без записи в словаре —
  *      удаляется ЦЕЛИКОМ из дерева (зеркало бэкового _strip_dangling_refs):
  *      снять только ссылку мало — пустой узел-зомби всё равно отрисуется в
@@ -52,12 +56,21 @@ export function sanitizeActContent(content) {
     for (;;) {
         const nodeIds = new Set();
         const linked = [];
+        // Обратный индекс (находка #21, Вариант Б): для каждого словаря —
+        // множество id, на которые РЕАЛЬНО ссылается хотя бы один узел через
+        // своё поле-ссылку (node[refField]). Перестраивается каждый проход
+        // по ТЕКУЩЕМУ дереву — как и nodeIds.
+        const referenced = Object.fromEntries(DICT_REFS.map(([dictName]) => [dictName, new Set()]));
         const stack = [{ node: content.tree, parent: null }];
         while (stack.length) {
             const { node, parent } = stack.pop();
             if (!node || typeof node !== 'object') continue;
             linked.push({ node, parent });
             if (node.id) nodeIds.add(node.id);
+            for (const [dictName, refField] of DICT_REFS) {
+                const ref = node[refField];
+                if (ref) referenced[dictName].add(ref);
+            }
             if (Array.isArray(node.children)) {
                 for (const child of node.children) stack.push({ node: child, parent: node });
             }
@@ -65,15 +78,18 @@ export function sanitizeActContent(content) {
 
         let changedThisPass = false;
 
-        // (а) сироты словарей: nodeId записи не существует в (текущем) дереве —
-        //     в т.ч. потомки удалённых на прошлом проходе зомби-узлов.
+        // (а) сироты словарей: nodeId записи не существует в (текущем) дереве
+        //     (в т.ч. потомки удалённых на прошлом проходе зомби-узлов), ИЛИ
+        //     ни один узел реально не ссылается на entryId (находка #21).
         for (const [dictName] of DICT_REFS) {
             const dict = content[dictName];
             if (!dict || typeof dict !== 'object') continue;
             for (const [entryId, entry] of Object.entries(dict)) {
                 // B-38: явная проверка отсутствия nodeId (раньше срабатывала
                 // косвенно через nodeIds.has(undefined)===false — неочевидно).
-                if (!entry || !entry.nodeId || !nodeIds.has(entry.nodeId)) {
+                const noOwnerNode = !entry || !entry.nodeId || !nodeIds.has(entry.nodeId);
+                const notReferencedBack = !referenced[dictName].has(entryId);
+                if (noOwnerNode || notReferencedBack) {
                     delete dict[entryId];
                     report.droppedEntries[dictName].push(entryId);
                     report.changed = true;

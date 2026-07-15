@@ -95,6 +95,44 @@ test('запись без nodeId считается сиротой', () => {
   assert.deepEqual(report.droppedEntries.tables, ['t_no_node']);
 });
 
+test('находка #21: nodeId указывает на существующий узел, но узел ссылается на другую запись — дропается (все 3 словаря)', () => {
+  const content = makeCleanContent();
+  // t_stale выдаёт себя за содержимое узла n1, но n1.tableId по-прежнему 't1' —
+  // узел реально НЕ ссылается назад на t_stale (раньше хватало существования n1).
+  content.tables.t_stale = { id: 't_stale', nodeId: 'n1', grid: [] };
+  content.textBlocks.tb_stale = { id: 'tb_stale', nodeId: 'n2' };
+  content.violations.v_stale = { id: 'v_stale', nodeId: 'n4' };
+
+  const report = sanitizeActContent(content);
+
+  assert.equal(content.tables.t_stale, undefined);
+  assert.equal(content.textBlocks.tb_stale, undefined);
+  assert.equal(content.violations.v_stale, undefined);
+  assert.deepEqual(report.droppedEntries.tables, ['t_stale']);
+  assert.deepEqual(report.droppedEntries.textBlocks, ['tb_stale']);
+  assert.deepEqual(report.droppedEntries.violations, ['v_stale']);
+  // Легитимные записи, на которые узлы реально ссылаются, не задеты.
+  assert.ok(content.tables.t1);
+  assert.ok(content.textBlocks.tb1);
+  assert.ok(content.violations.v1);
+  // Узлы-владельцы легитимных ссылок остаются на месте (не задеты правилом (б)).
+  const ids = nodeIdsOf(content.tree);
+  assert.ok(ids.has('n1') && ids.has('n2') && ids.has('n4'));
+});
+
+test('находка #21: nodeId ссылается на узел ДРУГОГО типа с тем же id записи — дропается', () => {
+  const content = makeCleanContent();
+  // t_wrong_type маскируется под запись узла n2 (textblock), но у n2 нет
+  // поля tableId вовсе — обратной ссылки на t_wrong_type нет ни у одного узла.
+  content.tables.t_wrong_type = { id: 't_wrong_type', nodeId: 'n2', grid: [] };
+
+  const report = sanitizeActContent(content);
+
+  assert.equal(content.tables.t_wrong_type, undefined);
+  assert.deepEqual(report.droppedEntries.tables, ['t_wrong_type']);
+  assert.ok(content.textBlocks.tb1, 'легитимный textBlock не задет');
+});
+
 test('узел-зомби (нет записи в словаре) удаляется целиком', () => {
   const content = makeCleanContent();
   delete content.tables.t1; // запись пропала, узел n1 ссылается в пустоту

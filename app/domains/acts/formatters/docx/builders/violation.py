@@ -28,6 +28,7 @@ from docx.shared import Pt, Twips
 
 from app.domains.acts.formatters.docx.styles import Fonts, Margins, Page, Sizes
 from app.domains.acts.schemas.act_content import (
+    _acts_settings,
     image_data_url_pattern,
     ViolationContentItemSchema,
     ViolationSchema,
@@ -35,6 +36,9 @@ from app.domains.acts.schemas.act_content import (
 
 # Полезная ширина страницы (A4 минус поля) в твипах — потолок ширины картинок.
 _USABLE_WIDTH_TWIPS = Page.width_twips - Margins.left - Margins.right
+# Полезная высота страницы (A4 минус верхнее/нижнее поле) в твипах — база
+# потолка высоты картинок (#13).
+_USABLE_HEIGHT_TWIPS = Page.height_twips - Margins.top - Margins.bottom
 
 
 @lru_cache(maxsize=8)
@@ -73,18 +77,19 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
             run.font.size = Pt(Sizes.violation_pt)
             run.italic = True
 
-    # additionalContent (case / image / freeText). Нумерация кейсов сбрасывается
-    # после не-кейса — зеркало markdown/text_formatter._add_additional_content.
+    # additionalContent (case / image / freeText). Нумеруются ВСЕ кейсы, включая
+    # пустые (метка + пустое тело); счётчик сбрасывается на любом не-кейсе —
+    # единое правило нумерации (computeAdditionalContentNumbers, решение Q1),
+    # зеркало markdown/text_formatter._add_additional_content.
     if violation.additionalContent.enabled:
         case_number = 1
         for item in violation.additionalContent.items:
             if item.type == "case":
-                if item.content:
-                    _labeled_paragraph(
-                        doc, f"Кейс {case_number}:", item.content,
-                        italic=True, size_pt=Sizes.violation_pt,
-                    )
-                    case_number += 1
+                _labeled_paragraph(
+                    doc, f"Кейс {case_number}:", item.content,
+                    italic=True, size_pt=Sizes.violation_pt,
+                )
+                case_number += 1
             elif item.type == "image":
                 _add_image(doc, item)
                 case_number = 1
@@ -98,7 +103,8 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
     for label, field in [
         ("Причины:", violation.reasons),
         ("Последствия:", violation.consequences),
-        ("Ответственный:", violation.responsible),
+        # Канон #11 (violation_fields.LABELS['responsible']) — «Ответственные».
+        ("Ответственные:", violation.responsible),
         ("Рекомендации:", violation.recommendations),
     ]:
         if field.enabled and field.content:
@@ -157,27 +163,47 @@ def _decode_data_url(url: str) -> bytes | None:
         return None
 
 
-def _scale_picture(shape, width_percent: int) -> None:
-    """Подгоняет размер inline shape с сохранением пропорций (Б-1.4).
+def _scale_picture(shape, width_percent: int, max_height_percent: int | None = None) -> None:
+    """Подгоняет размер inline shape с сохранением пропорций (Б-1.4, #13).
 
     width_percent > 0 — процент полезной ширины страницы; 0 — натуральный
-    размер с потолком по полезной ширине.
+    размер с потолком по полезной ширине. После расчёта ширины высота
+    ограничивается потолком (доля полезной высоты листа A4,
+    image_max_height_percent): если картинка выше потолка — она пропорционально
+    досжимается И по высоте, И по ширине (единый масштаб). Потолок применяется
+    во всех ветках, включая явную ширину и натуральный размер (паритет с превью).
 
-    Картинка нулевой ширины (битый/вырожденный shape, который python-docx всё
-    же встроил) не масштабируется — иначе деление на ноль уронило бы весь
-    экспорт DOCX. Оставляем натуральный размер и продолжаем сборку.
+    max_height_percent — доля полезной высоты (%). None → берётся из настроек
+    (ACTS__IMAGES__IMAGE_MAX_HEIGHT_PERCENT); юнит-тесты передают его явно.
+
+    Картинка нулевой ширины/высоты (битый/вырожденный shape, который
+    python-docx всё же встроил) не масштабируется — иначе деление на ноль
+    уронило бы весь экспорт DOCX. Оставляем натуральный размер.
     """
-    if not int(shape.width):
+    orig_width = int(shape.width)
+    orig_height = int(shape.height)
+    if not orig_width or not orig_height:
         return
+
     usable_emu = int(Twips(_USABLE_WIDTH_TWIPS))
     if width_percent:
-        target = usable_emu * width_percent // 100
-    elif int(shape.width) > usable_emu:
-        target = usable_emu
+        target_width = usable_emu * width_percent // 100
+    elif orig_width > usable_emu:
+        target_width = usable_emu
     else:
-        return
-    shape.height = round(int(shape.height) * target / int(shape.width))
-    shape.width = target
+        target_width = orig_width
+    target_height = round(orig_height * target_width / orig_width)
+
+    if max_height_percent is None:
+        max_height_percent = _acts_settings().images.image_max_height_percent
+    ceiling_emu = int(Twips(_USABLE_HEIGHT_TWIPS)) * max_height_percent // 100
+    if ceiling_emu and target_height > ceiling_emu:
+        # Досжать пропорционально: и высоту, и ширину (единый min-scale).
+        target_width = round(target_width * ceiling_emu / target_height)
+        target_height = ceiling_emu
+
+    shape.width = target_width
+    shape.height = target_height
 
 
 def _labeled_paragraph(

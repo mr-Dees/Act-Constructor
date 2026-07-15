@@ -144,12 +144,18 @@ export class VersionPreviewOverlay extends DialogBase {
                     tables_data: this._versionData.tables_data,
                     textblocks_data: this._versionData.textblocks_data,
                     violations_data: this._versionData.violations_data,
+                    // Старая сторона фактур — блоб снимка (у версий до миграции
+                    // отсутствует → движок трактует как {}).
+                    invoices_data: this._versionData.invoices_data,
                 },
                 {
                     tree: resp.tree,
                     tables: resp.tables,
                     textBlocks: resp.textBlocks,
                     violations: resp.violations,
+                    // Новая сторона — текущие фактуры акта (GET /acts/{id}/content
+                    // отдаёт их как {node_id: реквизиты}).
+                    invoices: resp.invoices,
                 }
             );
 

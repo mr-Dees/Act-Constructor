@@ -299,16 +299,15 @@ def build_golden_act_dict() -> dict:
             "additionalContent": {
                 "enabled": True,
                 "items": [
-                    {"id": "ac1", "type": "case", "content": "GOLDEN_V_CASE_1", "order": 0},
-                    {"id": "ac2", "type": "case", "content": "GOLDEN_V_CASE_2", "order": 1},
-                    {"id": "ac3", "type": "freeText", "content": "GOLDEN_V_FREETEXT", "order": 2},
+                    {"id": "ac1", "type": "case", "content": "GOLDEN_V_CASE_1"},
+                    {"id": "ac2", "type": "case", "content": "GOLDEN_V_CASE_2"},
+                    {"id": "ac3", "type": "freeText", "content": "GOLDEN_V_FREETEXT"},
                     {
                         "id": "ac4",
                         "type": "image",
                         "url": GOLDEN_PNG_DATA_URL,
                         "caption": MARKER_IMG_CAPTION,
                         "filename": MARKER_IMG_FILENAME,
-                        "order": 3,
                         "width": 50,
                     },
                 ],

@@ -3,7 +3,6 @@
  * Создание DOM-элементов для кейсов, изображений и текста
  */
 
-import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -12,6 +11,8 @@ import {
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
+import { renderImageWithFallback } from './violation-image-render.js';
+import { computeAdditionalContentNumbers } from './violation-numbering.js';
 
 /**
  * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
@@ -33,24 +34,24 @@ Object.assign(ViolationManager.prototype, {
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер для элементов
      */
-    renderContentItems(violation, container) {
+    renderContentItems(violation, container, isReadOnly = AppConfig.readOnlyMode?.isReadOnly) {
         container.innerHTML = '';
 
         // Вычисляем нумерацию для последовательных кейсов
-        const itemsWithNumbers = this.calculateCaseNumbers(violation.additionalContent.items);
+        const itemsWithNumbers = computeAdditionalContentNumbers(violation.additionalContent.items);
 
         violation.additionalContent.items.forEach((item, index) => {
             let itemElement;
 
             if (item.type === CONTENT_TYPE_CASE) {
-                const caseNumber = itemsWithNumbers[index];
-                itemElement = this.createCaseElement(violation, item, index, caseNumber);
+                const caseNumber = itemsWithNumbers[index]?.number;
+                itemElement = this.createCaseElement(violation, item, index, caseNumber, isReadOnly);
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_IMAGE, index);
-                itemElement = this.createImageElement(violation, item, index, imageNumber);
+                itemElement = this.createImageElement(violation, item, index, imageNumber, isReadOnly);
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
                 const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, CONTENT_TYPE_FREE_TEXT, index);
-                itemElement = this.createFreeTextElement(violation, item, index, textNumber);
+                itemElement = this.createFreeTextElement(violation, item, index, textNumber, isReadOnly);
             }
 
             if (itemElement) {
@@ -59,7 +60,6 @@ Object.assign(ViolationManager.prototype, {
                 itemElement.dataset.itemIndex = index;
 
                 // Добавляем drag-and-drop атрибуты (только если не режим чтения)
-                const isReadOnly = AppConfig.readOnlyMode?.isReadOnly;
                 itemElement.draggable = !isReadOnly;
 
                 // Обработчики перетаскивания (только если не режим чтения)
@@ -69,7 +69,7 @@ Object.assign(ViolationManager.prototype, {
                     itemElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
                     itemElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
                     itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
-                    itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, container));
+                    itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, violation, container));
                 }
 
                 container.appendChild(itemElement);
@@ -98,28 +98,6 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
-     * Вычисляет номера для кейсов (сброс нумерации при прерывании)
-     * @param {Array} items - Массив элементов
-     * @returns {Array} Массив с номерами кейсов
-     */
-    calculateCaseNumbers(items) {
-        const numbers = new Array(items.length).fill(null);
-        let currentCaseNumber = 1;
-
-        items.forEach((item, index) => {
-            if (item.type === CONTENT_TYPE_CASE) {
-                numbers[index] = currentCaseNumber;
-                currentCaseNumber++;
-            } else {
-                // Сбрасываем нумерацию при встрече не-кейса
-                currentCaseNumber = 1;
-            }
-        });
-
-        return numbers;
-    },
-
-    /**
      * Создает элемент кейса с нумерацией
      * @param {Object} violation - Объект нарушения
      * @param {Object} item - Данные элемента
@@ -127,9 +105,11 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} caseNumber - Номер кейса
      * @returns {HTMLElement} Элемент кейса
      */
-    createCaseElement(violation, item, index, caseNumber) {
+    createCaseElement(violation, item, index, caseNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
+        // Подсветка пустого кейса (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+        wrapper.classList.toggle('content-item-wrapper--empty', !item.content?.trim());
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
@@ -144,11 +124,16 @@ Object.assign(ViolationManager.prototype, {
         textarea.value = item.content;
         textarea.rows = 3;
 
-        textarea.addEventListener('input', () => {
-            item.content = textarea.value;
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
-        });
+        if (isReadOnly) {
+            textarea.readOnly = true;
+            textarea.classList.add('read-only');
+        } else {
+            // #18-А: Escape-откат/Enter-переход как у остальных полей нарушения.
+            this.setupTextareaHandlers(textarea, (value) => {
+                this.setContentItemField(violation, item, 'content', value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !value.trim());
+            });
+        }
 
         itemDiv.appendChild(textarea);
         wrapper.appendChild(label);
@@ -165,7 +150,7 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} imageNumber - Номер изображения
      * @returns {HTMLElement} Элемент изображения
      */
-    createImageElement(violation, item, index, imageNumber) {
+    createImageElement(violation, item, index, imageNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
@@ -180,17 +165,20 @@ Object.assign(ViolationManager.prototype, {
         const imgContainer = document.createElement('div');
         imgContainer.className = 'image-preview-container';
 
-        const img = document.createElement('img');
-        img.src = item.url;
-        img.alt = item.caption || item.filename;
-        img.className = 'image-preview';
-
-        // Запрещаем перетаскивание самого изображения
-        img.draggable = false;
-        img.style.pointerEvents = 'none';
-        img.style.userSelect = 'none';
-
-        imgContainer.appendChild(img);
+        // #27: onerror ДО src + текст-плейсхолдер при битой картинке (зеркалит превью).
+        renderImageWithFallback(imgContainer, {
+            src: item.url,
+            alt: item.caption || item.filename,
+            imgClassName: 'image-preview',
+            placeholderText: `Изображение: ${item.filename}`,
+            placeholderClassName: 'image-preview-placeholder',
+            configureImg: (img) => {
+                // Запрещаем перетаскивание самого изображения
+                img.draggable = false;
+                img.style.pointerEvents = 'none';
+                img.style.userSelect = 'none';
+            },
+        });
 
         const filenameDiv = document.createElement('div');
         filenameDiv.className = 'image-filename';
@@ -202,11 +190,16 @@ Object.assign(ViolationManager.prototype, {
         captionInput.placeholder = 'Подпись к изображению';
         captionInput.value = item.caption;
 
-        captionInput.addEventListener('input', () => {
-            item.caption = captionInput.value;
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
-        });
+        if (isReadOnly) {
+            captionInput.readOnly = true;
+            captionInput.classList.add('read-only');
+        } else {
+            // #18-А: подпись — однострочный input, multiline=false
+            // (Shift+Enter для неё бессмыслен). Escape откатывает подпись.
+            this.setupTextareaHandlers(captionInput, (value) => {
+                this.setContentItemField(violation, item, 'caption', value);
+            }, false);
+        }
 
         // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
         // (натуральный размер с потолком по ширине). Пишет item.width —
@@ -228,11 +221,13 @@ Object.assign(ViolationManager.prototype, {
         }
         widthSelect.value = String(item.width || 0);
         widthLabel.htmlFor = widthSelect.id = `${item.id}-width`;
+        widthSelect.disabled = isReadOnly;
 
-        widthSelect.addEventListener('change', () => {
-            item.width = parseInt(widthSelect.value, 10) || 0;
-            PreviewManager.updateBlock('violation', violation.id);
-        });
+        if (!isReadOnly) {
+            widthSelect.addEventListener('change', () => {
+                this.setContentItemField(violation, item, 'width', parseInt(widthSelect.value, 10) || 0);
+            });
+        }
 
         widthControl.appendChild(widthLabel);
         widthControl.appendChild(widthSelect);
@@ -256,9 +251,11 @@ Object.assign(ViolationManager.prototype, {
      * @param {number} textNumber - Номер текстового блока
      * @returns {HTMLElement} Элемент текста
      */
-    createFreeTextElement(violation, item, index, textNumber) {
+    createFreeTextElement(violation, item, index, textNumber, isReadOnly = false) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
+        // Подсветка пустого текста (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+        wrapper.classList.toggle('content-item-wrapper--empty', !item.content?.trim());
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
@@ -273,11 +270,16 @@ Object.assign(ViolationManager.prototype, {
         textarea.value = item.content;
         textarea.rows = 4;
 
-        textarea.addEventListener('input', () => {
-            item.content = textarea.value;
-            // Debounce 150мс: не пересобираем base64-картинки на каждый кадр (#6).
-            PreviewManager.scheduleTypingBlock('violation', violation.id);
-        });
+        if (isReadOnly) {
+            textarea.readOnly = true;
+            textarea.classList.add('read-only');
+        } else {
+            // #18-А: Escape-откат/Enter-переход как у остальных полей нарушения.
+            this.setupTextareaHandlers(textarea, (value) => {
+                this.setContentItemField(violation, item, 'content', value);
+                wrapper.classList.toggle('content-item-wrapper--empty', !value.trim());
+            });
+        }
 
         itemDiv.appendChild(textarea);
         wrapper.appendChild(label);

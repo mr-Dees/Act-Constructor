@@ -73,7 +73,7 @@ static/js/
     ├── search/       # FindBar (Ctrl+F) + ActSearchEngine/Highlight/Replace —
     │                 #   поиск/замена по текстблокам, deep-dive §12 в
     │                 #   textblock-editor-architecture.md
-    ├── violation/    # ViolationManager (10 файлов)
+    ├── violation/    # ViolationManager (17 файлов)
     ├── preview/      # PreviewManager + per-type renderer'ы
     ├── dialog/       # HelpManager, InvoiceDialog
     ├── context-menu/ # 5 файлов (tree, cells, violation, links-footnotes, core)
@@ -841,14 +841,15 @@ Fallback: если `BroadcastChannel` недоступен (старый Safari)
 
 ### 10.6 Diff engine
 
-`portal/acts-manager/diff-engine.js` (300 строк) — чистый utility без DOM. `DiffEngine.compute(oldData, newData)` возвращает `{tree, tables, textblocks, violations, hasChanges}`.
+`portal/acts-manager/diff-engine.js` (641 строка) — чистый utility без DOM. `DiffEngine.compute(oldData, newData)` возвращает `{tree, tables, textblocks, violations, invoices, hasChanges}`.
 
 - `_diffTree` — flatten оба дерева в map по id, `node._diff = added/modified/unchanged`.
 - `_diffTables` — cell-level (row × col matrix).
 - `_diffTextBlocks` — word-level через LCS на `Uint16Array`, fallback на coarse-diff если `m*n > 250000`.
-- `_diffViolations` — поле-за-полем.
+- `_diffViolations` — поле-за-полем (включая `descriptionList`/`additionalContent`).
+- `_diffInvoices` — поле-за-полем по `INVOICE_DIFF_FIELD_KEYS` (`portal/acts-manager/invoice-diff-fields.js`, новый shared-модуль с списком полей и подписей — переиспользуется `diff-renderer.js` для `INVOICE_FIELD_LABELS`).
 
-`portal/acts-manager/diff-renderer.js` (290 строк) — DOM-рендер с подсветкой.
+`portal/acts-manager/diff-renderer.js` (687 строк) — DOM-рендер с подсветкой.
 
 ---
 

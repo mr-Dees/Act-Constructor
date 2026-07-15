@@ -2,7 +2,6 @@
  * Управление нарушениями в документе
  * Создает и обрабатывает интерактивные формы для ввода нарушений
  */
-import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -86,6 +85,14 @@ export class ViolationManager {
             controller.abort();
             this._fileDropControllers.delete(violationId);
         }
+
+        // #23: активная зона вставки принадлежала удаляемому нарушению — сбрасываем
+        // её (иначе paste/ESC работали бы с зоной уже несуществующего нарушения).
+        const owner = this.currentActiveContainer?.querySelector?.('.additional-content-items')
+            ?.dataset?.violationId;
+        if (owner === violationId) {
+            this._resetActiveZone();
+        }
     }
 
     /**
@@ -136,13 +143,11 @@ export class ViolationManager {
             violatedTextarea.readOnly = true;
             violatedTextarea.classList.add('read-only');
         } else {
-            // Настраиваем обработку клавиш для сохранения изменений
+            // Настраиваем обработку клавиш для сохранения изменений.
+            // Аудит правки фиксируется diff-ом при сохранении (violation-audit.js),
+            // а не per-keystroke — отдельная запись в журнал здесь не нужна.
             this.setupTextareaHandlers(violatedTextarea, (value) => {
-                violation.violated = value;
-                if (typeof ChangelogTracker !== 'undefined') {
-                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
-                }
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
+                this.setViolationField(violation, 'violated', value);
             });
         }
 
@@ -168,13 +173,10 @@ export class ViolationManager {
             establishedTextarea.readOnly = true;
             establishedTextarea.classList.add('read-only');
         } else {
-            // Настраиваем обработку клавиш для сохранения изменений
+            // Настраиваем обработку клавиш для сохранения изменений.
+            // Аудит правки — diff при сохранении (violation-audit.js), не per-keystroke.
             this.setupTextareaHandlers(establishedTextarea, (value) => {
-                violation.established = value;
-                if (typeof ChangelogTracker !== 'undefined') {
-                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
-                }
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
+                this.setViolationField(violation, 'established', value);
             });
         }
 
@@ -189,27 +191,27 @@ export class ViolationManager {
         optionalFieldsContainer.className = 'violation-optional-fields';
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'descriptionList', 'Описание причин', 'list')
+            this.createOptionalField(violation, 'descriptionList', 'Описание причин', 'list', isReadOnly)
         );
 
         optionalFieldsContainer.appendChild(
-            this.createAdditionalContentField(violation)
+            this.createAdditionalContentField(violation, isReadOnly)
         );
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'reasons', 'Причины', 'text')
+            this.createOptionalField(violation, 'reasons', 'Причины', 'text', isReadOnly)
         );
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'consequences', 'Последствия', 'text')
+            this.createOptionalField(violation, 'consequences', 'Последствия', 'text', isReadOnly)
         );
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'responsible', 'Ответственные', 'text')
+            this.createOptionalField(violation, 'responsible', 'Ответственные', 'text', isReadOnly)
         );
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'recommendations', 'Рекомендации', 'text')
+            this.createOptionalField(violation, 'recommendations', 'Рекомендации', 'text', isReadOnly)
         );
 
         section.appendChild(optionalFieldsContainer);
@@ -218,45 +220,58 @@ export class ViolationManager {
     }
 
     /**
-     * Настраивает обработчики событий для textarea с поддержкой отмены
-     * @param {HTMLTextAreaElement} textarea - Элемент textarea
-     * @param {Function} onUpdate - Callback для обновления данных
+     * Настраивает обработчики событий для текстового поля с поддержкой отмены.
+     * Применяется ко всем текстовым полям формы нарушения: «Нарушено»/
+     * «Установлено», кейсы/свободный текст (textarea) и подпись картинки
+     * (однострочный input).
+     *
+     * @param {HTMLTextAreaElement|HTMLInputElement} field - Поле ввода
+     * @param {Function} onUpdate - Callback обновления данных (значение)
+     * @param {boolean} [multiline=true] - true для textarea (Shift+Enter — новая
+     *   строка); false для однострочного input (любой Enter сохраняет и снимает
+     *   фокус, Shift+Enter для него бессмыслен)
      */
-    setupTextareaHandlers(textarea, onUpdate) {
-        let originalValue = textarea.value;
+    setupTextareaHandlers(field, onUpdate, multiline = true) {
+        let originalValue = field.value;
 
         // Обновляем данные при каждом изменении
         const handleInput = () => {
-            onUpdate(textarea.value);
+            onUpdate(field.value);
         };
 
         // Обработка горячих клавиш
         const handleKeyDown = (e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-                // Shift+Enter — добавить новую строку (стандартное поведение)
+            if (e.key === 'Enter' && multiline && e.shiftKey) {
+                // Shift+Enter в textarea — добавить новую строку (стандартное поведение)
                 e.stopPropagation();
-            } else if (e.key === 'Enter' && !e.shiftKey) {
-                // Enter — сохранить изменения и снять фокус
+            } else if (e.key === 'Enter') {
+                // Enter — сохранить изменения и снять фокус. Для однострочного
+                // input сюда попадает любой Enter (в т.ч. с Shift).
                 e.preventDefault();
-                textarea.blur();
+                field.blur();
             } else if (e.key === 'Escape') {
-                // Escape — отменить изменения и восстановить исходное значение
+                // Escape — отменить изменения и восстановить исходное значение.
+                // onUpdate зовём ТОЛЬКО при реальном изменении, иначе Escape в
+                // нетронутом поле поднимал бы ложный markAsUnsaved и ложную
+                // запись аудита (#18-В).
                 e.preventDefault();
                 e.stopPropagation();
-                textarea.value = originalValue;
-                onUpdate(originalValue);
-                textarea.blur();
+                if (field.value !== originalValue) {
+                    field.value = originalValue;
+                    onUpdate(originalValue);
+                }
+                field.blur();
             }
         };
 
         // Запоминаем исходное значение при получении фокуса
         const handleFocus = () => {
-            originalValue = textarea.value;
+            originalValue = field.value;
         };
 
-        textarea.addEventListener('input', handleInput);
-        textarea.addEventListener('keydown', handleKeyDown);
-        textarea.addEventListener('focus', handleFocus);
+        field.addEventListener('input', handleInput);
+        field.addEventListener('keydown', handleKeyDown);
+        field.addEventListener('focus', handleFocus);
     }
 
     /**
@@ -267,7 +282,15 @@ export class ViolationManager {
      * @param {string} type - Тип поля ('list' или 'text')
      * @returns {HTMLElement} Контейнер с опциональным полем
      */
-    createOptionalField(violation, fieldName, label, type) {
+    createOptionalField(violation, fieldName, label, type, isReadOnly = false) {
+        // #20 страховка А: дешёвая защита от отсутствующего под-объекта поля
+        // (старые/повреждённые данные до normalizeViolations на загрузке).
+        // Не перезатирает валидные данные — подставляет дефолт только при
+        // полном отсутствии поля; последующие чтения (в т.ч. renderList) безопасны.
+        if (!violation[fieldName] || typeof violation[fieldName] !== 'object') {
+            violation[fieldName] = { enabled: false, items: [], content: '' };
+        }
+
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field';
 
@@ -279,12 +302,16 @@ export class ViolationManager {
         checkbox.type = 'checkbox';
         checkbox.id = `${violation.id}-${fieldName}`;
         checkbox.checked = violation[fieldName].enabled;
+        checkbox.disabled = isReadOnly;
 
-        checkbox.addEventListener('change', () => {
-            violation[fieldName].enabled = checkbox.checked;
-            contentContainer.style.display = checkbox.checked ? 'block' : 'none';
-            PreviewManager.updateBlock('violation', violation.id);
-        });
+        // В режиме просмотра чекбокс заблокирован, мутирующий слушатель не вешаем.
+        // Уже включённые секции остаются раскрытыми (display ниже) для чтения.
+        if (!isReadOnly) {
+            checkbox.addEventListener('change', () => {
+                this.setViolationField(violation, `${fieldName}.enabled`, checkbox.checked);
+                contentContainer.style.display = checkbox.checked ? 'block' : 'none';
+            });
+        }
 
         const checkboxLabel = document.createElement('label');
         checkboxLabel.htmlFor = checkbox.id;
@@ -308,16 +335,19 @@ export class ViolationManager {
             const addButton = document.createElement('button');
             addButton.className = 'violation-list-add-btn';
             addButton.textContent = '+ Добавить пункт';
+            addButton.disabled = isReadOnly;
 
-            addButton.addEventListener('click', () => {
-                violation[fieldName].items.push('');
-                this.renderList(listContainer, violation, fieldName);
-                PreviewManager.updateBlock('violation', violation.id);
-            });
+            if (!isReadOnly) {
+                addButton.addEventListener('click', () => {
+                    if (this.addViolationListItem(violation)) {
+                        this.renderList(listContainer, violation, fieldName, isReadOnly);
+                    }
+                });
+            }
 
             contentContainer.appendChild(addButton);
             contentContainer.appendChild(listContainer);
-            this.renderList(listContainer, violation, fieldName);
+            this.renderList(listContainer, violation, fieldName, isReadOnly);
 
         } else if (type === 'text') {
             const textarea = document.createElement('textarea');
@@ -326,11 +356,15 @@ export class ViolationManager {
             textarea.value = violation[fieldName].content || '';
             textarea.rows = 3;
 
-            // Настраиваем обработку клавиш
-            this.setupTextareaHandlers(textarea, (value) => {
-                violation[fieldName].content = value;
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
-            });
+            if (isReadOnly) {
+                textarea.readOnly = true;
+                textarea.classList.add('read-only');
+            } else {
+                // Настраиваем обработку клавиш
+                this.setupTextareaHandlers(textarea, (value) => {
+                    this.setViolationField(violation, `${fieldName}.content`, value);
+                });
+            }
 
             contentContainer.appendChild(textarea);
         }
@@ -345,12 +379,14 @@ export class ViolationManager {
      * @param {Object} violation - Объект нарушения
      * @param {string} fieldName - Имя поля со списком
      */
-    renderList(container, violation, fieldName) {
+    renderList(container, violation, fieldName, isReadOnly = false) {
         container.innerHTML = '';
 
         violation[fieldName].items.forEach((item, index) => {
             const itemContainer = document.createElement('div');
             itemContainer.className = 'violation-list-item';
+            // Подсветка пустого пункта (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
+            itemContainer.classList.toggle('violation-list-item--empty', !item.trim());
 
             const input = document.createElement('input');
             input.type = 'text';
@@ -358,45 +394,54 @@ export class ViolationManager {
             input.value = item;
             input.placeholder = `Пункт ${index + 1}`;
 
-            let originalValue = item;
+            if (isReadOnly) {
+                input.readOnly = true;
+                input.classList.add('read-only');
+            } else {
+                let originalValue = item;
 
-            // Обновляем массив при вводе
-            input.addEventListener('input', () => {
-                violation[fieldName].items[index] = input.value;
-                PreviewManager.scheduleTypingBlock('violation', violation.id);
-            });
+                // Обновляем массив при вводе
+                input.addEventListener('input', () => {
+                    this.setViolationListItem(violation, index, input.value);
+                    itemContainer.classList.toggle('violation-list-item--empty', !input.value.trim());
+                });
 
-            // Обработка горячих клавиш для элементов списка
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    // Enter — сохранить и снять фокус
-                    e.preventDefault();
-                    input.blur();
-                } else if (e.key === 'Escape') {
-                    // Escape — отменить изменения
-                    e.preventDefault();
-                    input.value = originalValue;
-                    violation[fieldName].items[index] = originalValue;
-                    input.blur();
-                    PreviewManager.updateBlock('violation', violation.id);
-                }
-            });
+                // Обработка горячих клавиш для элементов списка
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        // Enter — сохранить и снять фокус
+                        e.preventDefault();
+                        input.blur();
+                    } else if (e.key === 'Escape') {
+                        // Escape — отменить изменения
+                        e.preventDefault();
+                        input.value = originalValue;
+                        violation[fieldName].items[index] = originalValue;
+                        itemContainer.classList.toggle('violation-list-item--empty', !originalValue.trim());
+                        input.blur();
+                        PreviewManager.updateBlock('violation', violation.id);
+                    }
+                });
 
-            // Запоминаем исходное значение
-            input.addEventListener('focus', () => {
-                originalValue = input.value;
-            });
+                // Запоминаем исходное значение
+                input.addEventListener('focus', () => {
+                    originalValue = input.value;
+                });
+            }
 
             // Кнопка удаления элемента списка
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'violation-list-delete-btn';
             deleteBtn.textContent = '×';
+            deleteBtn.disabled = isReadOnly;
 
-            deleteBtn.addEventListener('click', () => {
-                violation[fieldName].items.splice(index, 1);
-                this.renderList(container, violation, fieldName);
-                PreviewManager.updateBlock('violation', violation.id);
-            });
+            if (!isReadOnly) {
+                deleteBtn.addEventListener('click', () => {
+                    if (this.removeViolationListItem(violation, index)) {
+                        this.renderList(container, violation, fieldName, isReadOnly);
+                    }
+                });
+            }
 
             itemContainer.appendChild(input);
             itemContainer.appendChild(deleteBtn);

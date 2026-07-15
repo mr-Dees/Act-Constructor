@@ -38,6 +38,45 @@ def _table_node_labels(tree: dict | None) -> dict[str, str]:
     return labels
 
 
+def _violation_node_labels(tree: dict | None) -> dict[str, str]:
+    """violationId → человекочитаемая метка узла-нарушения (для сообщений)."""
+    labels: dict[str, str] = {}
+    stack: list[Any] = [tree] if tree else []
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        vid = node.get("violationId")
+        if vid:
+            labels[vid] = node.get("customLabel") or node.get("label") or "Нарушение"
+        stack.extend(node.get("children") or [])
+    return labels
+
+
+def _violation_has_empty_fields(violation: Any) -> bool:
+    """Есть ли у нарушения незаполненные обязательные (рендерящиеся) поля.
+
+    Триггер: пустой `violated` ИЛИ пустой `established` ИЛИ включённый
+    список описаний с пустым/пробельным пунктом ИЛИ включённый доп.контент
+    с пустым кейсом/свободным текстом. Опциональные поля (причины,
+    последствия, ответственные, рекомендации) сознательно НЕ учитываются —
+    консервативно, вне scope находки о пустых обязательных полях.
+    """
+    if not (violation.violated or "").strip():
+        return True
+    if not (violation.established or "").strip():
+        return True
+    description_list = violation.descriptionList
+    if description_list.enabled and any(not (item or "").strip() for item in description_list.items):
+        return True
+    additional = violation.additionalContent
+    if additional.enabled:
+        for item in additional.items:
+            if item.type in ("case", "freeText") and not (item.content or "").strip():
+                return True
+    return False
+
+
 def _count_header_rows(grid) -> int:
     """Число подряд идущих сверху строк-заголовков (как countHeaderRows)."""
     count = 0
@@ -124,6 +163,17 @@ def collect_validation_issues(data: ActDataSchema) -> list[dict[str, Any]]:
                 "code": "table_no_data", "severity": "warning", "ref": tid,
                 "message": f"Таблица «{name}» без данных",
             })
+
+    # ── Нарушения (Q1, wave 2): мягкое замечание о незаполненных полях ──
+    violation_labels = _violation_node_labels(tree)
+    for vid, violation in (data.violations or {}).items():
+        if not _violation_has_empty_fields(violation):
+            continue
+        name = violation_labels.get(vid) or violation_labels.get(getattr(violation, "nodeId", "")) or "Нарушение"
+        issues.append({
+            "code": "violation_incomplete", "severity": "warning", "ref": vid,
+            "message": f"Нарушение «{name}»: есть незаполненные поля",
+        })
 
     return issues
 

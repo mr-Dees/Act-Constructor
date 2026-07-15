@@ -3,8 +3,16 @@ XSS-санитизация content-полей акта на бэкенде.
 
 Гарантирует, что ActContentService.save_content вычищает опасные
 теги/атрибуты до записи в БД: <script>, <img onerror>, <svg onload>,
-<iframe srcdoc>, javascript:-URL. Whitelist разрешает p/b/i/span/a/...
-и атрибуты {a:href,title; span:class,style; div/p:class,style; *:class}.
+<iframe srcdoc>, javascript:-URL — для textBlock.content и узлов дерева
+(реальный HTML, рендерится через innerHTML). Whitelist разрешает
+p/b/i/span/a/... и атрибуты {a:href,title; span:class,style;
+div/p:class,style; *:class}.
+
+Plain-text поля нарушения (violated/established, descriptionList.items[],
+additionalContent.items[].content/caption/filename, reasons/consequences/
+responsible/recommendations.content) через bleach НЕ гоняются — нигде не
+рендерятся как innerHTML, поэтому хранятся дословно (см.
+TestSaveContentViolationFieldsStoredVerbatim).
 
 Тесты дополнительно покрывают utils/html_sanitizer.sanitize_html
 напрямую (быстрые сценарии без поднятия сервиса).
@@ -255,90 +263,114 @@ class TestSaveContentSanitizesTextBlocks:
         assert 'href="https://example.com"' in sanitized
 
 
-class TestSaveContentSanitizesViolations:
-    """save_content → все HTML-поля violation чистятся."""
+class TestSaveContentViolationFieldsStoredVerbatim:
+    """save_content НЕ прогоняет plain-text поля нарушения через bleach.
 
-    async def test_violated_and_established_sanitized(self):
+    Поля нарушения нигде не рендерятся как innerHTML: форма — textarea/input,
+    превью — textContent/createTextNode, DOCX — add_run литерально, MD/TXT —
+    plain, diff — textContent/_escapeHtml. Санитизация была не нужна и вредна:
+    "Ромашка & Ко" превращалось в "Ромашка &amp; Ко", а часть текста вида
+    "a<b и c>d" терялась безвозвратно. Хранится дословно.
+    """
+
+    async def test_full_field_set_roundtrip_verbatim(self):
+        """Round-trip: весь набор plain-text полей нарушения — дословно."""
         svc, _ = _make_service()
         data = _data_with_violation(
-            violated="<p>ok</p><script>x</script>",
-            established='<img onerror="x" src=y>',
+            violated="Ромашка & Ко",
+            established="доля < 5%",
+            add_item_html="кейс & <тег>",
+            field_html="условие a<b и c>d",
+        )
+        data.violations["v1"].descriptionList = ViolationDescriptionListSchema(
+            enabled=True,
+            items=["пункт < 5%"],
+        )
+        data.violations["v1"].additionalContent.items[0].caption = "подпись & <b>"
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        v = data.violations["v1"]
+        assert v.violated == "Ромашка & Ко"
+        assert v.established == "доля < 5%"
+        assert v.reasons.content == "условие a<b и c>d"
+        assert v.consequences.content == "условие a<b и c>d"
+        assert v.responsible.content == "условие a<b и c>d"
+        assert v.recommendations.content == "условие a<b и c>d"
+        assert v.additionalContent.items[0].content == "кейс & <тег>"
+        assert v.additionalContent.items[0].caption == "подпись & <b>"
+        assert v.descriptionList.items == ["пункт < 5%"]
+
+    async def test_violated_and_established_stored_verbatim(self):
+        svc, _ = _make_service()
+        raw_violated = "<p>ok</p><script>x</script>"
+        raw_established = '<img onerror="x" src=y>'
+        data = _data_with_violation(
+            violated=raw_violated,
+            established=raw_established,
         )
 
         await svc.save_content(act_id=1, data=data, username="12345")
 
         v = data.violations["v1"]
-        assert "<script" not in v.violated
-        assert "ok" in v.violated
-        assert "onerror" not in v.established
-        assert "<img" not in v.established
+        assert v.violated == raw_violated
+        assert v.established == raw_established
 
-    async def test_additional_content_items_sanitized(self):
+    async def test_additional_content_items_stored_verbatim(self):
         svc, _ = _make_service()
-        data = _data_with_violation(
-            add_item_html='<p>note</p><iframe srcdoc="x"></iframe>',
-        )
+        raw = '<p>note</p><iframe srcdoc="x"></iframe>'
+        data = _data_with_violation(add_item_html=raw)
 
         await svc.save_content(act_id=1, data=data, username="12345")
 
         item = data.violations["v1"].additionalContent.items[0]
-        assert "<iframe" not in item.content
-        assert "note" in item.content
+        assert item.content == raw
 
-    async def test_optional_fields_sanitized(self):
-        """reasons/consequences/responsible/recommendations.content тоже чистятся."""
+    async def test_optional_fields_stored_verbatim(self):
+        """reasons/consequences/responsible/recommendations.content — дословно."""
         svc, _ = _make_service()
-        bad = '<p>r</p><svg onload="alert(1)"></svg>'
-        data = _data_with_violation(field_html=bad)
+        raw = '<p>r</p><svg onload="alert(1)"></svg>'
+        data = _data_with_violation(field_html=raw)
 
         await svc.save_content(act_id=1, data=data, username="12345")
 
         v = data.violations["v1"]
         for fname in ("reasons", "consequences", "responsible", "recommendations"):
-            content = getattr(v, fname).content
-            assert "<svg" not in content
-            assert "onload" not in content
-            assert "r" in content
+            assert getattr(v, fname).content == raw
 
-    async def test_description_list_items_sanitized(self):
-        """5.2.3: строки descriptionList.items чистятся как plain (теги выкусываются)."""
+    async def test_description_list_items_stored_verbatim(self):
+        """5.2.3: строки descriptionList.items хранятся дословно (plain-поле, не HTML)."""
         svc, _ = _make_service()
         data = _data_with_violation()
+        raw_items = [
+            "обычный пункт",
+            "<script>alert(1)</script>опасный",
+            '<b>жирный</b> уходит как текст',
+        ]
         data.violations["v1"].descriptionList = ViolationDescriptionListSchema(
             enabled=True,
-            items=[
-                "обычный пункт",
-                "<script>alert(1)</script>опасный",
-                '<b>жирный</b> уходит как текст',
-            ],
+            items=list(raw_items),
         )
 
         await svc.save_content(act_id=1, data=data, username="12345")
 
-        items = data.violations["v1"].descriptionList.items
-        assert items[0] == "обычный пункт"
-        assert "<script" not in items[1]
-        assert "опасный" in items[1]
-        # plain-поле: даже whitelist-теги вычищаются
-        assert "<b>" not in items[2]
-        assert "жирный" in items[2]
+        assert data.violations["v1"].descriptionList.items == raw_items
 
-    async def test_caption_and_filename_sanitized_as_plain(self):
-        """5.2.3: caption/filename элементов additionalContent чистятся как plain."""
+    async def test_caption_and_filename_stored_verbatim(self):
+        """5.2.3: caption/filename элементов additionalContent хранятся дословно."""
         svc, _ = _make_service()
         data = _data_with_violation()
+        raw_caption = '<img src=x onerror="alert(1)">подпись'
+        raw_filename = "<script>x</script>файл.png"
         item = data.violations["v1"].additionalContent.items[0]
-        item.caption = '<img src=x onerror="alert(1)">подпись'
-        item.filename = "<script>x</script>файл.png"
+        item.caption = raw_caption
+        item.filename = raw_filename
 
         await svc.save_content(act_id=1, data=data, username="12345")
 
         item = data.violations["v1"].additionalContent.items[0]
-        assert "<img" not in item.caption
-        assert "onerror" not in item.caption
-        assert "подпись" in item.caption
-        assert "<script" not in item.filename
-        assert "файл.png" in item.filename
+        assert item.caption == raw_caption
+        assert item.filename == raw_filename
 
     async def test_image_url_not_bleached(self):
         """url НЕ прогоняется через bleach — его валидирует схема (data:image-whitelist).

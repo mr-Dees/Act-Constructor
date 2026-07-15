@@ -430,3 +430,100 @@ class TestSaveTextblocksViolationsOrphanFilter:
         # Вставлена ровно одна запись — валидная
         assert len(rows) == 1
         assert rows[0][3] == "tb_ok"  # $4 — textblock_id
+
+
+class TestSaveOrphanFilterReverseRef:
+    """Находка #21: orphan-фильтр сверяет ОБРАТНУЮ ссылку узла (не только
+
+    существование узла с таким nodeId). Запись, чей nodeId указывает на
+    существующий узел, который в реальности ссылается на ДРУГУЮ запись
+    словаря (или не ссылается вовсе) — фантом, отбрасывается так же, как
+    обычный orphan.
+    """
+
+    _TREE_ONE_TABLE = {
+        "id": "root", "label": "Акт",
+        "children": [
+            {"id": "n1", "label": "Таблица", "type": "table",
+             "tableId": "t1", "children": []},
+        ],
+    }
+
+    async def test_stale_table_nodeid_points_to_node_referencing_other_table(self, mock_conn):
+        """t_stale.nodeId='n1', но n1.tableId фактически 't1' — t_stale фантом."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        valid = MagicMock()
+        valid.nodeId = "n1"
+        valid.grid = []
+        valid.colWidths = []
+        valid.protected = False
+        valid.deletable = True
+        valid.kind = "regular"
+
+        stale = MagicMock()
+        stale.nodeId = "n1"  # существующий узел, но он ссылается на "t1", не "t_stale"
+        stale.grid = []
+        stale.colWidths = []
+        stale.protected = False
+        stale.deletable = True
+        stale.kind = "regular"
+
+        data = _make_act_data(tables={"t1": valid, "t_stale": stale})
+        data.tree = dict(self._TREE_ONE_TABLE)
+        result = await repo.save_content(act_id=1, data=data, username="user1")
+
+        table_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_tables" in c.args[0]
+        ]
+        assert len(table_inserts) == 1
+        rows = table_inserts[0].args[1]
+        assert len(rows) == 1
+        assert rows[0][3] == "t1"  # $4 — table_id, только валидная запись
+        assert result["dropped_orphans"] == 1
+
+    async def test_stale_textblock_and_violation_dropped_by_reverse_ref(self, mock_conn):
+        """Аналогично для textBlocks/violations — единый generic-фильтр."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n_tb", "label": "ТБ", "type": "textblock",
+                 "textBlockId": "tb_ok", "children": []},
+                {"id": "n_v", "label": "Нарушение", "type": "violation",
+                 "violationId": "v_ok", "children": []},
+            ],
+        }
+
+        data = _make_act_data(
+            textblocks={
+                "tb_ok": _make_textblock("n_tb"),
+                "tb_stale": _make_textblock("n_tb"),  # n_tb ссылается на tb_ok, не tb_stale
+            },
+            violations={
+                "v_ok": _make_violation("n_v"),
+                "v_stale": _make_violation("n_v"),
+            },
+        )
+        data.tree = tree
+        result = await repo.save_content(act_id=1, data=data, username="user1")
+
+        tb_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_textblocks" in c.args[0]
+        ]
+        v_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_violations" in c.args[0]
+        ]
+        assert len(tb_inserts) == 1 and len(tb_inserts[0].args[1]) == 1
+        assert tb_inserts[0].args[1][0][3] == "tb_ok"
+        assert len(v_inserts) == 1 and len(v_inserts[0].args[1]) == 1
+        assert v_inserts[0].args[1][0][3] == "v_ok"
+        assert result["dropped_orphans"] == 2
