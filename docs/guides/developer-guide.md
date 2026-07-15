@@ -100,6 +100,7 @@
   - [10.5 Версионирование и аудит-лог](#105-версионирование-и-аудит-лог)
   - [10.5a Статус валидации содержимого акта](#105a-статус-валидации-содержимого-акта)
   - [10.6 Экспорт](#106-экспорт)
+  - [10.6a Карточка нарушения: контракт полей и рендер](#106a-карточка-нарушения-контракт-полей-и-рендер)
   - [10.7 Фактуры (invoice attachment)](#107-фактуры-invoice-attachment)
   - [10.8 URL страницы акта](#108-url-страницы-акта)
   - [10.9 Фронтенд: AppState и StorageManager](#109-фронтенд-appstate-и-storagemanager)
@@ -3437,7 +3438,7 @@ LIMIT 20;
 
 Две независимые системы:
 
-**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое сохранение содержимого создаёт запись со снимком `tree_data` (JSONB), `version_number` инкрементируется. Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
+**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое сохранение содержимого создаёт запись со снимком `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` (все JSONB), `version_number` инкрементируется. `invoices_data` — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
 
 **2. Аудит-лог — `{PREFIX}audit_log`** (`migrations/postgresql/schema.sql:338`). Запись о каждом действии (создание, редактирование, lock, отправка СЗ, экспорт). Сервис — `app/domains/acts/services/audit_log_service.py`. Здесь же лежит diff между версиями (по элементам дерева и ячейкам таблиц).
 
@@ -3456,7 +3457,7 @@ LIMIT 20;
 
 Отдельная от блокировки/верификации система-сигнал «в акте есть что проверить». Колонки `acts.validation_status` (`ok`/`warning`/`error`) + `acts.validation_issues` (JSONB) (см. §6.1).
 
-- **Источник истины — бэк.** `services/content_validation.py::collect_validation_issues(data)` — **чистая, не бросающая** функция, зеркалит фронт-правила (структура разделов 1–5, заголовки/данные таблиц) и возвращает список замечаний (`code`/`severity`/`message`/`ref`). `status_from_issues(...)` даёт **три уровня**: **`error`** при любом замечании `severity='error'` (сломанная структура, таблица без заголовка), иначе **`warning`** при только «мягких» замечаниях (`severity='warning'`, напр. пустая таблица), иначе **`ok`**. Жёсткие проверки корня/глубины дерева (`_validate_tree`) по-прежнему **бросают** (их сохранить нельзя). ТБ-проверка на бэк **не** портирована (зависит от фронтовой нумерации `node.number`, не гарантированной в хранимом дереве).
+- **Источник истины — бэк.** `services/content_validation.py::collect_validation_issues(data)` — **чистая, не бросающая** функция, зеркалит фронт-правила (структура разделов 1–5, заголовки/данные таблиц) и возвращает список замечаний (`code`/`severity`/`message`/`ref`). `status_from_issues(...)` даёт **три уровня**: **`error`** при любом замечании `severity='error'` (сломанная структура, таблица без заголовка), иначе **`warning`** при только «мягких» замечаниях (`severity='warning'`, напр. пустая таблица), иначе **`ok`**. Жёсткие проверки (`_validate_tree`) по-прежнему **бросают** (их сохранить нельзя) — нет корня / превышена глубина дерева / узел содержит слишком много текстблоков, нарушений или таблиц; с переработки это **один DFS-обход**, считающий глубину и первое превышение лимита каждого типа одновременно (порядок ошибок при нескольких нарушениях сразу: глубина → root-id → textblocks → violations → tables). ТБ-проверка на бэк **не** портирована (зависит от фронтовой нумерации `node.number`, не гарантированной в хранимом дереве).
 - **Вычисляется на сохранении** (любой `saveType`), персистится в `acts`, возвращается в `SaveContentResponse` (`validation_status`/`validation_issues`) и в `ActListItem`/`ActResponse`. **Restore версии** тоже пересчитывает статус из восстановленного содержимого (`audit_log_service.restore_version` → `collect_validation_issues`/`status_from_issues`), а не сбрасывает в `ok`.
 - **WIP не блокируется.** Фронт-гейт сохранения «только в БД» снят (`navigation-manager.js`): структурно невалидный черновик **сохраняется как есть**. Гейт остался **только на экспорт в файл** (error-level, отдельный клиентский контур `ValidationAct`, не поле `validation_status`) — битый документ хуже отказа.
 - **Поверхности уведомлений зависят от уровня** (решение: warning не должен шуметь, error приравнен к фактуре):
@@ -3486,6 +3487,14 @@ LIMIT 20;
 - **Размер шрифта текстблоков в DOCX**: если форматирование отличается от дефолтного, размер = `fontSize * _PX_TO_PT`, **но** при дефолтном `fontSize` берётся `body_pt` (12pt) — текстблок с дефолтным размером, но изменённым выравниванием/жирностью **не** мельчает (раньше уезжал в 10.5pt). alignment/b/i/u считаются независимо от размера.
 - **`_scale_picture`** (`docx/builders/violation.py`) — ранний `return` при нулевой ширине картинки (`if not int(shape.width): return`), иначе масштабирование делило бы на 0 и роняло весь экспорт.
 
+### 10.6a Карточка нарушения: контракт полей и рендер
+
+**Контракт полей — `app/domains/acts/violation_fields.py`.** Single source of truth: `VIOLATION_FIELDS` — кортеж `ViolationFieldDescriptor(key, label, order, kind, small, show_label_in_preview)` для 8 полей контента нарушения (`id`/`nodeId` — метаданные, не входят): `violated` («Нарушено») / `established` («Установлено») / `descriptionList` (без подписи, решение #12) / `additionalContent` (без подписи) / `reasons` («Причины») / `consequences` («Последствия») / `responsible` («Ответственные», канон #11 — не «Ответственный») / `recommendations` («Рекомендации»). `small=True` у первых четырёх (9pt, `Sizes.violation_pt`), `small=False` у последних четырёх (12pt, `Sizes.body_pt`; закреплено `test_reasons_block_stays_12pt_non_italic`). Синхронизируется ВРУЧНУЮ с фронтовым зеркалом `static/js/constructor/violation/violation-fields.js` (как `block_types.py` ↔ `block-types.js`, `chat/names.py` ↔ `chat-client-actions.js` — фронт Python не импортирует). Два теста-стража держат соответствие: `tests/domains/acts/test_violation_fields_guard.py` (бэк) и `tests/js/violation-fields.test.mjs` (фронт, точные строки меток).
+
+**Общий рендер MD/TXT — `formatters/violation_render.py`.** TXT- и MD-форматтеры делегируют сюда общие функции рендера полей нарушения (композиция, не наследование — параметризованный хелпер, а не базовый класс): `format_violation`, `add_required_pair`, `add_labeled_section`, `add_description_list`, `add_case`, `add_free_text`, `add_additional_content`; `wrap_bold`/`wrap_plain` — единственная точка расхождения по формату (передаётся параметром). Раньше рендер дублировался по формату. `_add_image` НЕ вынесен — рендер картинки реально расходится между MD и TXT. Экранирование инлайн-спецсимволов Markdown — `formatters/utils/markdown_utils.py::MarkdownUtils.escape_inline` (экранирует `\` ПЕРВЫМ, затем остальные спецсимволы — иначе пользовательский `\` перед спецсимволом «съедал» бы экранирование).
+
+**Фронт: нумерация и changelog.** `violation-numbering.js::computeAdditionalContentNumbers` — нумерация кейсов/картинок в `additionalContent` (заменил приватный метод `calculateCaseNumbers`; читают `violation-rendering.js` и `violation-drag-drop.js`). `violation-audit.js::ViolationAudit` — снимок для дифф-аудита теперь двухфазный: `synthesize()` кладёт фингерпринты в статический `_pendingSnapshot` (не коммитит), `confirmSave()` промотирует его в `_snapshot` только ПОСЛЕ подтверждённого успешного сохранения (вызывается из `shared/api.js` — `saveActContent`/`forceSaveToDb` — и `constructor/lock-manager.js` — `_initiateExit` — в ветке успеха). Раньше снимок коммитился независимо от результата сохранения, что могло зафиксировать несохранённое состояние как базу для следующего диффа.
+
 ### 10.7 Фактуры (invoice attachment)
 
 Под секцией 5 («leaf nodes») к узлам прикрепляются **фактуры** — ссылки на строки внешних таблиц Hive или Greenplum, использованные как доказательная база нарушения.
@@ -3505,6 +3514,8 @@ LIMIT 20;
 | `ACTS__INVOICE__GP_SCHEMA` | GP-схема для списка таблиц (`s_grnplm_ld_audit_da_sandbox_oarb`) |
 | `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` | Где лежит реестр Hive-таблиц |
 | `ACTS__INVOICE__HIVE_REGISTRY_TABLE` | Имя таблицы реестра (`t_db_oarb_ua_hadoop_tables`) |
+
+**Restore версии переприкрепляет фактуры.** `audit_log_service.restore_version` берёт снимок `invoices_data` восстановленной версии (см. §10.5 п.1 — 5-й блоб `act_content_versions`) и пересохраняет фактуры через `ActInvoiceRepository.save_invoice`; `verification_status` каждой сбрасывается в `pending` (проверку нужно проходить заново), фактуры узлов вне снимка удаляются `_sync_invoices`. Раньше restore фактуры не восстанавливал.
 
 ### 10.8 URL страницы акта
 
