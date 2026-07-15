@@ -195,9 +195,13 @@ export const FindBar = {
         bar.setAttribute('aria-label', 'Поиск и замена по тексту акта');
         bar.innerHTML = `
             <div class="act-find-row act-find-row-search">
-                <span class="act-find-grip" data-role="grip" title="Перетащить" aria-hidden="true">⠿</span>
                 <input type="text" class="act-find-input" data-role="find"
                        placeholder="Найти" aria-label="Найти" spellcheck="false" />
+                <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
+                <button type="button" class="act-find-btn act-find-close" data-role="close"
+                        title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
+            </div>
+            <div class="act-find-row act-find-row-options">
                 <div class="act-find-toggles" role="group" aria-label="Параметры поиска">
                     <button type="button" class="act-find-toggle" data-toggle="caseSensitive"
                             aria-pressed="false" title="Учитывать регистр">Aa</button>
@@ -207,15 +211,12 @@ export const FindBar = {
                             aria-pressed="false"
                             title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
                 </div>
-                <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
                 <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
                     <button type="button" class="act-find-btn" data-role="prev"
                             title="Предыдущее совпадение" aria-label="Предыдущее совпадение">‹</button>
                     <button type="button" class="act-find-btn" data-role="next"
                             title="Следующее совпадение" aria-label="Следующее совпадение">›</button>
                 </div>
-                <button type="button" class="act-find-btn act-find-close" data-role="close"
-                        title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
             </div>
             <div class="act-find-row act-find-row-replace" data-role="replaceRow">
                 <input type="text" class="act-find-input" data-role="replace"
@@ -236,14 +237,16 @@ export const FindBar = {
             replaceRow: bar.querySelector('[data-role="replaceRow"]'),
             undoBtn: bar.querySelector('[data-role="undo"]'),
             toggles: bar.querySelectorAll('[data-toggle]'),
-            grip: bar.querySelector('[data-role="grip"]'),
         };
 
         this._bindEvents();
-        // Перетаскивание за грип — общая логика с поповером корректора.
+        // Перетаскивание — за «раму» самой панели (по образцу заголовка корректора):
+        // навёлся на свободную зону/паддинг → курсор move → тянешь. Инпуты и кнопки
+        // исключены noDragSelector'ом, поэтому фокус/клики по ним работают штатно.
+        // Отдельный грип убран — он «съедал» и без того дефицитную ширину панели.
         this._dragger = makeDraggablePanel({
             panel: bar,
-            handle: this._els.grip,
+            handle: bar,
             storageKey: 'act-find-bar:pos',
         });
     },

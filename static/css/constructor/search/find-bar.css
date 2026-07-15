@@ -12,6 +12,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
+    /* Компактная колонка: узкая и «высокая», а не широкая простыня в один ряд.
+       Тянется за «раму» (cursor:move), инпуты/кнопки перебивают курсор на свой. */
+    width: var(--find-bar-width, 19rem);
+    max-width: calc(100vw - 2 * var(--spacing-lg));
+    cursor: move;
     background: var(--bg-primary);
     border: var(--border-width-thin) solid var(--border);
     border-radius: var(--radius-md);
@@ -37,19 +42,14 @@
     display: none;
 }
 
-/* Грип перетаскивания панели (общая логика с поповером корректора). */
-.act-find-grip {
-    cursor: move;
-    color: var(--text-secondary);
-    user-select: none;
-    padding: 0 var(--spacing-xs);
-    font-size: var(--font-size-md);
-    line-height: 1;
-    flex-shrink: 0;
+/* Ряд параметров: тумблеры слева, навигация ‹ › справа. */
+.act-find-row-options {
+    justify-content: space-between;
 }
 
-.act-find-grip:hover {
-    color: var(--text-primary);
+/* Ряд замены: на узкой панели кнопки переносятся под поле, не расширяя её. */
+.act-find-row-replace {
+    flex-wrap: wrap;
 }
 
 /* Текстовые поля «Найти» / «Заменить на». */
@@ -61,7 +61,10 @@
     color: var(--input-text);
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
-    min-width: var(--find-bar-input-width, 14rem);
+    /* Компактнее прежних 14rem; flex-рост добирает ширину внутри узкой панели. */
+    min-width: var(--find-bar-input-width, 9rem);
+    flex: 1 1 auto;
+    cursor: text;               /* перебиваем move-курсор «рамы» на текстовый */
     transition: var(--transition-all);
 }
 
