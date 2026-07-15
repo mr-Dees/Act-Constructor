@@ -20,6 +20,7 @@ def test_text_actions_defaults():
     assert isinstance(s.text_actions, TextActionsSettings)
     assert s.text_actions.corrector_temperature == 0.1
     assert s.text_actions.readability_temperature == 0.3
+    assert s.text_actions.formalizer_temperature == 0.01
     assert s.text_actions.corrector_model is None  # → падаем на settings.model
     assert s.text_actions.max_input_chars == 20000
     assert s.text_actions.per_call_timeout_sec == 60.0

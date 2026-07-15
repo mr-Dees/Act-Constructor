@@ -1,0 +1,128 @@
+"""Тесты ViolationFormalizerService (Фича «Формализация нарушения»)."""
+
+import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.domains.chat.exceptions import TextActionValidationError
+from app.domains.chat.services.text_actions.formalizer_service import (
+    ViolationFormalizerService,
+)
+from app.domains.chat.services.text_actions.llm_utils import extract_json
+from app.domains.chat.settings import ChatDomainSettings
+
+
+def _settings():
+    return ChatDomainSettings(api_base="http://x", api_key="x", model="m")
+
+
+def _resp(content: str):
+    msg = AsyncMock()
+    msg.content = content
+    r = AsyncMock()
+    r.choices = [AsyncMock(message=msg)]
+    return r
+
+
+# JSON, который «модель» вернёт каждому экстрактору — по фразе в system-промпте.
+_BY_PROMPT = {
+    "аналитик нормативных нарушений": json.dumps({
+        "essence": "Кредит выдан без проверки",
+        "norm_doc": "П. 3.1 Регламента",
+        "metrics": ["сумма 5 млн руб.", "дата 01.02.2025"],
+    }),
+    "эксперт по расследованию инцидентов": json.dumps({
+        "causes": ["отсутствие проверки", "нет контроля лимитов"],
+        "persons": ["Иванов И.И., кредитный инспектор", "Отдел кредитования"],
+    }),
+    "Каждое последствие": json.dumps({"consequences": "Финансовый ущерб 5 млн руб."}),
+    "аналитик корректирующих мер": json.dumps({
+        "measures": ["досоздан контроль", "проведён аудит"],
+    }),
+}
+
+
+def _client_by_prompt(overrides: dict[str, str] | None = None):
+    """Мок LLM-клиента: JSON-ответ выбирается по маркеру в system-промпте."""
+    table = dict(_BY_PROMPT)
+    if overrides:
+        table.update(overrides)
+    fake = AsyncMock()
+
+    async def _create(**kwargs):
+        system = kwargs["messages"][0]["content"]
+        for marker, payload in table.items():
+            if marker in system:
+                return _resp(payload)
+        return _resp("{}")
+
+    fake.chat.completions.create = AsyncMock(side_effect=_create)
+    return fake
+
+
+async def test_formalize_maps_all_fields():
+    with patch(
+        "app.domains.chat.services.text_actions.formalizer_service.build_llm_client",
+        return_value=_client_by_prompt(),
+    ):
+        out = await ViolationFormalizerService(_settings()).formalize("сырой текст")
+
+    assert out.violated == "П. 3.1 Регламента"
+    assert "Кредит выдан без проверки" in out.established
+    assert "сумма 5 млн руб." in out.established  # metrics подмешаны в established
+    assert out.reasons == "отсутствие проверки; нет контроля лимитов"
+    assert out.responsible == "Иванов И.И., кредитный инспектор; Отдел кредитования"
+    assert out.consequences == "Финансовый ущерб 5 млн руб."
+    assert out.measures == "досоздан контроль; проведён аудит"  # вычислено
+
+
+async def test_formalize_temperature_deterministic():
+    client = _client_by_prompt()
+    with patch(
+        "app.domains.chat.services.text_actions.formalizer_service.build_llm_client",
+        return_value=client,
+    ):
+        await ViolationFormalizerService(_settings()).formalize("текст")
+    assert client.chat.completions.create.call_count == 4  # 4 экстрактора параллельно
+    for call in client.chat.completions.create.call_args_list:
+        assert call.kwargs["temperature"] == 0.01
+
+
+async def test_formalize_extractor_failure_leaves_field_empty():
+    """Битый JSON от одного экстрактора → его поля пустые, остальные заполнены."""
+    client = _client_by_prompt(
+        {"эксперт по расследованию инцидентов": "не json вообще"},
+    )
+    with patch(
+        "app.domains.chat.services.text_actions.formalizer_service.build_llm_client",
+        return_value=client,
+    ):
+        out = await ViolationFormalizerService(_settings()).formalize("текст")
+
+    assert out.reasons == ""       # экстрактор причин упал
+    assert out.responsible == ""
+    assert out.violated == "П. 3.1 Регламента"  # остальные не пострадали
+    assert out.consequences == "Финансовый ущерб 5 млн руб."
+
+
+async def test_formalize_rejects_empty():
+    with pytest.raises(TextActionValidationError):
+        await ViolationFormalizerService(_settings()).formalize("   ")
+
+
+async def test_formalize_rejects_too_long():
+    s = _settings()
+    s.text_actions.max_input_chars = 5
+    with pytest.raises(TextActionValidationError):
+        await ViolationFormalizerService(s).formalize("слишком длинный текст")
+
+
+def test_extract_json_strips_think_and_grabs_object():
+    raw = '<think>рассуждаю…</think> Вот ответ: {"essence": "x", "metrics": []} — готово'
+    assert extract_json(raw) == {"essence": "x", "metrics": []}
+
+
+def test_extract_json_raises_without_object():
+    with pytest.raises(ValueError):
+        extract_json("нет json")

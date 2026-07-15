@@ -14,8 +14,12 @@ from app.core.domain_registry import reset_registry
 from app.core.exceptions import AppError
 from app.core.settings_registry import reset as reset_settings
 from app.domains.chat.api.text_actions import router
-from app.domains.chat.deps import get_text_corrector_service
+from app.domains.chat.deps import (
+    get_text_corrector_service,
+    get_violation_formalizer_service,
+)
 from app.domains.chat.exceptions import TextActionValidationError
+from app.domains.chat.schemas.text_actions import FormalizeResponse
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +48,7 @@ def _app(service):
         {"id": 1, "name": "Админ", "domain_name": None},
     ]
     app.dependency_overrides[get_text_corrector_service] = lambda: service
+    app.dependency_overrides[get_violation_formalizer_service] = lambda: service
     return app
 
 
@@ -94,3 +99,32 @@ def test_correct_empty_text_rejected_by_dto():
     with TestClient(_app(svc)) as c:
         r = c.post("/api/v1/chat/text-actions/correct", json={"text": ""})
     assert r.status_code == 422  # min_length=1 в CorrectRequest
+
+
+def test_formalize_ok():
+    svc = MagicMock()
+    svc.formalize = AsyncMock(return_value=FormalizeResponse(
+        violated="норма", established="факт", responsible="Иванов",
+    ))
+    with TestClient(_app(svc)) as c:
+        r = c.post(
+            "/api/v1/chat/text-actions/formalize-violation",
+            json={"text": "сырой текст нарушения"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["violated"] == "норма"
+    assert body["established"] == "факт"
+    assert body["responsible"] == "Иванов"
+    assert body["reasons"] == ""  # не извлечено → пусто
+
+
+def test_formalize_empty_text_rejected_by_dto():
+    svc = MagicMock()
+    svc.formalize = AsyncMock(return_value=FormalizeResponse())
+    with TestClient(_app(svc)) as c:
+        r = c.post(
+            "/api/v1/chat/text-actions/formalize-violation",
+            json={"text": ""},
+        )
+    assert r.status_code == 422  # min_length=1 в FormalizeRequest

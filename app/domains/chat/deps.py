@@ -101,6 +101,15 @@ def get_text_corrector_service():
     return TextCorrectorService(get_chat_settings())
 
 
+def get_violation_formalizer_service():
+    """DI-фабрика формализации нарушения (Фича «Формализация»). Чистый LLM-вызов."""
+    from app.domains.chat.services.text_actions.formalizer_service import (
+        ViolationFormalizerService,
+    )
+
+    return ViolationFormalizerService(get_chat_settings())
+
+
 def get_rate_limiter() -> UserRateLimiter:
     """Возвращает singleton UserRateLimiter с лимитом из текущих настроек.
 

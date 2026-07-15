@@ -73,6 +73,10 @@ class TextActionsSettings(BaseModel):
     # Режим «улучшение читаемости»: чуть выше корректорской, чтобы
     # переструктурировать текст, но остаться верным фактам.
     readability_temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    # Формализация нарушения (4 экстрактора D17): температура ~0 ради
+    # детерминизма извлечения. None-модель → основная модель профиля чата.
+    formalizer_model: str | None = Field(default_factory=lambda: None)
+    formalizer_temperature: float = Field(default=0.01, ge=0.0, le=2.0)
     per_call_timeout_sec: float = Field(default=60.0, gt=0.0)
     max_input_chars: int = Field(default=20000, ge=1)
 
