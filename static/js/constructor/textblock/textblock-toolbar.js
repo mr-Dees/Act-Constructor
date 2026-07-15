@@ -147,7 +147,11 @@ Object.assign(TextBlockManager.prototype, {
                         return;
                     }
                     const range = sel.getRangeAt(0).cloneRange();
-                    const text = range.toString();
+                    // Selection.toString() отдаёт переносы строк (<br> → \n), а
+                    // Range.toString() их теряет (только текстовые узлы). Корректору
+                    // нужны переносы, иначе многострочный текст схлопнется в одну
+                    // строку. Ср. FindBar._selectionPrefill (та же причина).
+                    const text = sel.toString();
                     if (!text.trim()) {
                         Notifications.info('Выделите текст для корректуры');
                         return;
