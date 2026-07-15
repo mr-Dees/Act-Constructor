@@ -6,6 +6,19 @@ import re
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
+# Обёртка ``` … ``` вокруг ВСЕГО ответа (модель завернула текст в код-блок).
+_CODE_FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n```\s*$", re.DOTALL)
+
+# Ведущая преамбула-ярлык, которую промпты корректора ПРЯМО запрещают
+# («Исправленный текст:», «Вот улучшенный вариант:» …). Рассуждающие провайдеры
+# (напр. Anthropic) иногда добавляют её вопреки запрету. Матчим ТОЛЬКО как
+# отдельную ведущую строку (обязателен перевод строки после двоеточия) — чтобы
+# не срезать реальный первый абзац, если он случайно начнётся с этих слов.
+_PREAMBLE_RE = re.compile(
+    r"^\s*(?:вот\s+)?(?:исправленн\w+|улучшенн\w+)\s+(?:текст|вариант)\s*:[ \t]*\n+",
+    re.IGNORECASE,
+)
+
 
 def strip_think(text: str) -> str:
     """Убрать блоки рассуждений reasoning-модели (``<think>…</think>``).
@@ -14,6 +27,25 @@ def strip_think(text: str) -> str:
     ``--reasoning-parser`` и рассуждения попали в ``content``.
     """
     return _THINK_RE.sub("", text or "")
+
+
+def clean_text_response(text: str) -> str:
+    """Очистить ``text → text`` ответ LLM от «мусора вокруг полезной нагрузки».
+
+    Тот же принцип устойчивости, что у ``extract_json`` для формализации: не
+    доверяем модели вернуть ТОЛЬКО payload, а вычищаем обрамление. Здесь payload —
+    сам исправленный текст, поэтому срезаем: рассуждения ``<think>…</think>``,
+    обёртку ``` ``` вокруг всего ответа и ведущую преамбулу-ярлык, запрещённую
+    промптом («Исправленный текст:» и т.п.). Провайдер-агностично — защищает диф
+    корректора от рассуждающих моделей (Anthropic и др.), как формализатор защищён
+    разбором JSON.
+    """
+    cleaned = strip_think(text or "").strip()
+    fence = _CODE_FENCE_RE.match(cleaned)
+    if fence:
+        cleaned = fence.group(1).strip()
+    cleaned = _PREAMBLE_RE.sub("", cleaned, count=1)
+    return cleaned.strip()
 
 
 async def run_text_call(
@@ -29,7 +61,9 @@ async def run_text_call(
     """One-shot вызов LLM ``text → text`` (Фича «Корректор»).
 
     ``retry_call`` — обёртка ``retry_on_transient`` над вызываемым; она сама
-    ретраит transient-ошибки, ``timeout`` ограничивает каждую попытку.
+    ретраит transient-ошибки, ``timeout`` ограничивает каждую попытку. Ответ
+    чистится ``clean_text_response`` (рассуждения/обёртки/преамбулы — как в
+    формализаторе, чтобы диф не пачкали рассуждающие провайдеры).
     """
     wrapped = retry_call(client.chat.completions.create)
     resp = await wrapped(
@@ -43,7 +77,7 @@ async def run_text_call(
         ],
     )
     content = resp.choices[0].message.content or ""
-    return strip_think(content).strip()
+    return clean_text_response(content)
 
 
 def extract_json(text: str) -> dict:

@@ -14,6 +14,37 @@ def test_strip_think_noop_on_plain_text():
     assert U.strip_think("обычный текст") == "обычный текст"
 
 
+def test_clean_text_response_strips_leading_preamble_label():
+    # Anthropic вопреки запрету добавил ярлык отдельной строкой — срезаем.
+    raw = "Исправленный текст:\n\nВ ходе проверки выявлено нарушение."
+    assert U.clean_text_response(raw) == "В ходе проверки выявлено нарушение."
+
+
+def test_clean_text_response_strips_readability_preamble():
+    raw = "Вот улучшенный вариант:\nТекст стал яснее."
+    assert U.clean_text_response(raw) == "Текст стал яснее."
+
+
+def test_clean_text_response_unwraps_code_fence():
+    raw = "```\nисправленный абзац\n```"
+    assert U.clean_text_response(raw) == "исправленный абзац"
+
+
+def test_clean_text_response_strips_think_and_preamble_together():
+    raw = "<think>подумаю</think>\nИсправленный текст:\nГотово."
+    assert U.clean_text_response(raw) == "Готово."
+
+
+def test_clean_text_response_keeps_inline_label_as_real_content():
+    # Ярлык БЕЗ перевода строки — это реальный текст (не преамбула), не трогаем.
+    raw = "Исправленный текст: смотри приложение №3."
+    assert U.clean_text_response(raw) == "Исправленный текст: смотри приложение №3."
+
+
+def test_clean_text_response_noop_on_clean_text():
+    assert U.clean_text_response("В акте установлено нарушение.") == "В акте установлено нарушение."
+
+
 async def test_run_text_call_returns_content_and_passes_params():
     client = AsyncMock()
     msg = AsyncMock()
