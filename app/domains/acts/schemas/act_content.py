@@ -502,7 +502,6 @@ class ViolationSchema(BaseModel):
         reasons: Причины нарушения
         consequences: Последствия нарушения
         responsible: Ответственные лица
-        recommendations: Рекомендации по устранению
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -529,10 +528,6 @@ class ViolationSchema(BaseModel):
     responsible: ViolationOptionalFieldSchema = Field(
         default_factory=ViolationOptionalFieldSchema,
         description="Ответственные"
-    )
-    recommendations: ViolationOptionalFieldSchema = Field(
-        default_factory=ViolationOptionalFieldSchema,
-        description="Рекомендации"
     )
 
 

@@ -181,7 +181,6 @@ def _data_with_violation(*, violated="", established="",
         reasons=ViolationOptionalFieldSchema(enabled=True, content=field_html),
         consequences=ViolationOptionalFieldSchema(enabled=True, content=field_html),
         responsible=ViolationOptionalFieldSchema(enabled=True, content=field_html),
-        recommendations=ViolationOptionalFieldSchema(enabled=True, content=field_html),
     )
     return ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": []},
@@ -286,7 +285,7 @@ class TestSaveContentSanitizesViolations:
         assert "note" in item.content
 
     async def test_optional_fields_sanitized(self):
-        """reasons/consequences/responsible/recommendations.content тоже чистятся."""
+        """reasons/consequences/responsible.content тоже чистятся."""
         svc, _ = _make_service()
         bad = '<p>r</p><svg onload="alert(1)"></svg>'
         data = _data_with_violation(field_html=bad)
@@ -294,7 +293,7 @@ class TestSaveContentSanitizesViolations:
         await svc.save_content(act_id=1, data=data, username="12345")
 
         v = data.violations["v1"]
-        for fname in ("reasons", "consequences", "responsible", "recommendations"):
+        for fname in ("reasons", "consequences", "responsible"):
             content = getattr(v, fname).content
             assert "<svg" not in content
             assert "onload" not in content

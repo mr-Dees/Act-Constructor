@@ -219,10 +219,6 @@ Object.assign(AppState, {
             responsible: {
                 enabled: false,
                 content: ''
-            },
-            recommendations: {
-                enabled: false,
-                content: ''
             }
         };
     },

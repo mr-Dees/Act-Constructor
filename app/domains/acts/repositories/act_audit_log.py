@@ -454,14 +454,14 @@ class ActAuditLogRepository(BaseRepository):
                 f"SELECT violation_id, "
                 f"COALESCE(violated, '') AS violated, "
                 f"COALESCE(established, '') AS established, "
-                f"reasons, consequences, responsible, recommendations, "
+                f"reasons, consequences, responsible, "
                 f"description_list, additional_content "
                 f"FROM {self._violations} WHERE act_id = $1",
                 act_id,
             )
             db_viol_map = {r["violation_id"]: dict(r) for r in db_viols}
 
-            viol_fields = ("violated", "established", "reasons", "consequences", "responsible", "recommendations")
+            viol_fields = ("violated", "established", "reasons", "consequences", "responsible")
             # Поля-коллекции diff'ятся отдельно компактной сводкой (см. ниже):
             # additional_content может содержать base64-картинки на мегабайты —
             # их содержимое в аудит-лог попадать не должно.

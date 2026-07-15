@@ -208,10 +208,6 @@ export class ViolationManager {
             this.createOptionalField(violation, 'responsible', 'Ответственные', 'text')
         );
 
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'recommendations', 'Рекомендации', 'text')
-        );
-
         section.appendChild(optionalFieldsContainer);
 
         return section;

@@ -17,7 +17,7 @@
 | `act_tree`        | сам JSONB `tree_data`                                                       | сам корень                    |
 | `act_tables`      | сетки таблиц (`grid_data`), ширины колонок, флаги спец-таблиц                | `node.tableId`               |
 | `act_textblocks`  | HTML-контент текстовых блоков и базовое форматирование                       | `node.textBlockId`           |
-| `act_violations`  | поля нарушения (нарушено, установлено, причины, последствия, рекомендации…) | `node.violationId`           |
+| `act_violations`  | поля нарушения (нарушено, установлено, причины, последствия…) | `node.violationId`           |
 | `act_invoices`    | фактуры, прикреплённые к листьям раздела 5                                   | `node.invoice` + `node.id`   |
 | `act_directives`  | поручения по пунктам акта                                                    | `node_id`                    |
 | `acts`            | метаданные акта (КМ, СЗ, даты, блокировка, audit_act_id и т.д.)             | владелец всех остальных      |
@@ -151,7 +151,6 @@ underline}` **вырезан целиком** (директива владель
 | `reasons`             | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
 | `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
 | `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `recommendations`     | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
 
 `ViolationContentItemSchema` (`act_content.py::ViolationContentItemSchema`) — элемент additionalContent:
 

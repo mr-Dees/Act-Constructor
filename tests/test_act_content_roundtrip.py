@@ -197,7 +197,6 @@ def _make_export_fixture() -> dict:
                 "reasons": {"enabled": True, "content": "Причина"},
                 "consequences": {"enabled": False, "content": ""},
                 "responsible": {"enabled": False, "content": ""},
-                "recommendations": {"enabled": True, "content": "Рекомендация"},
             },
         },
         "invoiceNodeIds": ["5.1"],

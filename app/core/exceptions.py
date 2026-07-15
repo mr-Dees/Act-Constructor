@@ -102,9 +102,6 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_responsible_is_object_or_null": (
         "Поле responsible должно быть объектом JSON с полями enabled и content, или отсутствовать"
     ),
-    "check_recommendations_is_object_or_null": (
-        "Поле recommendations должно быть объектом JSON с полями enabled и content, или отсутствовать"
-    ),
     # ── acts: act_invoices ───────────────────────────────────────────────────
     # PG-имена (явные, добавлены при заполнении)
     "check_act_invoices_db_type_values": (

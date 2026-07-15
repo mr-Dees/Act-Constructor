@@ -104,7 +104,7 @@ class TestSaveContentUsesTransaction:
         v_data.violated = "нарушено"
         v_data.established = "установлено"
         for attr in ("descriptionList", "additionalContent", "reasons",
-                     "consequences", "responsible", "recommendations"):
+                     "consequences", "responsible"):
             m = MagicMock()
             m.model_dump.return_value = {}
             setattr(v_data, attr, m)
@@ -337,7 +337,7 @@ def _make_violation(node_id: str) -> MagicMock:
     v.violated = "нарушено"
     v.established = "установлено"
     for attr in ("descriptionList", "additionalContent", "reasons",
-                 "consequences", "responsible", "recommendations"):
+                 "consequences", "responsible"):
         m = MagicMock()
         m.model_dump.return_value = {}
         setattr(v, attr, m)

@@ -28,7 +28,6 @@ _VIOLATION = {
     "reasons": {"enabled": False, "content": ""},
     "consequences": {"enabled": False, "content": ""},
     "responsible": {"enabled": False, "content": ""},
-    "recommendations": {"enabled": False, "content": ""},
 }
 
 

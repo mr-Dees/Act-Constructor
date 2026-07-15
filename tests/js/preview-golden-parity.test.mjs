@@ -56,7 +56,6 @@ const goldenViolation = {
     reasons: { enabled: true, content: 'GOLDEN_V_REASONS' },
     consequences: { enabled: true, content: 'GOLDEN_V_CONSEQUENCES' },
     responsible: { enabled: true, content: 'GOLDEN_V_RESPONSIBLE' },
-    recommendations: { enabled: true, content: 'GOLDEN_V_RECOMMENDATIONS' },
 };
 
 // Обычная таблица фикстуры: шапка + merge по горизонтали и вертикали + спецсимволы.
@@ -98,7 +97,6 @@ test('golden: все текстовые поля нарушения присут
         'GOLDEN_V_REASONS',
         'GOLDEN_V_CONSEQUENCES',
         'GOLDEN_V_RESPONSIBLE',
-        'GOLDEN_V_RECOMMENDATIONS',
     ];
     const missing = markers.filter(m => !textDump.includes(m));
     assert.deepEqual(missing, [], `превью потеряло маркеры: ${missing}`);

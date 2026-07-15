@@ -3,8 +3,6 @@
 Заголовок и нумерация нарушения не выводятся: шаблон «Проблема. ПNNNN.»
 указывается в блоке пункта (item) и подставляется при сборке в formatter.py.
 
-Регрессия: рендеринг `recommendations` (раньше пропускалось).
-
 Дополнительный контент:
 - кейсы нумеруются («Кейс 1:», «Кейс 2:»), нумерация сбрасывается после
   не-кейса — та же семантика, что в MD/TXT-форматтерах и превью;
@@ -99,7 +97,6 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
         ("Причины:", violation.reasons),
         ("Последствия:", violation.consequences),
         ("Ответственный:", violation.responsible),
-        ("Рекомендации:", violation.recommendations),
     ]:
         if field.enabled and field.content:
             _labeled_paragraph(doc, label, field.content)

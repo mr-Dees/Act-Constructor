@@ -233,7 +233,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     reasons JSONB,
     consequences JSONB,
     responsible JSONB,
-    recommendations JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -254,9 +253,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
 
     CONSTRAINT check_responsible_is_object_or_null
         CHECK (responsible IS NULL OR jsonb_typeof(responsible) = 'object'),
-
-    CONSTRAINT check_recommendations_is_object_or_null
-        CHECK (recommendations IS NULL OR jsonb_typeof(recommendations) = 'object'),
 
     UNIQUE(act_id, violation_id)
 );
@@ -530,7 +526,7 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_grid_data
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}violations_content
     ON {SCHEMA}.{PREFIX}act_violations USING GIN(
         description_list, additional_content, reasons,
-        consequences, responsible, recommendations
+        consequences, responsible
     );
 
 -- ============================================================================

@@ -23,7 +23,7 @@ const SHEET_HEIGHT_MM = 297;
  *
  * Флаг `small` помечает поля, которые в Word рендерятся 9pt-курсивом
  * (Нарушено/Установлено/descriptionList/additionalContent — см. styles.Sizes.
- * violation_pt). Поля «Причины/Последствия/Ответственный/Рекомендации» — обычный
+ * violation_pt). Поля «Причины/Последствия/Ответственный» — обычный
  * текст листа (12pt, без курсива), поэтому `small: false`.
  *
  * @param {Object} violation - Данные нарушения
@@ -69,7 +69,6 @@ export function collectViolationLines(violation) {
         ['reasons', 'Причины'],
         ['consequences', 'Последствия'],
         ['responsible', 'Ответственный за решение проблем'],
-        ['recommendations', 'Рекомендации'],
     ];
     for (const [key, label] of optionalFields) {
         const field = violation[key];

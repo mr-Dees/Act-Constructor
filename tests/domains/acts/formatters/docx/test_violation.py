@@ -32,20 +32,9 @@ def _v(**overrides):
         reasons=ViolationOptionalFieldSchema(enabled=True, content="Причина-X"),
         consequences=ViolationOptionalFieldSchema(enabled=True, content="Последствие-Y"),
         responsible=ViolationOptionalFieldSchema(enabled=True, content="Иванов И.И."),
-        recommendations=ViolationOptionalFieldSchema(
-            enabled=True, content="Рекомендация-Z",
-        ),
     )
     base.update(overrides)
     return ViolationSchema(**base)
-
-
-def test_violation_renders_recommendations(doc):
-    """Регрессия: recommendations раньше не рендерились."""
-    build_violation(doc, _v())
-    text = "\n".join(p.text for p in doc.paragraphs)
-    assert "Рекомендация-Z" in text
-    assert "Рекомендации" in text
 
 
 def test_violation_renders_required_fields(doc):
@@ -95,9 +84,9 @@ def test_description_list_bullets_9pt_italic(doc):
 
 
 def test_reasons_block_stays_12pt_non_italic(doc):
-    """Причины/Последствия/Ответственный/Рекомендации — 12pt без курсива."""
+    """Причины/Последствия/Ответственный — 12pt без курсива."""
     build_violation(doc, _v())
-    for label in ("Причины:", "Последствия:", "Ответственный:", "Рекомендации:"):
+    for label in ("Причины:", "Последствия:", "Ответственный:"):
         label_run, body_run = _runs_for_label(doc, label)
         assert label_run is not None and body_run is not None
         assert label_run.font.size == Pt(Sizes.body_pt)
@@ -135,9 +124,9 @@ def test_labels_are_underlined(doc):
     build_violation(doc, _v())
     label_runs = [
         r for p in doc.paragraphs for r in p.runs
-        if r.text.strip() in {"Причины:", "Последствия:", "Ответственный:", "Рекомендации:"}
+        if r.text.strip() in {"Причины:", "Последствия:", "Ответственный:"}
     ]
-    assert len(label_runs) == 4
+    assert len(label_runs) == 3
     assert all(r.underline for r in label_runs)
 
 

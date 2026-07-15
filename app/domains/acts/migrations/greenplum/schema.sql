@@ -317,7 +317,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     reasons JSONB,
     consequences JSONB,
     responsible JSONB,
-    recommendations JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -333,8 +332,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
         CHECK (consequences IS NULL OR jsonb_typeof(consequences) = 'object'),
     CONSTRAINT check_responsible_is_object_or_null
         CHECK (responsible IS NULL OR jsonb_typeof(responsible) = 'object'),
-    CONSTRAINT check_recommendations_is_object_or_null
-        CHECK (recommendations IS NULL OR jsonb_typeof(recommendations) = 'object'),
 
     UNIQUE(act_id, violation_id)
 )
@@ -354,7 +351,6 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.additional_content IS 'JSONB �
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.reasons IS 'JSONB объект с полями enabled и content для причин нарушения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.consequences IS 'JSONB объект с полями enabled и content для последствий нарушения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.responsible IS 'JSONB объект с полями enabled и content для ответственных лиц';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.recommendations IS 'JSONB объект с полями enabled и content для рекомендаций по устранению';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.created_at IS 'Дата и время создания записи о нарушении';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и время последнего изменения записи';
 
