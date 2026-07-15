@@ -8,6 +8,7 @@ import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
 import { Notifications } from '../../shared/notifications.js';
+import { FormalizerPopover } from '../text-actions/formalizer-popover.js';
 
 export class ViolationManager {
     constructor() {
@@ -196,21 +197,89 @@ export class ViolationManager {
             this.createAdditionalContentField(violation)
         );
 
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'reasons', 'Причины', 'text')
-        );
-
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'consequences', 'Последствия', 'text')
-        );
-
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'responsible', 'Ответственные', 'text')
-        );
+        const reasonsField = this.createOptionalField(violation, 'reasons', 'Причины', 'text');
+        const consequencesField = this.createOptionalField(violation, 'consequences', 'Последствия', 'text');
+        const responsibleField = this.createOptionalField(violation, 'responsible', 'Ответственные', 'text');
+        optionalFieldsContainer.appendChild(reasonsField);
+        optionalFieldsContainer.appendChild(consequencesField);
+        optionalFieldsContainer.appendChild(responsibleField);
 
         section.appendChild(optionalFieldsContainer);
 
+        // Формализация: раскладка свободного текста по полям карточки (не в RO-режиме).
+        if (!isReadOnly) {
+            this._addFormalizeButton(section, violation, {
+                violated: violatedTextarea,
+                established: establishedTextarea,
+                reasons: reasonsField,
+                consequences: consequencesField,
+                responsible: responsibleField,
+            });
+        }
+
         return section;
+    }
+
+    /**
+     * Добавляет кнопку «Формализовать из текста» вверху секции нарушения.
+     * Открывает панель-заполнитель; применение раскладывает извлечённые поля.
+     * @param {HTMLElement} section - Секция нарушения
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} controls - Ссылки на DOM-контролы полей карточки
+     */
+    _addFormalizeButton(section, violation, controls) {
+        const bar = document.createElement('div');
+        bar.className = 'violation-formalize-bar';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'violation-formalize-btn';
+        btn.textContent = '✨ Формализовать из текста';
+        btn.title = 'Разложить свободный текст нарушения по полям карточки';
+        btn.addEventListener('click', () => {
+            FormalizerPopover.open({
+                violation,
+                apply: (fields) => this._applyFormalized(violation, controls, fields),
+            });
+        });
+
+        bar.appendChild(btn);
+        section.insertBefore(bar, section.firstChild);
+    }
+
+    /**
+     * Пишет извлечённые формализацией поля в объект нарушения и его DOM-контролы.
+     * Что LLM не извлекла (пустая строка) — поле НЕ трогаем.
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} controls - Ссылки на DOM-контролы
+     * @param {Object} fields - Ответ формализатора (плоские строки)
+     */
+    _applyFormalized(violation, controls, fields) {
+        const setPlain = (name, textarea, value) => {
+            const v = (value || '').trim();
+            if (!v) return;                 // не извлечено — не затираем существующее
+            violation[name] = v;
+            if (textarea) textarea.value = v;
+        };
+        const setOptional = (name, container, value) => {
+            const v = (value || '').trim();
+            if (!v) return;
+            violation[name].enabled = true;
+            violation[name].content = v;
+            const cb = container.querySelector('.violation-field-toggle input[type="checkbox"]');
+            const content = container.querySelector('.violation-field-content');
+            const ta = container.querySelector('.violation-field-content textarea');
+            if (cb) cb.checked = true;
+            if (content) content.style.display = 'block';
+            if (ta) ta.value = v;
+        };
+
+        setPlain('violated', controls.violated, fields.violated);
+        setPlain('established', controls.established, fields.established);
+        setOptional('reasons', controls.reasons, fields.reasons);
+        setOptional('consequences', controls.consequences, fields.consequences);
+        setOptional('responsible', controls.responsible, fields.responsible);
+        PreviewManager.updateBlock('violation', violation.id);
     }
 
     /**

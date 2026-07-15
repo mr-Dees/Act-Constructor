@@ -32,3 +32,34 @@ export async function correctText(text, { signal, mode = 'fix' } = {}) {
 }
 
 window.correctText = correctText;
+
+/**
+ * Формализовать нарушение: разложить свободный текст по полям карточки.
+ * @param {string} text — свободный текст нарушения.
+ * @param {{signal?: AbortSignal}} [opts]
+ * @returns {Promise<{violated:string, established:string, reasons:string,
+ *   responsible:string, consequences:string, measures:string}>} извлечённые поля
+ *   (пустые — что LLM не нашла; `measures` — вычислено, в карточку не пишется).
+ */
+export async function formalizeViolation(text, { signal } = {}) {
+    const res = await fetch(
+        AppConfig.api.getUrl('/api/v1/chat/text-actions/formalize-violation'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+            signal,
+        });
+    if (!res.ok) {
+        let detail = 'Не удалось формализовать текст';
+        try {
+            const data = await res.json();
+            if (data && data.detail) detail = data.detail;
+        } catch (_) { /* тело не JSON — оставляем дефолт */ }
+        const err = new Error(detail);
+        err.status = res.status;
+        throw err;
+    }
+    return res.json();
+}
+
+window.formalizeViolation = formalizeViolation;
