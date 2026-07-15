@@ -14,7 +14,7 @@
     gap: var(--spacing-sm);
     /* Компактная колонка: узкая и «высокая», а не широкая простыня в один ряд.
        Тянется за «раму» (cursor:move), инпуты/кнопки перебивают курсор на свой. */
-    width: var(--find-bar-width, 19rem);
+    width: var(--find-bar-width, 20rem);
     max-width: calc(100vw - 2 * var(--spacing-lg));
     cursor: move;
     background: var(--bg-primary);
@@ -42,14 +42,27 @@
     display: none;
 }
 
-/* Ряд параметров: тумблеры слева, навигация ‹ › справа. */
-.act-find-row-options {
-    justify-content: space-between;
+/* Секция замены: поле и кнопки — двумя отдельными рядами, левые края выровнены
+   с остальными рядами (общий вертикальный ритм). data-role="replaceRow" здесь,
+   чтобы read-only прятал всю секцию разом. */
+.act-find-replace-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
 }
 
-/* Ряд замены: на узкой панели кнопки переносятся под поле, не расширяя её. */
-.act-find-row-replace {
+/* Ряд действий: «Заменить» / «Заменить всё» делят ширину поровну;
+   «Отменить замену» (появляется после замены) занимает отдельную полную строку. */
+.act-find-row-actions {
     flex-wrap: wrap;
+}
+
+.act-find-row-actions .act-find-action {
+    flex: 1 1 auto;
+}
+
+.act-find-row-actions .act-find-undo {
+    flex-basis: 100%;
 }
 
 /* Текстовые поля «Найти» / «Заменить на». */
@@ -62,7 +75,7 @@
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
     /* Компактнее прежних 14rem; flex-рост добирает ширину внутри узкой панели. */
-    min-width: var(--find-bar-input-width, 9rem);
+    min-width: var(--find-bar-input-width, 8rem);
     flex: 1 1 auto;
     cursor: text;               /* перебиваем move-курсор «рамы» на текстовый */
     transition: var(--transition-all);
@@ -144,7 +157,7 @@
     font-size: var(--font-size-xs);
     color: var(--text-secondary);
     white-space: nowrap;
-    min-width: var(--find-bar-counter-width, 3.5rem);
+    min-width: var(--find-bar-counter-width, 3rem);
     text-align: center;
     flex-shrink: 0;
 }

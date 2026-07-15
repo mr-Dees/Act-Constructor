@@ -198,6 +198,12 @@ export const FindBar = {
                 <input type="text" class="act-find-input" data-role="find"
                        placeholder="Найти" aria-label="Найти" spellcheck="false" />
                 <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
+                <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
+                    <button type="button" class="act-find-btn" data-role="prev"
+                            title="Предыдущее совпадение" aria-label="Предыдущее совпадение">‹</button>
+                    <button type="button" class="act-find-btn" data-role="next"
+                            title="Следующее совпадение" aria-label="Следующее совпадение">›</button>
+                </div>
                 <button type="button" class="act-find-btn act-find-close" data-role="close"
                         title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
             </div>
@@ -211,20 +217,18 @@ export const FindBar = {
                             aria-pressed="false"
                             title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
                 </div>
-                <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
-                    <button type="button" class="act-find-btn" data-role="prev"
-                            title="Предыдущее совпадение" aria-label="Предыдущее совпадение">‹</button>
-                    <button type="button" class="act-find-btn" data-role="next"
-                            title="Следующее совпадение" aria-label="Следующее совпадение">›</button>
-                </div>
             </div>
-            <div class="act-find-row act-find-row-replace" data-role="replaceRow">
-                <input type="text" class="act-find-input" data-role="replace"
-                       placeholder="Заменить на" aria-label="Заменить на" spellcheck="false" />
-                <button type="button" class="act-find-action" data-role="replaceOne">Заменить</button>
-                <button type="button" class="act-find-action" data-role="replaceAll">Заменить всё</button>
-                <button type="button" class="act-find-action act-find-undo hidden" data-role="undo"
-                        title="Отменить последнюю замену">Отменить замену</button>
+            <div class="act-find-replace-group" data-role="replaceRow">
+                <div class="act-find-row act-find-row-replace">
+                    <input type="text" class="act-find-input" data-role="replace"
+                           placeholder="Заменить на" aria-label="Заменить на" spellcheck="false" />
+                </div>
+                <div class="act-find-row act-find-row-actions">
+                    <button type="button" class="act-find-action" data-role="replaceOne">Заменить</button>
+                    <button type="button" class="act-find-action" data-role="replaceAll">Заменить всё</button>
+                    <button type="button" class="act-find-action act-find-undo hidden" data-role="undo"
+                            title="Отменить последнюю замену">Отменить замену</button>
+                </div>
             </div>
         `;
         document.body.appendChild(bar);
