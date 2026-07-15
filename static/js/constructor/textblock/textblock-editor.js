@@ -674,8 +674,29 @@ Object.assign(TextBlockManager.prototype, {
         if (typeof this._cleanCapGuards === 'function') this._cleanCapGuards(wrapper);
 
         e.clipboardData.setData('text/html', wrapper.outerHTML);
+        // text/plain: \u0441\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u0443\u0435\u043C \u043A\u043B\u043E\u043D \u0441 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435\u043C \u043F\u0435\u0440\u0435\u043D\u043E\u0441\u043E\u0432 \u2014 <br> \u0438 \u0433\u0440\u0430\u043D\u0438\u0446\u044B
+        // \u0431\u043B\u043E\u0447\u043D\u044B\u0445 \u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432 \u2192 \n. wrapper.textContent \u0438\u0445 \u0442\u0435\u0440\u044F\u043B (\u0441\u043A\u043B\u0435\u0438\u0432\u0430\u043B \u0432\u0441\u0451 \u0432 \u043E\u0434\u043D\u0443
+        // \u0441\u0442\u0440\u043E\u043A\u0443), \u0438\u0437-\u0437\u0430 \u0447\u0435\u0433\u043E \u0432\u0441\u0442\u0430\u0432\u043A\u0430 \u0432\u043E \u0432\u043D\u0435\u0448\u043D\u0438\u0435 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0441\u0445\u043B\u043E\u043F\u044B\u0432\u0430\u043B\u0430\u0441\u044C. \u0421\u0440. \u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043E\u0440:
+        // textContent/Range.toString() \u0442\u0435\u0440\u044F\u044E\u0442 <br>, \u0430 \u043E\u0431\u0445\u043E\u0434 \u0441 \u044F\u0432\u043D\u044B\u043C <br>\u2192\n \u2014 \u043D\u0435\u0442.
+        const plainFromClip = (root) => {
+            let out = '';
+            const BLOCK = /^(DIV|P|LI|TR|H[1-6]|BLOCKQUOTE|PRE)$/;
+            const walk = (node) => {
+                for (let n = node.firstChild; n; n = n.nextSibling) {
+                    if (n.nodeType === Node.TEXT_NODE) {
+                        out += n.data;
+                    } else if (n.nodeType === Node.ELEMENT_NODE) {
+                        if (n.tagName === 'BR') { out += '\n'; continue; }
+                        walk(n);
+                        if (BLOCK.test(n.tagName) && !out.endsWith('\n')) out += '\n';
+                    }
+                }
+            };
+            walk(root);
+            return out;
+        };
         e.clipboardData.setData('text/plain',
-            (wrapper.textContent || '').replace(/\u200B/g, ''));
+            plainFromClip(wrapper).replace(/\u200B/g, ''));
 
         if (isCut) {
             // Удаляем расширенное выделение нативно — остаётся в undo-стеке.
