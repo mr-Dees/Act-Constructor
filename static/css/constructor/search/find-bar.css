@@ -37,6 +37,21 @@
     display: none;
 }
 
+/* Грип перетаскивания панели (общая логика с поповером корректора). */
+.act-find-grip {
+    cursor: move;
+    color: var(--text-secondary);
+    user-select: none;
+    padding: 0 var(--spacing-xs);
+    font-size: var(--font-size-md);
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.act-find-grip:hover {
+    color: var(--text-primary);
+}
+
 /* Текстовые поля «Найти» / «Заменить на». */
 .act-find-input {
     padding: var(--spacing-xs) var(--spacing-sm);

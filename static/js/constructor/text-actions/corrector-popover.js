@@ -1,17 +1,21 @@
 /**
- * Поповер «Корректор» — Variant B: выпадашка от кнопки тулбара текстблока.
+ * Плавающая панель «Корректор» текста.
  *
- * Показывает word-diff исправленного текста в ресайзабельном поле и даёт
- * принять / отклонить / перегенерировать. Поповер вложен в группу тулбара
- * (position:absolute), поэтому переживает blur-guard редактора и остаётся
- * «привязанным к кнопке». Замена выделения — через ActSearchEngine.replaceRange
- * + textBlockManager.finalizeEdit (тот же сток персиста, что печать и find-bar).
+ * Перетаскиваемая (за заголовок) и ресайзабельная панель по образцу строки поиска:
+ * базовое положение — слева вверху (поиск — справа), позиция/размер персистятся.
+ * Показывает диф исправленного текста в одном из трёх режимов (в строку / 2 окна /
+ * 3 окна — из настроек конструктора). «Принять» заменяет выделение с сохранением
+ * переносов строк (`\n`→`<br>`); при наличии в выделении ссылок/сносок — предупреждает,
+ * что они будут удалены.
  */
-import { DiffEngine } from '../../portal/acts-manager/diff-engine.js';
+import {
+    diffTokens, renderInline, renderBefore, renderAfter, renderPlain,
+} from './corrector-diff.js';
 import { SafeHTML } from '../../shared/sanitize.js';
 import { Notifications } from '../../shared/notifications.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
 import { makeResizablePanel } from '../../shared/resizable-panel.js';
+import { makeDraggablePanel } from '../../shared/draggable-panel.js';
 import { ActSearchEngine } from '../search/act-search-engine.js';
 import { textBlockManager } from '../textblock/textblock-core.js';
 import { correctText } from './text-actions-client.js';
@@ -20,26 +24,27 @@ export const CorrectorPopover = {
     _el: null,
     _els: null,
     _resizer: null,
+    _dragger: null,
     _escUnsub: null,
-    _outsideHandler: null,
     _controller: null,
     _editor: null,
     _range: null,
     _sourceText: '',
     _corrected: '',
+    _destructive: false,
 
     /**
-     * @param {{button: HTMLElement, editor: HTMLElement, range: Range, text: string}} opts
+     * @param {{editor: HTMLElement, range: Range, text: string}} opts
      */
-    open({ button, editor, range, text }) {
-        this._build(button);
+    open({ editor, range, text }) {
+        this._build();
         this._editor = editor;
         this._range = range;
         this._sourceText = text;
         this._corrected = '';
+        this._destructive = this._detectDestructiveCapsules(range);
         this._el.classList.remove('hidden');
         if (!this._escUnsub) this._escUnsub = EscapeStack.push(() => this.close());
-        this._bindOutside();
         this._request();
     },
 
@@ -47,22 +52,20 @@ export const CorrectorPopover = {
         this._abort();
         if (this._el) this._el.classList.add('hidden');
         if (this._escUnsub) { this._escUnsub(); this._escUnsub = null; }
-        this._unbindOutside();
         this._editor = null;
         this._range = null;
         this._corrected = '';
+        this._destructive = false;
     },
 
-    _build(button) {
+    _build() {
         if (this._el) return;
-        const group = button.closest('.toolbar-group') || button.parentElement;
-        group.classList.add('toolbar-group-corrector');
         const el = document.createElement('div');
         el.className = 'corrector-popover hidden';
         el.setAttribute('role', 'dialog');
         el.setAttribute('aria-label', 'Корректор текста');
         el.innerHTML = `
-            <div class="corrector-header">
+            <div class="corrector-header" data-role="header">
                 <span class="corrector-title">✨ Корректор</span>
                 <button type="button" class="corrector-close" data-role="close" title="Закрыть">✕</button>
             </div>
@@ -74,9 +77,10 @@ export const CorrectorPopover = {
             </div>
             <div class="corrector-resize" data-role="resize" title="Изменить размер"></div>
         `;
-        group.appendChild(el);
+        document.body.appendChild(el);
         this._el = el;
         this._els = {
+            header: el.querySelector('[data-role="header"]'),
             body: el.querySelector('[data-role="body"]'),
             accept: el.querySelector('[data-role="accept"]'),
             reject: el.querySelector('[data-role="reject"]'),
@@ -84,16 +88,11 @@ export const CorrectorPopover = {
             close: el.querySelector('[data-role="close"]'),
             resize: el.querySelector('[data-role="resize"]'),
         };
-        // B-40: не воруем фокус/выделение у редактора. У кнопок — свой preventDefault;
-        // прочие зоны тоже гасим, кроме грипа ресайза (ему нужен нативный mousedown).
-        el.querySelectorAll('button').forEach((b) => {
+        // B-40: кнопки не воруют фокус/выделение у редактора. Заголовок НЕ гасим —
+        // за него тянет makeDraggablePanel.
+        [this._els.accept, this._els.reject, this._els.regen, this._els.close].forEach((b) => {
             b.addEventListener('mousedown', (e) => e.preventDefault());
             b.addEventListener('pointerdown', (e) => e.preventDefault());
-        });
-        el.addEventListener('mousedown', (e) => {
-            if (e.target === this._els.resize) return;
-            if (e.target.closest('button')) return;
-            e.preventDefault();
         });
         this._els.accept.addEventListener('click', () => this._accept());
         this._els.reject.addEventListener('click', () => this.close());
@@ -102,13 +101,18 @@ export const CorrectorPopover = {
         this._resizer = makeResizablePanel({
             panel: el,
             handle: this._els.resize,
-            growX: 'left',
-            minWidth: 280,
-            maxWidthVw: 90,
-            minHeight: 120,
+            growX: 'right',
+            minWidth: 320,
+            maxWidthVw: 92,
+            minHeight: 140,
             maxHeightVh: 80,
             storageKey: 'corrector:popover:size',
-            cursor: 'nesw-resize',
+            cursor: 'nwse-resize',
+        });
+        this._dragger = makeDraggablePanel({
+            panel: el,
+            handle: this._els.header,
+            storageKey: 'corrector:popover:pos',
         });
     },
 
@@ -126,7 +130,7 @@ export const CorrectorPopover = {
             const corrected = await correctText(
                 this._sourceText, { signal: this._controller.signal });
             this._corrected = corrected;
-            this._renderDiff(this._sourceText, corrected);
+            this._render();
             this._setBusy(false);
         } catch (e) {
             if (e && e.name === 'AbortError') return;
@@ -141,64 +145,121 @@ export const CorrectorPopover = {
         }
     },
 
-    _renderDiff(before, after) {
-        const ops = DiffEngine._wordDiff(before, after);
-        const html = ops.map((part) => {
-            const esc = this._escape(part.text);
-            if (part.type === 'insert') return `<ins>${esc}</ins>`;
-            if (part.type === 'delete') return `<del>${esc}</del>`;
-            return esc;
-        }).join(' ');
-        this._els.body.innerHTML = '';
-        const wrap = document.createElement('div');
-        wrap.className = 'corrector-diff';
-        this._els.body.appendChild(wrap);
-        SafeHTML.set(wrap, html);
+    _render() {
+        const before = this._sourceText;
+        const after = this._corrected;
+        const ops = diffTokens(before, after);
+        const mode = this._diffMode();
+        const body = this._els.body;
+        body.innerHTML = '';
+
+        if (this._destructive) {
+            const warn = document.createElement('div');
+            warn.className = 'corrector-warning';
+            warn.textContent = '⚠ В выделении есть ссылки или сноски — при замене они будут удалены.';
+            body.appendChild(warn);
+        }
+
+        if (mode === 'panes2') {
+            body.appendChild(this._panesRow([
+                ['Было', renderBefore(ops)],
+                ['Стало', renderAfter(ops)],
+            ]));
+        } else if (mode === 'panes3') {
+            body.appendChild(this._panesRow([
+                ['Было', renderPlain(before)],
+                ['Изменения', renderInline(ops)],
+                ['Стало', renderPlain(after)],
+            ]));
+        } else {
+            const div = document.createElement('div');
+            div.className = 'corrector-diff';
+            body.appendChild(div);
+            SafeHTML.set(div, renderInline(ops));
+        }
     },
 
-    _escape(str) {
-        if (!str) return '';
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+    _panesRow(panes) {
+        const row = document.createElement('div');
+        row.className = 'corrector-panes';
+        for (const [label, html] of panes) {
+            const pane = document.createElement('div');
+            pane.className = 'corrector-pane';
+            const lab = document.createElement('div');
+            lab.className = 'corrector-pane-label';
+            lab.textContent = label;
+            const content = document.createElement('div');
+            content.className = 'corrector-diff';
+            SafeHTML.set(content, html);
+            pane.appendChild(lab);
+            pane.appendChild(content);
+            row.appendChild(pane);
+        }
+        return row;
+    },
+
+    // Режим сравнения из настроек конструктора (сегмент-контрол в меню шестерёнки).
+    _diffMode() {
+        const sm = (typeof window !== 'undefined') ? window.SettingsMenuManager : null;
+        const m = (sm && typeof sm.getCorrectorDiffMode === 'function')
+            ? sm.getCorrectorDiffMode() : 'inline';
+        return (m === 'panes2' || m === 'panes3') ? m : 'inline';
+    },
+
+    // Разрушит ли замена капсулы: капсула ВНУТРИ выделения либо пересечение границы.
+    // Выделение целиком внутри одной капсулы (правка подписи ссылки) — не разрушает.
+    _detectDestructiveCapsules(range) {
+        const start = ActSearchEngine._capsuleAncestorOf(range.startContainer);
+        const end = ActSearchEngine._capsuleAncestorOf(range.endContainer);
+        if (start && start === end) return false;
+        let interior = false;
+        try {
+            interior = !!range.cloneContents().querySelector('.text-link, .text-footnote');
+        } catch (e) {
+            interior = false;
+        }
+        return interior || (start !== end);
+    },
+
+    // Вставка plain-текста с сохранением переносов: `\n` → <br> (как paste-путь редактора).
+    _insertCorrected(range, text) {
+        range.deleteContents();
+        const frag = document.createDocumentFragment();
+        const lines = String(text).split('\n');
+        lines.forEach((line, i) => {
+            if (i > 0) frag.appendChild(document.createElement('br'));
+            if (line) frag.appendChild(document.createTextNode(line));
+        });
+        range.insertNode(frag);
     },
 
     _accept() {
         if (!this._corrected || !this._range || !this._editor) { this.close(); return; }
+        const range = this._range;
         try {
-            ActSearchEngine.replaceRange(this._range, this._corrected);
+            // Разрушительные капсулы: выносим границы наружу капсул, чтобы не оставить
+            // «половину» капсулы, затем плоско заменяем (капсулы внутри удаляются — о чём
+            // предупредили баннером).
+            if (this._destructive
+                && typeof textBlockManager._expandRangeOutOfMarkers === 'function') {
+                textBlockManager._expandRangeOutOfMarkers(range, this._editor);
+            }
+            this._insertCorrected(range, this._corrected);
         } catch (e) {
-            // replaceRange бросает, если выделение пересекает границу капсулы.
-            Notifications.warning(
-                'В выделении есть ссылка или сноска — сузьте выделение и повторите');
+            Notifications.error('Не удалось заменить текст');
             return;
+        }
+        if (ActSearchEngine && typeof ActSearchEngine.invalidateRunsCache === 'function') {
+            ActSearchEngine.invalidateRunsCache();
         }
         textBlockManager.finalizeEdit(this._editor);
         Notifications.success('Текст исправлен');
         this.close();
     },
 
-    _bindOutside() {
-        if (this._outsideHandler) return;
-        this._outsideHandler = (e) => {
-            if (!this._el || this._el.contains(e.target)) return;
-            // Клик по самой кнопке ✨ не закрывает (её обработчик сам решает).
-            if (e.target.closest && e.target.closest('[data-command="improveText"]')) return;
-            this.close();
-        };
-        document.addEventListener('mousedown', this._outsideHandler, true);
-    },
-
-    _unbindOutside() {
-        if (this._outsideHandler) {
-            document.removeEventListener('mousedown', this._outsideHandler, true);
-            this._outsideHandler = null;
-        }
-    },
-
     _abort() {
         if (this._controller) {
-            try { this._controller.abort(); } catch (_) { /* no-op */ }
+            try { this._controller.abort(); } catch (e) { /* no-op */ }
             this._controller = null;
         }
     },

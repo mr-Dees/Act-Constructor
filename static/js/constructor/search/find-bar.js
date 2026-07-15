@@ -41,6 +41,7 @@ import {
     applySnapshotRestore,
 } from './act-search-replace.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
+import { makeDraggablePanel } from '../../shared/draggable-panel.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -194,6 +195,7 @@ export const FindBar = {
         bar.setAttribute('aria-label', 'Поиск и замена по тексту акта');
         bar.innerHTML = `
             <div class="act-find-row act-find-row-search">
+                <span class="act-find-grip" data-role="grip" title="Перетащить" aria-hidden="true">⠿</span>
                 <input type="text" class="act-find-input" data-role="find"
                        placeholder="Найти" aria-label="Найти" spellcheck="false" />
                 <div class="act-find-toggles" role="group" aria-label="Параметры поиска">
@@ -234,9 +236,16 @@ export const FindBar = {
             replaceRow: bar.querySelector('[data-role="replaceRow"]'),
             undoBtn: bar.querySelector('[data-role="undo"]'),
             toggles: bar.querySelectorAll('[data-toggle]'),
+            grip: bar.querySelector('[data-role="grip"]'),
         };
 
         this._bindEvents();
+        // Перетаскивание за грип — общая логика с поповером корректора.
+        this._dragger = makeDraggablePanel({
+            panel: bar,
+            handle: this._els.grip,
+            storageKey: 'act-find-bar:pos',
+        });
     },
 
     /** @private Навешивает обработчики ввода/кнопок. */

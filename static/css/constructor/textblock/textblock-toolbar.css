@@ -243,24 +243,20 @@
     margin-left: var(--spacing-xs);
 }
 
-/* Корректор — Variant B: выпадашка от кнопки ✨. Как меню размера шрифта,
-   поповер вложен в группу тулбара (position:relative) и растёт вниз/влево.
-   Ресайз поля — через makeResizablePanel (грип в левом нижнем углу). */
-.toolbar-group-corrector {
-    position: relative;
-}
-
+/* Корректор — плавающая перетаскиваемая панель (базово слева вверху, как строка
+   поиска — справа). Перетаскивание за заголовок (makeDraggablePanel), ресайз за
+   грип в правом нижнем углу (makeResizablePanel). */
 .corrector-popover {
-    position: absolute;
-    top: calc(100% + var(--spacing-xs));
-    right: 0;
-    z-index: var(--z-dropdown);
+    position: fixed;
+    top: calc(max(var(--header-height), var(--header-min-height)) + var(--toolbar-top-offset));
+    left: var(--spacing-lg);
+    z-index: var(--z-sticky-elevated);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
-    width: 420px;
-    max-width: 90vw;
-    max-height: 60vh;
+    width: 440px;
+    max-width: 92vw;
+    max-height: 70vh;
     padding: var(--spacing-sm);
     background: var(--bg-primary);
     border: var(--border-width-thin) solid var(--border);
@@ -279,6 +275,8 @@
     align-items: center;
     justify-content: space-between;
     font-weight: var(--font-weight-semibold);
+    cursor: move;
+    user-select: none;
 }
 
 .corrector-close {
@@ -299,6 +297,43 @@
     flex: 1 1 auto;
     overflow: auto;
     min-height: var(--spacing-xl);
+}
+
+/* Режимы «2 окна» / «3 окна» — колонки. */
+.corrector-panes {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+}
+
+.corrector-pane {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.corrector-pane + .corrector-pane {
+    border-left: var(--border-width-thin) solid var(--border);
+    padding-left: var(--spacing-sm);
+}
+
+.corrector-pane-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.corrector-warning {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+    background: var(--warning-subtle, rgba(245, 158, 11, 0.12));
+    border-radius: var(--radius-sm);
+    color: var(--warning, #b45309);
+    font-size: var(--font-size-xs);
 }
 
 .corrector-diff {
@@ -366,12 +401,12 @@
 
 .corrector-resize {
     position: absolute;
-    left: 0;
+    right: 0;
     bottom: 0;
     width: 14px;
     height: 14px;
-    cursor: nesw-resize;
-    background: linear-gradient(45deg,
+    cursor: nwse-resize;
+    background: linear-gradient(-45deg,
         transparent 0 40%,
         var(--border) 40% 50%,
         transparent 50% 70%,

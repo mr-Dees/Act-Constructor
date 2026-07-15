@@ -139,8 +139,8 @@ Object.assign(TextBlockManager.prototype, {
                 }
 
                 if (command === 'improveText') {
-                    // Корректор: поповер вложен в тулбар и держит своё выделение
-                    // через клон Range — редактор НЕ перефокусируем и НЕ прячем тулбар.
+                    // Корректор: плавающая перетаскиваемая панель. Выделение держим
+                    // через клон Range — редактор НЕ перефокусируем.
                     const sel = window.getSelection();
                     if (!sel || sel.isCollapsed) {
                         Notifications.info('Выделите текст для корректуры');
@@ -152,9 +152,7 @@ Object.assign(TextBlockManager.prototype, {
                         Notifications.info('Выделите текст для корректуры');
                         return;
                     }
-                    CorrectorPopover.open({
-                        button: btn, editor: this.activeEditor, range, text,
-                    });
+                    CorrectorPopover.open({ editor: this.activeEditor, range, text });
                     return;
                 }
 
