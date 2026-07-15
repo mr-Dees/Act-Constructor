@@ -27,6 +27,12 @@ export class SettingsMenuManager {
     /** Допустимые значения режима ОАРБ */
     static _validOarbModes = ['off', 'adaptive', 'always'];
 
+    /** Ключ localStorage для режима сравнения корректора текста */
+    static _correctorDiffModeKey = 'corrector_diff_mode';
+
+    /** Допустимые режимы сравнения корректора: в строку / 2 окна / 3 окна */
+    static _validCorrectorDiffModes = ['inline', 'panes2', 'panes3'];
+
     /** @type {string[]} Ключи баз знаний (загружаются из DOM) */
     static _kbKeys = [];
 
@@ -130,6 +136,8 @@ export class SettingsMenuManager {
         this._setupKbToggles();
         this._applyOarbMode();
         this._setupOarbModeSelect();
+        this._applyCorrectorDiffMode();
+        this._setupCorrectorDiffModeSelect();
     }
 
     /**
@@ -275,6 +283,48 @@ export class SettingsMenuManager {
                     console.warn('SettingsMenuManager: не удалось сохранить режим ОАРБ', e);
                 }
                 this._applyOarbMode();
+            });
+        }
+    }
+
+    /**
+     * Читает режим сравнения корректора из localStorage.
+     * @returns {'inline'|'panes2'|'panes3'}
+     */
+    static getCorrectorDiffMode() {
+        const val = localStorage.getItem(this._correctorDiffModeKey);
+        return this._validCorrectorDiffModes.includes(val) ? val : 'inline';
+    }
+
+    /**
+     * Синхронизирует сегмент-контрол режима сравнения с localStorage
+     * @private
+     */
+    static _applyCorrectorDiffMode() {
+        const mode = this.getCorrectorDiffMode();
+        const btns = document.querySelectorAll('[data-corrector-diff-mode] [data-corrector-diff-option]');
+        for (const btn of btns) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.correctorDiffOption === mode));
+        }
+    }
+
+    /**
+     * Обработчики клика по кнопкам сегмент-контрола режима сравнения
+     * @private
+     */
+    static _setupCorrectorDiffModeSelect() {
+        const btns = document.querySelectorAll('[data-corrector-diff-mode] [data-corrector-diff-option]');
+        for (const btn of btns) {
+            btn.addEventListener('click', () => {
+                const val = this._validCorrectorDiffModes.includes(btn.dataset.correctorDiffOption)
+                    ? btn.dataset.correctorDiffOption
+                    : 'inline';
+                try {
+                    localStorage.setItem(this._correctorDiffModeKey, val);
+                } catch (e) {
+                    console.warn('SettingsMenuManager: не удалось сохранить режим сравнения', e);
+                }
+                this._applyCorrectorDiffMode();
             });
         }
     }
