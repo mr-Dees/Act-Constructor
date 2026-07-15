@@ -202,7 +202,7 @@ export const CorrectorPopover = {
     _diffMode() {
         const sm = (typeof window !== 'undefined') ? window.SettingsMenuManager : null;
         const m = (sm && typeof sm.getCorrectorDiffMode === 'function')
-            ? sm.getCorrectorDiffMode() : 'inline';
+            ? sm.getCorrectorDiffMode() : 'panes2';
         return (m === 'panes2' || m === 'panes3') ? m : 'inline';
     },
 

@@ -293,7 +293,7 @@ export class SettingsMenuManager {
      */
     static getCorrectorDiffMode() {
         const val = localStorage.getItem(this._correctorDiffModeKey);
-        return this._validCorrectorDiffModes.includes(val) ? val : 'inline';
+        return this._validCorrectorDiffModes.includes(val) ? val : 'panes2';
     }
 
     /**
