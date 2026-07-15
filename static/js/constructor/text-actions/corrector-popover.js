@@ -3,8 +3,10 @@
  *
  * Перетаскиваемая (за заголовок) и ресайзабельная панель по образцу строки поиска:
  * базовое положение — слева вверху (поиск — справа), позиция/размер персистятся.
- * Два режима обработки (тумблер в шапке): «Исправить ошибки» (орфография/пунктуация)
- * и «Улучшить читаемость» (структура/связность) — оба возвращают диф.
+ * Два режима обработки (кнопки в шапке): «Исправить ошибки» (орфография/пунктуация)
+ * и «Улучшить читаемость» (структура/связность) — оба возвращают диф. При открытии
+ * обращения к модели НЕТ: обработка стартует по клику на нужный режим — кнопка режима
+ * и есть кнопка запуска (экономит лишний вызов LLM, когда нужен не дефолтный режим).
  * Показывает диф исправленного текста в одном из трёх режимов (в строку / 2 окна /
  * 3 окна — из настроек конструктора). «Принять» заменяет выделение с сохранением
  * переносов строк (`\n`→`<br>`); при наличии в выделении ссылок/сносок — предупреждает,
@@ -35,6 +37,7 @@ export const CorrectorPopover = {
     _corrected: '',
     _destructive: false,
     _mode: 'fix',
+    _hasRequested: false,
 
     /**
      * @param {{editor: HTMLElement, range: Range, text: string}} opts
@@ -46,11 +49,13 @@ export const CorrectorPopover = {
         this._sourceText = text;
         this._corrected = '';
         this._mode = 'fix';
+        this._hasRequested = false;
         this._syncModeButtons();
         this._destructive = this._detectDestructiveCapsules(range);
         this._el.classList.remove('hidden');
         if (!this._escUnsub) this._escUnsub = EscapeStack.push(() => this.close());
-        this._request();
+        // Не запрашиваем модель на открытии — ждём выбор режима пользователем.
+        this._renderIdle();
     },
 
     close() {
@@ -137,12 +142,26 @@ export const CorrectorPopover = {
         this._els.regen.disabled = busy;
     },
 
-    // Переключение режима: обновляет активную кнопку и перезапрашивает результат.
+    // Клик по кнопке режима = запуск варианта: меняет активную кнопку и запрашивает
+    // результат. Запрос идёт при смене режима ЛИБО при первом клике из стартового
+    // состояния (когда обращения к модели ещё не было). Повторный клик по уже
+    // отработавшему режиму не дёргает модель зря — для этого есть кнопка ↻.
     _setMode(mode) {
-        if (mode === this._mode || (mode !== 'fix' && mode !== 'readability')) return;
+        if (mode !== 'fix' && mode !== 'readability') return;
+        const changed = mode !== this._mode;
         this._mode = mode;
         this._syncModeButtons();
-        this._request();
+        if (changed || !this._hasRequested) this._request();
+    },
+
+    // Стартовое состояние до первого запроса: подсказка «выберите режим», кнопки
+    // «Принять»/↻ выключены (принимать/перегенерировать пока нечего).
+    _renderIdle() {
+        this._corrected = '';
+        this._els.accept.disabled = true;
+        this._els.regen.disabled = true;
+        this._els.body.innerHTML =
+            '<div class="corrector-status">Выберите режим выше, чтобы запустить обработку.</div>';
     },
 
     _syncModeButtons() {
@@ -154,6 +173,7 @@ export const CorrectorPopover = {
 
     async _request() {
         this._abort();
+        this._hasRequested = true;
         this._controller = new AbortController();
         this._setBusy(true);
         this._els.body.innerHTML = '<div class="corrector-status">Обрабатываю…</div>';
