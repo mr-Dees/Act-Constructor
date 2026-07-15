@@ -441,12 +441,12 @@ class ActCrudRepository(BaseRepository):
             INSERT INTO {self.violations} (
                 act_id, violation_id, node_id, node_number, violated, established,
                 description_list, additional_content, reasons, consequences,
-                responsible
+                responsible, measures
             )
             SELECT
                 $2, violation_id, node_id, node_number, violated, established,
                 description_list, additional_content, reasons, consequences,
-                responsible
+                responsible, measures
             FROM {self.violations}
             WHERE act_id = $1
             """,

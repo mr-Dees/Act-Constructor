@@ -212,6 +212,10 @@ Object.assign(AppState, {
                 enabled: false,
                 content: ''
             },
+            measures: {
+                enabled: false,
+                content: ''
+            },
             consequences: {
                 enabled: false,
                 content: ''

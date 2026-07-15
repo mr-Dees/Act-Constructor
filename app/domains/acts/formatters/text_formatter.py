@@ -174,6 +174,7 @@ class TextFormatter(BaseFormatter):
         self._add_description_list(lines, violation_data.get('descriptionList', {}))
         self._add_additional_content(lines, violation_data.get('additionalContent', {}))
         self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
+        self._add_labeled_section(lines, "Принятые меры", violation_data.get('measures', {}))
         self._add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
         self._add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
 

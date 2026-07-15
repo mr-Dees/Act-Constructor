@@ -54,6 +54,7 @@ const goldenViolation = {
         ],
     },
     reasons: { enabled: true, content: 'GOLDEN_V_REASONS' },
+    measures: { enabled: true, content: 'GOLDEN_V_MEASURES' },
     consequences: { enabled: true, content: 'GOLDEN_V_CONSEQUENCES' },
     responsible: { enabled: true, content: 'GOLDEN_V_RESPONSIBLE' },
 };
@@ -95,6 +96,7 @@ test('golden: все текстовые поля нарушения присут
         'GOLDEN_V_CASE_2',
         'GOLDEN_V_FREETEXT',
         'GOLDEN_V_REASONS',
+        'GOLDEN_V_MEASURES',
         'GOLDEN_V_CONSEQUENCES',
         'GOLDEN_V_RESPONSIBLE',
     ];

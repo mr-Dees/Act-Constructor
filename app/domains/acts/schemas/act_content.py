@@ -399,7 +399,7 @@ class ViolationOptionalFieldSchema(BaseModel):
     """
     Схема опционального текстового поля нарушения.
 
-    Используется для причин, последствий, рекомендаций,
+    Используется для причин, принятых мер, последствий,
     ответственных лиц и др.
     """
     model_config = ConfigDict(extra="forbid")
@@ -500,6 +500,7 @@ class ViolationSchema(BaseModel):
         descriptionList: Список описаний нарушения
         additionalContent: Дополнительный контент
         reasons: Причины нарушения
+        measures: Принятые меры
         consequences: Последствия нарушения
         responsible: Ответственные лица
     """
@@ -520,6 +521,10 @@ class ViolationSchema(BaseModel):
     reasons: ViolationOptionalFieldSchema = Field(
         default_factory=ViolationOptionalFieldSchema,
         description="Причины"
+    )
+    measures: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Принятые меры"
     )
     consequences: ViolationOptionalFieldSchema = Field(
         default_factory=ViolationOptionalFieldSchema,

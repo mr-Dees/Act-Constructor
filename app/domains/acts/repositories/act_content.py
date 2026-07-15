@@ -200,7 +200,7 @@ class ActContentRepository(BaseRepository):
             f"""
             SELECT violation_id, node_id, violated, established,
                    description_list, additional_content, reasons,
-                   consequences, responsible
+                   consequences, responsible, measures
             FROM {self.violations}
             WHERE act_id = $1
             """,
@@ -215,6 +215,7 @@ class ActContentRepository(BaseRepository):
                 'descriptionList': json.loads(row['description_list'] or '{"enabled": false, "items": []}'),
                 'additionalContent': json.loads(row['additional_content'] or '{"enabled": false, "items": []}'),
                 'reasons': json.loads(row['reasons'] or '{"enabled": false, "content": ""}'),
+                'measures': json.loads(row['measures'] or '{"enabled": false, "content": ""}'),
                 'consequences': json.loads(row['consequences'] or '{"enabled": false, "content": ""}'),
                 'responsible': json.loads(row['responsible'] or '{"enabled": false, "content": ""}')
             }
@@ -449,6 +450,7 @@ class ActContentRepository(BaseRepository):
                 json.dumps(v_data.reasons.model_dump()),
                 json.dumps(v_data.consequences.model_dump()),
                 json.dumps(v_data.responsible.model_dump()),
+                json.dumps(v_data.measures.model_dump()),
             ))
 
         if dropped:
@@ -464,9 +466,9 @@ class ActContentRepository(BaseRepository):
                     act_id, audit_act_id, audit_point_id,
                     violation_id, node_id, node_number, violated, established,
                     description_list, additional_content, reasons, consequences,
-                    responsible
+                    responsible, measures
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 """,
                 args,
             )

@@ -198,9 +198,11 @@ export class ViolationManager {
         );
 
         const reasonsField = this.createOptionalField(violation, 'reasons', 'Причины', 'text');
+        const measuresField = this.createOptionalField(violation, 'measures', 'Принятые меры', 'text');
         const consequencesField = this.createOptionalField(violation, 'consequences', 'Последствия', 'text');
         const responsibleField = this.createOptionalField(violation, 'responsible', 'Ответственные', 'text');
         optionalFieldsContainer.appendChild(reasonsField);
+        optionalFieldsContainer.appendChild(measuresField);
         optionalFieldsContainer.appendChild(consequencesField);
         optionalFieldsContainer.appendChild(responsibleField);
 
@@ -212,6 +214,7 @@ export class ViolationManager {
                 violated: violatedTextarea,
                 established: establishedTextarea,
                 reasons: reasonsField,
+                measures: measuresField,
                 consequences: consequencesField,
                 responsible: responsibleField,
             });
@@ -277,6 +280,7 @@ export class ViolationManager {
         setPlain('violated', controls.violated, fields.violated);
         setPlain('established', controls.established, fields.established);
         setOptional('reasons', controls.reasons, fields.reasons);
+        setOptional('measures', controls.measures, fields.measures);
         setOptional('consequences', controls.consequences, fields.consequences);
         setOptional('responsible', controls.responsible, fields.responsible);
         PreviewManager.updateBlock('violation', violation.id);

@@ -148,9 +148,10 @@ underline}` **вырезан целиком** (директива владель
 | `established`         | str, default `""`                         | секция «Установлено»                                         |
 | `descriptionList`     | `ViolationDescriptionListSchema`          | `{enabled: bool, items: list[str]}`                          |
 | `additionalContent`   | `ViolationAdditionalContentSchema`        | `{enabled: bool, items: list[ViolationContentItemSchema]}`   |
-| `reasons`             | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
+| `reasons`             | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Причины»                  |
+| `measures`            | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Принятые меры» (под «Причинами») |
+| `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Последствия»              |
+| `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Ответственные»            |
 
 `ViolationContentItemSchema` (`act_content.py::ViolationContentItemSchema`) — элемент additionalContent:
 

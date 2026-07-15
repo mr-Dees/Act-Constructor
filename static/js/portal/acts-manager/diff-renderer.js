@@ -232,14 +232,14 @@ export class DiffRenderer {
 
         const fieldLabels = {
             violated: 'Нарушено', established: 'Установлено',
-            reasons: 'Причины', consequences: 'Последствия',
+            reasons: 'Причины', measures: 'Принятые меры', consequences: 'Последствия',
             responsible: 'Ответственные',
         };
 
         const data = violDiff.newData || violDiff.oldData;
         if (!data) return;
 
-        const fields = ['violated', 'established', 'reasons', 'consequences', 'responsible'];
+        const fields = ['violated', 'established', 'reasons', 'measures', 'consequences', 'responsible'];
 
         for (const field of fields) {
             const val = this._getViolFieldValue(data, field);

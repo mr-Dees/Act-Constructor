@@ -67,6 +67,7 @@ export function collectViolationLines(violation) {
 
     const optionalFields = [
         ['reasons', 'Причины'],
+        ['measures', 'Принятые меры'],
         ['consequences', 'Последствия'],
         ['responsible', 'Ответственный за решение проблем'],
     ];

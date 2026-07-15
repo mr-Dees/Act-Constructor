@@ -315,6 +315,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     description_list JSONB,
     additional_content JSONB,
     reasons JSONB,
+    measures JSONB,
     consequences JSONB,
     responsible JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -328,6 +329,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
         CHECK (additional_content IS NULL OR jsonb_typeof(additional_content) = 'object'),
     CONSTRAINT check_reasons_is_object_or_null
         CHECK (reasons IS NULL OR jsonb_typeof(reasons) = 'object'),
+    CONSTRAINT check_measures_is_object_or_null
+        CHECK (measures IS NULL OR jsonb_typeof(measures) = 'object'),
     CONSTRAINT check_consequences_is_object_or_null
         CHECK (consequences IS NULL OR jsonb_typeof(consequences) = 'object'),
     CONSTRAINT check_responsible_is_object_or_null
@@ -349,6 +352,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.established IS 'Что уст�
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.description_list IS 'JSONB объект с полями enabled и items для списка описаний';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.additional_content IS 'JSONB объект с полями enabled и items для дополнительного содержимого';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.reasons IS 'JSONB объект с полями enabled и content для причин нарушения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.measures IS 'JSONB объект с полями enabled и content для принятых мер';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.consequences IS 'JSONB объект с полями enabled и content для последствий нарушения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.responsible IS 'JSONB объект с полями enabled и content для ответственных лиц';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.created_at IS 'Дата и время создания записи о нарушении';

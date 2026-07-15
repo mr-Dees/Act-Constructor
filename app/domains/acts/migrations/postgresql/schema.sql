@@ -231,6 +231,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     description_list JSONB,
     additional_content JSONB,
     reasons JSONB,
+    measures JSONB,
     consequences JSONB,
     responsible JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -247,6 +248,9 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     -- (ViolationOptionalFieldSchema). «Прод = контракт» — dev не строже прода.
     CONSTRAINT check_reasons_is_object_or_null
         CHECK (reasons IS NULL OR jsonb_typeof(reasons) = 'object'),
+
+    CONSTRAINT check_measures_is_object_or_null
+        CHECK (measures IS NULL OR jsonb_typeof(measures) = 'object'),
 
     CONSTRAINT check_consequences_is_object_or_null
         CHECK (consequences IS NULL OR jsonb_typeof(consequences) = 'object'),
@@ -526,7 +530,7 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_grid_data
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}violations_content
     ON {SCHEMA}.{PREFIX}act_violations USING GIN(
         description_list, additional_content, reasons,
-        consequences, responsible
+        measures, consequences, responsible
     );
 
 -- ============================================================================

@@ -95,6 +95,7 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
 
     for label, field in [
         ("Причины:", violation.reasons),
+        ("Принятые меры:", violation.measures),
         ("Последствия:", violation.consequences),
         ("Ответственный:", violation.responsible),
     ]:

@@ -179,7 +179,7 @@ export class DiffEngine {
     static _diffViolations(oldViols, newViols) {
         const result = {};
         const allKeys = new Set([...Object.keys(oldViols), ...Object.keys(newViols)]);
-        const fields = ['violated', 'established', 'reasons', 'consequences', 'responsible'];
+        const fields = ['violated', 'established', 'reasons', 'measures', 'consequences', 'responsible'];
 
         for (const id of allKeys) {
             const oldV = oldViols[id];

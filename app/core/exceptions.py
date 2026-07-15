@@ -96,6 +96,9 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_reasons_is_object_or_null": (
         "Поле reasons должно быть объектом JSON с полями enabled и content, или отсутствовать"
     ),
+    "check_measures_is_object_or_null": (
+        "Поле measures должно быть объектом JSON с полями enabled и content, или отсутствовать"
+    ),
     "check_consequences_is_object_or_null": (
         "Поле consequences должно быть объектом JSON с полями enabled и content, или отсутствовать"
     ),

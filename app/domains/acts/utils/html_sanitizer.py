@@ -4,7 +4,7 @@
 Защищает от XSS: textBlock.content, violation.violated/established,
 violation.descriptionList.items[], violation.additionalContent.items[]
 (.content как HTML; .caption/.filename как plain), violation.{reasons,
-consequences, responsible}.content и узлы дерева.
+measures, consequences, responsible}.content и узлы дерева.
 
 Whitelist тегов/атрибутов согласован с фронтовым рендерингом через
 innerHTML. Опасные теги (script/iframe/svg/object) и on*-обработчики
@@ -67,7 +67,7 @@ ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 # восстановления версий) читают эти кортежи — список полей не разъезжается
 # (пин — тест паритета test_sanitizer_field_parity).
 _VIOLATION_HTML_FIELDS = ("violated", "established")
-_VIOLATION_OPTIONAL_HTML_FIELDS = ("reasons", "consequences", "responsible")
+_VIOLATION_OPTIONAL_HTML_FIELDS = ("reasons", "measures", "consequences", "responsible")
 
 
 def _acts_settings():
@@ -373,7 +373,7 @@ def sanitize_act_data(data) -> None:
     - violations[*].descriptionList.items[*] (plain: теги выкусываются)
     - violations[*].additionalContent.items[*].content
     - violations[*].additionalContent.items[*].caption / filename (plain)
-    - violations[*].{reasons, consequences, responsible}.content
+    - violations[*].{reasons, measures, consequences, responsible}.content
     - tree nodes[*].content (рекурсивно — узлы могут содержать HTML)
 
     url элементов additionalContent СОЗНАТЕЛЬНО не чистится bleach'ем:

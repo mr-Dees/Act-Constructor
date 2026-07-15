@@ -5,7 +5,6 @@
  * ресайз, Esc, персист позиции/размера), но другой поток: аналитик вставляет
  * свободный текст → «Формализовать» → превью извлечённых полей → «Применить»
  * раскладывает их по полям карточки нарушения (что LLM не нашла — поле пустое).
- * Поле «Принятые меры» показывается справочно, но в карточку не пишется.
  *
  * Открывается кнопкой на панели нарушения; заголовок — «Корректор отклонения/
  * проблемы по пункту 5.*». Применение делает callback `apply(fields)`, который
@@ -17,13 +16,14 @@ import { makeResizablePanel } from '../../shared/resizable-panel.js';
 import { makeDraggablePanel } from '../../shared/draggable-panel.js';
 import { formalizeViolation } from './text-actions-client.js';
 
-// Поля превью в порядке карточки. measures — отдельно, справочно.
+// Поля превью в порядке карточки (Принятые меры — под Причинами, как в форме).
 const _PREVIEW_FIELDS = [
     ['violated', 'Нарушено'],
     ['established', 'Установлено'],
     ['reasons', 'Причины'],
-    ['responsible', 'Ответственные'],
+    ['measures', 'Принятые меры'],
     ['consequences', 'Последствия'],
+    ['responsible', 'Ответственные'],
 ];
 
 export const FormalizerPopover = {
@@ -165,13 +165,6 @@ export const FormalizerPopover = {
             row.appendChild(lab);
             row.appendChild(val);
             this._els.preview.appendChild(row);
-        }
-        const measures = (fields.measures || '').trim();
-        if (measures) {
-            const note = document.createElement('div');
-            note.className = 'formalizer-measures';
-            note.textContent = `Принятые меры (не записывается в карточку): ${measures}`;
-            this._els.preview.appendChild(note);
         }
     },
 
