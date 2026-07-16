@@ -4,7 +4,6 @@ import json
 import re
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 # Обёртка ``` … ``` вокруг ВСЕГО ответа (модель завернула текст в код-блок).
 _CODE_FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n```\s*$", re.DOTALL)
@@ -48,7 +47,7 @@ def clean_text_response(text: str) -> str:
     return cleaned.strip()
 
 
-async def run_text_call(
+async def _raw_call(
     client,
     *,
     model: str,
@@ -58,12 +57,11 @@ async def run_text_call(
     retry_call,
     timeout: float,
 ) -> str:
-    """One-shot вызов LLM ``text → text`` (Фича «Корректор»).
+    """Общий транспорт one-shot вызова LLM — возвращает сырой ``content``.
 
     ``retry_call`` — обёртка ``retry_on_transient`` над вызываемым; она сама
-    ретраит transient-ошибки, ``timeout`` ограничивает каждую попытку. Ответ
-    чистится ``clean_text_response`` (рассуждения/обёртки/преамбулы — как в
-    формализаторе, чтобы диф не пачкали рассуждающие провайдеры).
+    ретраит transient-ошибки, ``timeout`` ограничивает каждую попытку. Пост-
+    обработку (очистка текста / разбор JSON) делают публичные обёртки.
     """
     wrapped = retry_call(client.chat.completions.create)
     resp = await wrapped(
@@ -76,22 +74,59 @@ async def run_text_call(
             {"role": "user", "content": user},
         ],
     )
-    content = resp.choices[0].message.content or ""
+    return resp.choices[0].message.content or ""
+
+
+async def run_text_call(
+    client,
+    *,
+    model: str,
+    temperature: float,
+    system: str,
+    user: str,
+    retry_call,
+    timeout: float,
+) -> str:
+    """One-shot вызов LLM ``text → text`` (Фича «Корректор»).
+
+    Ответ чистится ``clean_text_response`` (рассуждения/обёртки/преамбулы — как в
+    формализаторе, чтобы диф не пачкали рассуждающие провайдеры).
+    """
+    content = await _raw_call(
+        client,
+        model=model,
+        temperature=temperature,
+        system=system,
+        user=user,
+        retry_call=retry_call,
+        timeout=timeout,
+    )
     return clean_text_response(content)
 
 
 def extract_json(text: str) -> dict:
     """Достаёт JSON-объект из ответа LLM (Фича «Формализация»).
 
-    Срезает ``<think>…</think>`` и берёт первый ``{…}``-блок — провайдер-
-    агностично защищает разбор от протёкших рассуждений и префиксов-пояснений.
-    Кидает ``ValueError``/``json.JSONDecodeError`` на отсутствующий/битый объект.
+    Срезает ``<think>…</think>`` и разбирает первый сбалансированный ``{…}``-блок
+    через ``raw_decode`` (хвост после объекта игнорируется) — провайдер-агностично
+    защищает разбор от протёкших рассуждений, префиксов-пояснений и лишних скобок
+    в прозе вокруг JSON. Кандидаты (позиции ``{``) перебираются по очереди: скобки
+    из текста (напр. ``{данных}``) не парсятся как JSON и пропускаются. Кидает
+    ``ValueError`` на отсутствующий/битый объект.
     """
     cleaned = strip_think(text or "")
-    m = _JSON_OBJ_RE.search(cleaned)
-    if not m:
-        raise ValueError("В ответе LLM не найден JSON-объект")
-    return json.loads(m.group(0))
+    decoder = json.JSONDecoder()
+    idx = cleaned.find("{")
+    while idx != -1:
+        try:
+            obj, _ = decoder.raw_decode(cleaned, idx)
+        except json.JSONDecodeError:
+            idx = cleaned.find("{", idx + 1)
+            continue
+        if isinstance(obj, dict):
+            return obj
+        idx = cleaned.find("{", idx + 1)
+    raise ValueError("В ответе LLM не найден JSON-объект")
 
 
 async def run_json_call(
@@ -110,16 +145,13 @@ async def run_json_call(
     (см. ``extract_json``). Провайдер-специфичный ``response_format`` НЕ
     используется: структуру задаёт промпт, надёжность даёт разбор ответа.
     """
-    wrapped = retry_call(client.chat.completions.create)
-    resp = await wrapped(
+    content = await _raw_call(
+        client,
         model=model,
         temperature=temperature,
-        stream=False,
+        system=system,
+        user=user,
+        retry_call=retry_call,
         timeout=timeout,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
     )
-    content = resp.choices[0].message.content or ""
     return extract_json(content)

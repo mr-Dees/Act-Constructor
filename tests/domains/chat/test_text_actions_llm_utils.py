@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock
 
+import pytest
+
 from app.domains.chat.services.text_actions import llm_utils as U
 
 
@@ -43,6 +45,41 @@ def test_clean_text_response_keeps_inline_label_as_real_content():
 
 def test_clean_text_response_noop_on_clean_text():
     assert U.clean_text_response("В акте установлено нарушение.") == "В акте установлено нарушение."
+
+
+def test_extract_json_plain_object():
+    assert U.extract_json('{"a": 1, "b": "x"}') == {"a": 1, "b": "x"}
+
+
+def test_extract_json_ignores_prose_and_stray_braces_around():
+    # Лишние скобки в прозе до и после JSON не ломают разбор.
+    raw = 'Анализ {данных}: {"a": 1} см. {3}'
+    assert U.extract_json(raw) == {"a": 1}
+
+
+def test_extract_json_with_nested_braces():
+    raw = 'Результат: {"outer": {"inner": [1, 2]}, "k": "v"} — конец.'
+    assert U.extract_json(raw) == {"outer": {"inner": [1, 2]}, "k": "v"}
+
+
+def test_extract_json_inside_code_fence():
+    raw = 'Вот ответ:\n```json\n{"norm_doc": "п. 5", "essence": "суть"}\n```'
+    assert U.extract_json(raw) == {"norm_doc": "п. 5", "essence": "суть"}
+
+
+def test_extract_json_strips_think_before_parsing():
+    raw = '<think>прикину структуру {x}</think>{"causes": ["c1"]}'
+    assert U.extract_json(raw) == {"causes": ["c1"]}
+
+
+def test_extract_json_raises_when_no_object():
+    with pytest.raises(ValueError):
+        U.extract_json("никакого json тут нет")
+
+
+def test_extract_json_raises_on_broken_object():
+    with pytest.raises(ValueError):
+        U.extract_json('начало {"a": } конец')
 
 
 async def test_run_text_call_returns_content_and_passes_params():
