@@ -401,23 +401,22 @@ class TestViolationAdditionalContentItemsLimit:
 
 
 class TestViolationContentItemLegacyOrder:
-    """Директива владельца: поле order вырезано из модели (#24).
+    """Директива владельца 1B: шим снят, обратная совместимость не нужна.
 
-    Порядок элемента задаётся позицией в списке items, order был write-only
-    дублем (фронт писал, никто не читал). Старые сохранённые акты хранят его
-    в content-JSON — загрузка/PUT такого акта не должна падать при
-    extra="forbid" (before-валидатор молча выкидывает ключ).
+    Поле order вырезано из модели (#24); порядок элемента задаётся позицией в
+    списке items. Прежний before-валидатор молча выкидывал ключ ради restore
+    старых актов — снят. При extra="forbid" подача order теперь отвергается
+    (БД пересоздаётся с нуля, легаси-данных нет).
     """
 
-    def test_legacy_order_key_ignored(self):
-        item = ViolationContentItemSchema.model_validate({
-            "id": "i1", "type": "case", "content": "текст", "order": 3,
-        })
-        assert "order" not in item.model_dump()
-        assert item.content == "текст"
+    def test_legacy_order_key_rejected(self):
+        with pytest.raises(ValidationError, match="order"):
+            ViolationContentItemSchema.model_validate({
+                "id": "i1", "type": "case", "content": "текст", "order": 3,
+            })
 
     def test_other_unknown_field_still_rejected(self):
-        # extra="forbid" сохранён: выкидывается только известное легаси-поле.
+        # extra="forbid": любое незадекларированное поле отвергается.
         with pytest.raises(ValidationError, match="junk"):
             ViolationContentItemSchema(id="i1", type="case", junk=1)
 
@@ -426,25 +425,25 @@ class TestViolationContentItemLegacyOrder:
 
 
 class TestTextBlockLegacyFormatting:
-    """Директива владельца: объект formatting вырезан из модели.
+    """Директива владельца 1B: шим снят, обратная совместимость не нужна.
 
-    Старые акты хранят его в content-JSON — загрузка/PUT такого акта не должна
-    падать при extra="forbid" (before-валидатор молча выкидывает ключ).
+    Контейнерный объект formatting вырезан из модели. Прежний before-валидатор
+    молча выкидывал ключ ради restore старых актов — снят. При extra="forbid"
+    подача formatting теперь отвергается (БД пересоздаётся с нуля).
     """
 
-    def test_legacy_formatting_key_ignored(self):
-        tb = TextBlockSchema.model_validate({
-            "id": "b1", "nodeId": "n1", "content": "<p>текст</p>",
-            "formatting": {
-                "fontSize": 14, "alignment": "center",
-                "bold": True, "italic": False, "underline": False,
-            },
-        })
-        assert "formatting" not in tb.model_dump()
-        assert tb.content == "<p>текст</p>"
+    def test_legacy_formatting_key_rejected(self):
+        with pytest.raises(ValidationError, match="formatting"):
+            TextBlockSchema.model_validate({
+                "id": "b1", "nodeId": "n1", "content": "<p>текст</p>",
+                "formatting": {
+                    "fontSize": 14, "alignment": "center",
+                    "bold": True, "italic": False, "underline": False,
+                },
+            })
 
     def test_other_unknown_field_still_rejected(self):
-        # extra="forbid" сохранён: выкидывается только известное легаси-поле.
+        # extra="forbid": любое незадекларированное поле отвергается.
         with pytest.raises(ValidationError, match="junk"):
             TextBlockSchema(id="b1", nodeId="n1", junk=1)
 

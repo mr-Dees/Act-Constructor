@@ -133,8 +133,9 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 Прежний контейнерный объект `formatting {fontSize, alignment, bold, italic,
 underline}` **вырезан целиком** (директива владельца): он писался один раз
 при создании блока и правками не обновлялся — всё форматирование живёт в
-`content`. `model_validator` `_drop_legacy_formatting` молча отбрасывает поле
-из данных старых актов на загрузке; базовый размер шрифта — единый дефолт
+`content`. При `extra="forbid"` подача поля `formatting` теперь **отвергается**
+(шим-валидатор `_drop_legacy_formatting` снят — обратная совместимость не
+нужна, БД пересоздаётся с нуля); базовый размер шрифта — единый дефолт
 настроек (`ACTS__TEXTBLOCKS__FONT_SIZE_*`, экранные 16px → 12pt ×0.75), не
 хранится per-block. Deep-dive — [`textblock-editor-architecture.md`](textblock-editor-architecture.md) §2/§10.
 

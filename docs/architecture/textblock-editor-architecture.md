@@ -87,9 +87,10 @@ CSS — `static/css/constructor/textblock/{textblock-content,textblock-links-foo
 единственный раз при создании блока и правками не обновлялся, а превью и
 DOCX читали его как «базу», в которую никто не писал, — отсюда рос класс
 находок TB-1/EXP-2 (выравнивание и размер терялись на сохранении). Схема
-`TextBlockSchema` (`act_content.py`) больше не содержит поля `formatting`,
-а `model_validator` `_drop_legacy_formatting` молча отбрасывает его из
-данных старых актов на загрузке (обратная совместимость не требуется).
+`TextBlockSchema` (`act_content.py`) больше не содержит поля `formatting`;
+при `extra="forbid"` его наличие теперь **отвергается** (шим-валидатор
+`_drop_legacy_formatting` снят — обратная совместимость не нужна, БД
+пересоздаётся с нуля).
 На **уже развёрнутых** БД колонку `formatting` нужно снять вручную
 (`create_tables_if_not_exist` не делает ALTER): `ALTER TABLE ... DROP COLUMN
 IF EXISTS formatting` (PG и GP 6.x = PostgreSQL 9.4 — синтаксис общий,

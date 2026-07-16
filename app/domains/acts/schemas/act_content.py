@@ -371,21 +371,6 @@ class TextBlockSchema(BaseModel):
     nodeId: str = Field(description="ID узла дерева")
     content: str = Field(default="", description="HTML-содержимое")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_legacy_formatting(cls, data):
-        """Отбрасывает устаревшее поле formatting (директива владельца).
-
-        Контейнерные стили (размер/выравнивание) больше не хранятся отдельно.
-        Поле удалено из схемы, но в ранее сохранённых актах ещё встречается — при
-        extra="forbid" его наличие уронило бы restore/PUT такого акта
-        (ActDataSchema пересобирается из stored-данных). Молча выкидываем;
-        новые сохранения его не пишут.
-        """
-        if isinstance(data, dict):
-            data.pop("formatting", None)
-        return data
-
 
 class ViolationDescriptionListSchema(BaseModel):
     """Схема списка описаний нарушения."""
@@ -433,20 +418,6 @@ class ViolationContentItemSchema(BaseModel):
         default=0, ge=0, le=100,
         description="Ширина изображения, % полезной ширины страницы (0 — авто)",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_legacy_order(cls, data):
-        """Отбрасывает устаревшее поле order (директива владельца, #24).
-
-        Порядок элемента задаётся позицией в списке items, order был
-        write-only дублем (фронт писал, никто не читал). В ранее сохранённых
-        актах ещё встречается — при extra="forbid" его наличие уронило бы
-        restore/PUT такого акта. Молча выкидываем; новые сохранения его не пишут.
-        """
-        if isinstance(data, dict):
-            data.pop("order", None)
-        return data
 
     @model_validator(mode="after")
     def validate_image_url(self) -> "ViolationContentItemSchema":
