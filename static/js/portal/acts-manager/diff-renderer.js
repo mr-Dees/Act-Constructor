@@ -168,13 +168,7 @@ export class DiffRenderer {
                 const strong = document.createElement('strong');
                 strong.textContent = `${labels[field] || field}: `;
                 span.appendChild(strong);
-                const del = document.createElement('del');
-                del.textContent = String(ch.old ?? '') || '∅';
-                span.appendChild(del);
-                span.appendChild(document.createTextNode(' → '));
-                const ins = document.createElement('ins');
-                ins.textContent = String(ch.new ?? '') || '∅';
-                span.appendChild(ins);
+                this.appendOldNewPair(span, ch.old, ch.new, { placeholder: '∅' });
                 el.appendChild(span);
             }
         }
@@ -184,6 +178,28 @@ export class DiffRenderer {
             badge.textContent = 'перемещён';
             el.appendChild(badge);
         }
+    }
+
+    /**
+     * Добавляет к parent пару «старое → новое»: <del>old</del> → <ins>new</ins>.
+     * Единый сборщик для бейджей атрибутов узла, полей фактуры и атрибутов
+     * картинки. Варианты — через opts:
+     *  - opts.placeholder — заглушка для пустого значения (например '∅');
+     *  - opts.conditionalOld — не выводить <del> и стрелку, если старое пусто.
+     */
+    static appendOldNewPair(parent, oldVal, newVal, opts = {}) {
+        const { placeholder = '', conditionalOld = false } = opts;
+        const oldText = oldVal == null ? '' : String(oldVal);
+        const newText = newVal == null ? '' : String(newVal);
+        if (!conditionalOld || oldText) {
+            const del = document.createElement('del');
+            del.textContent = oldText || placeholder;
+            parent.appendChild(del);
+            parent.appendChild(document.createTextNode(' → '));
+        }
+        const ins = document.createElement('ins');
+        ins.textContent = newText || placeholder;
+        parent.appendChild(ins);
     }
 
     /**
@@ -439,19 +455,16 @@ export class DiffRenderer {
                 strong.textContent = `${INVOICE_FIELD_LABELS[field]}: `;
                 fieldDiv.appendChild(strong);
 
-                if (changed) {
+                const oldText = changed ? this._invoiceFieldText(invDiff.oldData, field) : '';
+                const newText = changed ? this._invoiceFieldText(invDiff.newData, field) : '';
+                // Фантом: движок пометил поле изменённым по служебному атрибуту,
+                // а видимый текст (коды) не изменился → показываем как обычное
+                // значение, без del/ins-бейджа.
+                if (changed && oldText !== newText) {
                     fieldDiv.classList.add('diff-field-changed');
-                    const oldText = this._invoiceFieldText(invDiff.oldData, field);
-                    const newText = this._invoiceFieldText(invDiff.newData, field);
-                    if (oldText) {
-                        const del = document.createElement('del');
-                        del.textContent = oldText;
-                        fieldDiv.appendChild(del);
-                        fieldDiv.appendChild(document.createTextNode(' → '));
-                    }
-                    const ins = document.createElement('ins');
-                    ins.textContent = newText || '∅';
-                    fieldDiv.appendChild(ins);
+                    this.appendOldNewPair(fieldDiv, oldText, newText, {
+                        placeholder: '∅', conditionalOld: true,
+                    });
                 } else {
                     fieldDiv.appendChild(document.createTextNode(text));
                 }
@@ -629,13 +642,7 @@ export class DiffRenderer {
             const strong = document.createElement('strong');
             strong.textContent = `${attrLabels[key]}: `;
             line.appendChild(strong);
-            const del = document.createElement('del');
-            del.textContent = String(fields[key].old ?? '');
-            line.appendChild(del);
-            line.appendChild(document.createTextNode(' → '));
-            const ins = document.createElement('ins');
-            ins.textContent = String(fields[key].new ?? '');
-            line.appendChild(ins);
+            this.appendOldNewPair(line, fields[key].old, fields[key].new);
             itemDiv.appendChild(line);
         }
     }

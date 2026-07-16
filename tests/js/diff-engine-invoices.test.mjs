@@ -94,6 +94,33 @@ test('одинаковые metrics по значению → unchanged', () => {
     assert.equal(d.status, 'unchanged');
 });
 
+// --- фантомный дифф: сравнение по ВИДИМЫМ кодам (#8) -------------------------
+
+test('metrics: одинаковый код, разный служебный атрибут → unchanged (фантом погашен)', () => {
+    const d = diffOne(
+        inv({ metrics: [{ metric_code: 'ФР00001', metric_name: 'старое имя' }] }),
+        inv({ metrics: [{ metric_code: 'ФР00001', metric_name: 'новое имя' }] }),
+    );
+    assert.equal(d.status, 'unchanged');
+});
+
+test('metrics: разный код → modified (реальная смена видима)', () => {
+    const d = diffOne(
+        inv({ metrics: [{ metric_code: 'ФР00001' }] }),
+        inv({ metrics: [{ metric_code: 'ФР00002' }] }),
+    );
+    assert.equal(d.status, 'modified');
+    assert.deepEqual(d.fieldDiffs.metrics, { old: 'ФР00001', new: 'ФР00002' });
+});
+
+test('process: одинаковый код, разный служебный атрибут → unchanged', () => {
+    const d = diffOne(
+        inv({ process: [{ process_code: 'П6152', process_name: 'A' }] }),
+        inv({ process: [{ process_code: 'П6152', process_name: 'B' }] }),
+    );
+    assert.equal(d.status, 'unchanged');
+});
+
 // --- compute-интеграция -----------------------------------------------------
 
 test('compute: изменение фактуры отражается в hasChanges и invoices', () => {
