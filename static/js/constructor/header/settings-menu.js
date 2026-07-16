@@ -274,9 +274,7 @@ export class SettingsMenuManager {
         const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
         for (const btn of btns) {
             btn.addEventListener('click', () => {
-                const val = this._validOarbModes.includes(btn.dataset.oarbModeOption)
-                    ? btn.dataset.oarbModeOption
-                    : 'off';
+                const val = btn.dataset.oarbModeOption;
                 try {
                     localStorage.setItem(this._oarbModeKey, val);
                 } catch (e) {
@@ -316,9 +314,7 @@ export class SettingsMenuManager {
         const btns = document.querySelectorAll('[data-corrector-diff-mode] [data-corrector-diff-option]');
         for (const btn of btns) {
             btn.addEventListener('click', () => {
-                const val = this._validCorrectorDiffModes.includes(btn.dataset.correctorDiffOption)
-                    ? btn.dataset.correctorDiffOption
-                    : 'inline';
+                const val = btn.dataset.correctorDiffOption;
                 try {
                     localStorage.setItem(this._correctorDiffModeKey, val);
                 } catch (e) {
