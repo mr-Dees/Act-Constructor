@@ -11,6 +11,8 @@ import assert from 'node:assert/strict';
 import {
     detectImageMagic,
     sniffImageMagic,
+    DEFAULT_ALLOWED_IMAGE_MIME,
+    RECOGNIZED_IMAGE_FORMATS,
 } from '../../static/js/constructor/violation/violation-file-reading.js';
 
 /** Файл-стаб с рабочим slice().arrayBuffer() поверх заданных байтов. */
@@ -60,4 +62,25 @@ test('sniffImageMagic: тип не в allowed-списке отклоняетс�
 
 test('sniffImageMagic: сбой чтения (нет slice) → false, без исключения', async () => {
     assert.equal(await sniffImageMagic({ type: 'image/png' }), false);
+});
+
+// --- производные списки (4A: sniffer — единый источник истины) ---
+
+test('DEFAULT_ALLOWED_IMAGE_MIME производен от сигнатур sniffer\'а (3 формата, без webp)', () => {
+    // Список allowed-типов и то, что sniffer умеет подтвердить, не могут разъехаться.
+    assert.deepEqual(DEFAULT_ALLOWED_IMAGE_MIME, ['image/png', 'image/jpeg', 'image/gif']);
+    // Каждый allowed-тип реально распознаётся sniffer'ом (нет типа без сигнатуры).
+    for (const mime of DEFAULT_ALLOWED_IMAGE_MIME) {
+        assert.equal(
+            detectImageMagic(mime === 'image/png' ? [0x89, 0x50, 0x4E, 0x47]
+                : mime === 'image/jpeg' ? [0xFF, 0xD8, 0xFF]
+                : [0x47, 0x49, 0x46, 0x38]),
+            mime,
+        );
+    }
+    assert.equal(DEFAULT_ALLOWED_IMAGE_MIME.includes('image/webp'), false);
+});
+
+test('RECOGNIZED_IMAGE_FORMATS — человекочитаемые ярлыки, производные от сигнатур', () => {
+    assert.deepEqual(RECOGNIZED_IMAGE_FORMATS, ['PNG', 'JPEG', 'GIF']);
 });

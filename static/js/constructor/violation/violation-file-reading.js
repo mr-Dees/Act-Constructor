@@ -22,15 +22,31 @@ export function readFileAsDataUrl(file) {
     });
 }
 
-/** Разрешённые по умолчанию типы картинок (зеркало DEFAULT_IMAGE_LIMITS). */
-const DEFAULT_ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif'];
-
-/** Магические сигнатуры первых байтов файла → MIME. */
+/**
+ * Магические сигнатуры первых байтов файла → MIME.
+ *
+ * Этот набор — ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ для того, что настройка вправе разрешать:
+ * sniffer может подтвердить только формат, чью сигнатуру знает, поэтому
+ * DEFAULT_ALLOWED_IMAGE_MIME производится отсюда — список и sniffer не разъедутся.
+ * webp сознательно НЕ включён — зеркалит бэк: python-docx без Pillow не встраивает
+ * webp (app/domains/acts/settings.py:113).
+ */
 const IMAGE_MAGIC_SIGNATURES = [
     { mime: 'image/png', bytes: [0x89, 0x50, 0x4E, 0x47] },
     { mime: 'image/jpeg', bytes: [0xFF, 0xD8, 0xFF] },
     { mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] }, // GIF87a / GIF89a
 ];
+
+/** Разрешённые по умолчанию типы картинок — производны от IMAGE_MAGIC_SIGNATURES. */
+export const DEFAULT_ALLOWED_IMAGE_MIME = IMAGE_MAGIC_SIGNATURES.map((s) => s.mime);
+
+/**
+ * Человекочитаемые ярлыки распознаваемых форматов (PNG/JPEG/GIF) — производны от
+ * IMAGE_MAGIC_SIGNATURES. Для честных сообщений об отклонении файла (не хардкод).
+ */
+export const RECOGNIZED_IMAGE_FORMATS = IMAGE_MAGIC_SIGNATURES.map(
+    (s) => s.mime.replace('image/', '').toUpperCase(),
+);
 
 /**
  * Определяет MIME картинки по первым байтам (магическая сигнатура).

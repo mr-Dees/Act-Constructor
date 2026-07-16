@@ -269,14 +269,16 @@ export class ViolationManager {
         const setPlain = (name, textarea, value) => {
             const v = (value || '').trim();
             if (!v) return;                 // не извлечено — не затираем существующее
-            violation[name] = v;
+            // Запись только через setViolationField — единственную защищённую точку
+            // (requireWrite-guard + превью); прямая запись миновала бы её.
+            this.setViolationField(violation, name, v);
             if (textarea) textarea.value = v;
         };
         const setOptional = (name, container, value) => {
             const v = (value || '').trim();
             if (!v) return;
-            violation[name].enabled = true;
-            violation[name].content = v;
+            this.setViolationField(violation, `${name}.enabled`, true);
+            this.setViolationField(violation, `${name}.content`, v);
             const cb = container.querySelector('.violation-field-toggle input[type="checkbox"]');
             const content = container.querySelector('.violation-field-content');
             const ta = container.querySelector('.violation-field-content textarea');
@@ -414,7 +416,7 @@ export class ViolationManager {
 
             if (!isReadOnly) {
                 addButton.addEventListener('click', () => {
-                    if (this.addViolationListItem(violation)) {
+                    if (this.addViolationListItem(violation, fieldName)) {
                         this.renderList(listContainer, violation, fieldName, isReadOnly);
                     }
                 });
@@ -461,7 +463,10 @@ export class ViolationManager {
             const itemContainer = document.createElement('div');
             itemContainer.className = 'violation-list-item';
             // Подсветка пустого пункта (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
-            itemContainer.classList.toggle('violation-list-item--empty', !item.trim());
+            // String(...) — страховка от не-строкового элемента ([null]/число из
+            // легаси/битого акта): нормализатор дозаполняет ключи, но не приводит
+            // типы внутри items, иначе .trim() кинул бы TypeError и уронил рендер карточки.
+            itemContainer.classList.toggle('violation-list-item--empty', !String(item).trim());
 
             const input = document.createElement('input');
             input.type = 'text';
@@ -477,7 +482,7 @@ export class ViolationManager {
 
                 // Обновляем массив при вводе
                 input.addEventListener('input', () => {
-                    this.setViolationListItem(violation, index, input.value);
+                    this.setViolationListItem(violation, fieldName, index, input.value);
                     itemContainer.classList.toggle('violation-list-item--empty', !input.value.trim());
                 });
 
@@ -492,7 +497,7 @@ export class ViolationManager {
                         e.preventDefault();
                         input.value = originalValue;
                         violation[fieldName].items[index] = originalValue;
-                        itemContainer.classList.toggle('violation-list-item--empty', !originalValue.trim());
+                        itemContainer.classList.toggle('violation-list-item--empty', !String(originalValue).trim());
                         input.blur();
                         PreviewManager.updateBlock('violation', violation.id);
                     }
@@ -512,7 +517,7 @@ export class ViolationManager {
 
             if (!isReadOnly) {
                 deleteBtn.addEventListener('click', () => {
-                    if (this.removeViolationListItem(violation, index)) {
+                    if (this.removeViolationListItem(violation, fieldName, index)) {
                         this.renderList(container, violation, fieldName, isReadOnly);
                     }
                 });
