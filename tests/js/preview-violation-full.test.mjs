@@ -41,7 +41,6 @@ function renderImageStyle(imageItem) {
             reasons: { enabled: false, content: '' },
             consequences: { enabled: false, content: '' },
             responsible: { enabled: false, content: '' },
-            recommendations: { enabled: false, content: '' },
         });
     } finally {
         document.createElement = origCreate;
@@ -62,7 +61,6 @@ function makeViolation(overrides = {}) {
         reasons: { enabled: false, content: '' },
         consequences: { enabled: false, content: '' },
         responsible: { enabled: false, content: '' },
-        recommendations: { enabled: false, content: '' },
     }, overrides);
 }
 
@@ -193,7 +191,7 @@ test('image-элемент попадает в модель строк цели�
 test('опциональные поля выводятся полностью при enabled', () => {
     const lines = collectViolationLines(makeViolation({
         reasons: { enabled: true, content: LONG },
-        recommendations: { enabled: false, content: 'скрытая' },
+        consequences: { enabled: false, content: 'скрытая' },
     }));
     assert.equal(lines.find(l => l.label === 'Причины').text, LONG);
     assert.ok(!lines.some(l => (l.text || '').includes('скрытая')));

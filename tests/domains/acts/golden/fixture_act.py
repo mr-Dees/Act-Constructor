@@ -5,7 +5,7 @@
 (colSpan/rowSpan + spanOrigin), кастомные colWidths, спецсимволы в ячейках,
 текстблок с formatting и inline-разметкой (b/i/u/s, ссылка, сноска),
 нарушение со всеми полями (descriptionList, кейсы, freeText, картинка,
-причины/последствия/ответственные/рекомендации), пустая таблица и узел
+причины/последствия/ответственные), пустая таблица и узел
 type='item' с прикреплённой таблицей (известный кандидат на потерю в DOCX).
 
 Все пользовательские строки — УНИКАЛЬНЫЕ маркеры (префикс GOLDEN_), чтобы
@@ -40,9 +40,6 @@ MARKER_LINK_URL = "GOLDEN_LINK_URL"
 # Текст сноски текстблока (data-footnote-text): в DOCX — native footnote,
 # в MD/TXT атрибут вырезается вместе с тегом.
 MARKER_FOOTNOTE_TEXT = "GOLDEN_TB_FOOTNOTE_TEXT"
-
-# Рекомендации нарушения: в DOCX рендерятся, в MD/TXT ветки нет (ebe-8).
-MARKER_RECOMMENDATIONS = "GOLDEN_V_RECOMMENDATIONS"
 
 # Имя файла картинки: в MD/TXT — текстовый плейсхолдер, в DOCX картинка
 # встраивается байтами (имя файла не выводится — проверяется inline shape).
@@ -107,6 +104,7 @@ MARKERS_ALL_FORMATS = [
     "GOLDEN_V_CASE_2",
     "GOLDEN_V_FREETEXT",
     "GOLDEN_V_REASONS",
+    "GOLDEN_V_MEASURES",
     "GOLDEN_V_CONSEQUENCES",
     "GOLDEN_V_RESPONSIBLE",
     MARKER_IMG_CAPTION,
@@ -313,9 +311,9 @@ def build_golden_act_dict() -> dict:
                 ],
             },
             "reasons": {"enabled": True, "content": "GOLDEN_V_REASONS"},
+            "measures": {"enabled": True, "content": "GOLDEN_V_MEASURES"},
             "consequences": {"enabled": True, "content": "GOLDEN_V_CONSEQUENCES"},
             "responsible": {"enabled": True, "content": "GOLDEN_V_RESPONSIBLE"},
-            "recommendations": {"enabled": True, "content": MARKER_RECOMMENDATIONS},
         },
     }
 

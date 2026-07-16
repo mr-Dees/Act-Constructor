@@ -17,7 +17,7 @@
 | `act_tree`        | сам JSONB `tree_data`                                                       | сам корень                    |
 | `act_tables`      | сетки таблиц (`grid_data`), ширины колонок, флаги спец-таблиц                | `node.tableId`               |
 | `act_textblocks`  | HTML-контент текстовых блоков и базовое форматирование                       | `node.textBlockId`           |
-| `act_violations`  | поля нарушения (нарушено, установлено, причины, последствия, рекомендации…) | `node.violationId`           |
+| `act_violations`  | поля нарушения (нарушено, установлено, причины, последствия…) | `node.violationId`           |
 | `act_invoices`    | фактуры, прикреплённые к листьям раздела 5                                   | `node.invoice` + `node.id`   |
 | `act_directives`  | поручения по пунктам акта                                                    | `node_id`                    |
 | `acts`            | метаданные акта (КМ, СЗ, даты, блокировка, audit_act_id и т.д.)             | владелец всех остальных      |
@@ -133,8 +133,9 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 Прежний контейнерный объект `formatting {fontSize, alignment, bold, italic,
 underline}` **вырезан целиком** (директива владельца): он писался один раз
 при создании блока и правками не обновлялся — всё форматирование живёт в
-`content`. `model_validator` `_drop_legacy_formatting` молча отбрасывает поле
-из данных старых актов на загрузке; базовый размер шрифта — единый дефолт
+`content`. При `extra="forbid"` подача поля `formatting` теперь **отвергается**
+(шим-валидатор `_drop_legacy_formatting` снят — обратная совместимость не
+нужна, БД пересоздаётся с нуля); базовый размер шрифта — единый дефолт
 настроек (`ACTS__TEXTBLOCKS__FONT_SIZE_*`, экранные 16px → 12pt ×0.75), не
 хранится per-block. Deep-dive — [`textblock-editor-architecture.md`](textblock-editor-architecture.md) §2/§10.
 
@@ -148,10 +149,22 @@ underline}` **вырезан целиком** (директива владель
 | `established`         | str, default `""`                         | секция «Установлено»                                         |
 | `descriptionList`     | `ViolationDescriptionListSchema`          | `{enabled: bool, items: list[str]}`                          |
 | `additionalContent`   | `ViolationAdditionalContentSchema`        | `{enabled: bool, items: list[ViolationContentItemSchema]}`   |
-| `reasons`             | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
-| `recommendations`     | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}`                              |
+| `reasons`             | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Причины»                  |
+| `measures`            | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Принятые меры» (под «Причинами») |
+| `consequences`        | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Последствия»              |
+| `responsible`         | `ViolationOptionalFieldSchema`            | `{enabled: bool, content: str}` — «Ответственные»            |
+
+Текстовые поля нарушения (`violated`/`established`/`reasons`/`responsible`/
+`consequences`/`measures`) можно автозаполнить из свободного описания — кнопка
+«✨ Формализовать текст» на карточке нарушения зовёт формализатор
+(`app/domains/chat/services/text_actions/formalizer_service.py`, эндпоинт
+`POST /api/v1/chat/text-actions/formalize-violation`): 4 экстрактора D17 разбирают
+текст параллельно и раскладывают его по полям (что не извлеклось — поле пустое; уже
+заполненное поле пустым ответом не затирается). Заголовок панели подставляет реальный
+номер родительского пункта, свободный текст предзаполняется текущими полями карточки.
+Вторым этапом (по извлечённым полям) формализатор возвращает `recommendations` —
+дисплей-онли подсказки «чего не хватает в описании»: показываются в панели рядом с
+превью, но в карточку и экспорт НЕ пишутся (кнопка «Применить» их не трогает).
 
 `ViolationContentItemSchema` (`act_content.py::ViolationContentItemSchema`) — элемент additionalContent:
 

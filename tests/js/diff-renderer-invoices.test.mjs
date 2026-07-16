@@ -106,3 +106,103 @@ test('render: узел с изменённой фактурой рендерит
     };
     DiffRenderer.render({ innerHTML: '', classList: { toggle() {} }, appendChild() {} }, diffResult, true);
 });
+
+// --- recording-DOM: захват реального дерева del/ins --------------------------
+
+function makeRec(tag) {
+    const classes = new Set();
+    const el = {
+        tagName: tag, _text: '', children: [], style: {}, dataset: {},
+        classList: {
+            add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+            toggle() {}, contains: (c) => classes.has(c),
+        },
+        appendChild(c) { el.children.push(c); return c; },
+        setAttribute() {},
+    };
+    Object.defineProperty(el, 'textContent', {
+        get() { return el._text; }, set(v) { el._text = String(v); },
+    });
+    return el;
+}
+
+function withRecDom(fn) {
+    const origCreate = document.createElement;
+    const origText = document.createTextNode;
+    document.createElement = (tag) => makeRec(tag);
+    document.createTextNode = (t) => ({ nodeType: 3, textContent: String(t) });
+    try { return fn(); } finally {
+        document.createElement = origCreate;
+        document.createTextNode = origText;
+    }
+}
+
+function collect(el, tag, acc = []) {
+    if (!el || !el.children) return acc;
+    for (const c of el.children) {
+        if (c.tagName === tag) acc.push(c);
+        collect(c, tag, acc);
+    }
+    return acc;
+}
+
+// --- appendOldNewPair (#14 единый сборщик «было → стало») --------------------
+
+test('appendOldNewPair: placeholder ∅ для пустых старого и нового', () => {
+    withRecDom(() => {
+        const parent = document.createElement('span');
+        DiffRenderer.appendOldNewPair(parent, '', '', { placeholder: '∅' });
+        assert.equal(collect(parent, 'del')[0].textContent, '∅');
+        assert.equal(collect(parent, 'ins')[0].textContent, '∅');
+    });
+});
+
+test('appendOldNewPair: conditionalOld — пустое старое без <del> и стрелки', () => {
+    withRecDom(() => {
+        const parent = document.createElement('div');
+        DiffRenderer.appendOldNewPair(parent, '', 'новое', { placeholder: '∅', conditionalOld: true });
+        assert.equal(collect(parent, 'del').length, 0);
+        assert.equal(collect(parent, 'ins')[0].textContent, 'новое');
+        const arrows = parent.children.filter(c => c.nodeType === 3 && c.textContent === ' → ');
+        assert.equal(arrows.length, 0);
+    });
+});
+
+test('appendOldNewPair: без opts — значения как есть, без заглушки', () => {
+    withRecDom(() => {
+        const parent = document.createElement('div');
+        DiffRenderer.appendOldNewPair(parent, '10', '20');
+        assert.equal(collect(parent, 'del')[0].textContent, '10');
+        assert.equal(collect(parent, 'ins')[0].textContent, '20');
+    });
+});
+
+// --- _renderDiffInvoice: гашение фантомной смены (#8) ------------------------
+
+test('_renderDiffInvoice: фантомная metrics (коды равны) → без del/ins', () => {
+    withRecDom(() => {
+        const root = document.createElement('div');
+        DiffRenderer._renderDiffInvoice(root, {
+            status: 'modified',
+            oldData: inv({ metrics: [{ metric_code: 'ФР00001', metric_name: 'старое' }] }),
+            newData: inv({ metrics: [{ metric_code: 'ФР00001', metric_name: 'новое' }] }),
+            fieldDiffs: { metrics: { old: 'ФР00001', new: 'ФР00001' } },
+        });
+        assert.equal(collect(root, 'del').length, 0);
+        assert.equal(collect(root, 'ins').length, 0);
+    });
+});
+
+test('_renderDiffInvoice: реальная смена table_name → del/ins присутствуют', () => {
+    withRecDom(() => {
+        const root = document.createElement('div');
+        DiffRenderer._renderDiffInvoice(root, {
+            status: 'modified',
+            oldData: inv({ table_name: 't1' }),
+            newData: inv({ table_name: 't2' }),
+            fieldDiffs: { table_name: { old: 't1', new: 't2' } },
+        });
+        assert.ok(collect(root, 'del').some(d => d.textContent === 't1'));
+        assert.ok(collect(root, 'ins').some(i => i.textContent === 't2'));
+    });
+});

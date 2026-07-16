@@ -739,7 +739,6 @@ def _db_violation_row(**overrides) -> dict:
         "reasons": '{"enabled": false, "content": ""}',
         "consequences": '{"enabled": false, "content": ""}',
         "responsible": '{"enabled": false, "content": ""}',
-        "recommendations": '{"enabled": false, "content": ""}',
         "description_list": '{"enabled": false, "items": []}',
         "additional_content": '{"enabled": false, "items": []}',
     }

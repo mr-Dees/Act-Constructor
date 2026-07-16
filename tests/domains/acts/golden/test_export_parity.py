@@ -28,7 +28,6 @@ from tests.domains.acts.golden.fixture_act import (
     MARKER_FOOTNOTE_TEXT,
     MARKER_IMG_FILENAME,
     MARKER_LINK_URL,
-    MARKER_RECOMMENDATIONS,
     MARKERS_ALL_FORMATS,
     build_golden_act,
     build_golden_act_dict,
@@ -163,16 +162,6 @@ def test_docx_footnote_text_preserved(golden_docx):
 def test_docx_item_node_attached_table_rendered(golden_docx):
     """Узел type='item' с tableId: DOCX рендерит и пункт, и таблицу (как MD/TXT)."""
     assert MARKER_ATTACHED_TBL_CELL in _docx_body_text(golden_docx)
-
-
-def test_md_recommendations_rendered(golden_md):
-    """«Рекомендации» нарушения рендерятся в MD (ebe-8 закрыт)."""
-    assert MARKER_RECOMMENDATIONS in golden_md
-
-
-def test_txt_recommendations_rendered(golden_txt):
-    """«Рекомендации» нарушения рендерятся в TXT (ebe-8 закрыт)."""
-    assert MARKER_RECOMMENDATIONS in golden_txt
 
 
 def test_md_link_url_preserved(golden_md):

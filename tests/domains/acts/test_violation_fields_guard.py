@@ -60,9 +60,9 @@ class TestCanonicalLabels:
             "descriptionList": "",
             "additionalContent": "",
             "reasons": "Причины",
+            "measures": "Принятые меры",
             "consequences": "Последствия",
             "responsible": "Ответственные",
-            "recommendations": "Рекомендации",
         }
 
     def test_case_and_free_text_labels(self):
@@ -80,9 +80,9 @@ class TestKindSmallAndPreviewFlags:
             "descriptionList": ("list", True, False),
             "additionalContent": ("additional", True, False),
             "reasons": ("optional_text", False, True),
+            "measures": ("optional_text", False, True),
             "consequences": ("optional_text", False, True),
             "responsible": ("optional_text", False, True),
-            "recommendations": ("optional_text", False, True),
         }
         actual = {
             field.key: (field.kind, field.small, field.show_label_in_preview)

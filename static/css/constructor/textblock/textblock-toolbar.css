@@ -242,3 +242,346 @@
     height: var(--toolbar-count-height);
     margin-left: var(--spacing-xs);
 }
+
+/* Корректор — плавающая перетаскиваемая панель (базово слева вверху, как строка
+   поиска — справа). Перетаскивание за заголовок (makeDraggablePanel), ресайз за
+   грип в правом нижнем углу (makeResizablePanel). */
+.corrector-popover {
+    position: fixed;
+    top: calc(max(var(--header-height), var(--header-min-height)) + var(--toolbar-top-offset));
+    left: var(--spacing-lg);
+    z-index: var(--z-sticky-elevated);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    width: 440px;
+    max-width: 92vw;
+    max-height: 70vh;
+    padding: var(--spacing-sm);
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.corrector-popover.hidden {
+    display: none;
+}
+
+.corrector-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: var(--font-weight-semibold);
+    cursor: move;
+    user-select: none;
+}
+
+.corrector-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--font-size-md);
+    line-height: 1;
+    padding: 0 var(--spacing-xs);
+}
+
+.corrector-close:hover {
+    color: var(--primary);
+}
+
+/* Тумблер режимов обработки: «Исправить ошибки» / «Улучшить читаемость». */
+.corrector-modes {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.corrector-mode {
+    flex: 1 1 0;
+    background: transparent;
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-secondary);
+    transition: var(--transition-all);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.corrector-mode:hover {
+    background: var(--bg-secondary);
+    color: var(--primary);
+}
+
+.corrector-mode.active {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.corrector-body {
+    flex: 1 1 auto;
+    overflow: auto;
+    min-height: var(--spacing-xl);
+}
+
+/* Режимы «2 окна» / «3 окна» — колонки. */
+.corrector-panes {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+}
+
+.corrector-pane {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.corrector-pane + .corrector-pane {
+    border-left: var(--border-width-thin) solid var(--border);
+    padding-left: var(--spacing-sm);
+}
+
+.corrector-pane-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.corrector-warning {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+    background: var(--warning-subtle, rgba(245, 158, 11, 0.12));
+    border-radius: var(--radius-sm);
+    color: var(--warning, #b45309);
+    font-size: var(--font-size-xs);
+}
+
+.corrector-diff {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.corrector-diff ins {
+    background: var(--diff-ins-bg, rgba(46, 160, 67, 0.25));
+    text-decoration: none;
+}
+
+.corrector-diff del {
+    background: var(--diff-del-bg, rgba(248, 81, 73, 0.25));
+    text-decoration: line-through;
+}
+
+.corrector-status {
+    color: var(--text-secondary);
+    padding: var(--spacing-xs) 0;
+}
+
+.corrector-error {
+    color: var(--danger, #c0392b);
+}
+
+.corrector-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-xs);
+}
+
+.corrector-btn {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    transition: var(--transition-all);
+}
+
+.corrector-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, var(--bg-secondary));
+    color: var(--primary);
+}
+
+.corrector-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.corrector-accept {
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-color: var(--primary);
+}
+
+.corrector-accept:hover:not(:disabled) {
+    background: var(--primary-hover, var(--primary));
+    color: var(--text-on-primary);
+}
+
+.corrector-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    background: linear-gradient(-45deg,
+        transparent 0 40%,
+        var(--border) 40% 50%,
+        transparent 50% 70%,
+        var(--border) 70% 80%,
+        transparent 80%);
+}
+
+/* ── Панель-формализатор нарушения (тот же chrome, что у корректора) ── */
+.formalizer-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.formalizer-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+}
+
+.formalizer-source {
+    width: 100%;
+    resize: vertical;
+    min-height: 4.5rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    color: var(--input-text);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+}
+
+.formalizer-source:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+.formalizer-run {
+    align-self: flex-start;
+}
+
+.formalizer-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.formalizer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.formalizer-field-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.formalizer-field-value {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+}
+
+.formalizer-field-empty .formalizer-field-value {
+    color: var(--text-tertiary, var(--text-secondary));
+    font-style: italic;
+}
+
+/* Рекомендации D17 «чего не хватает» — дисплей-онли, в карточку/экспорт не идут. */
+.formalizer-recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    padding-top: var(--spacing-sm);
+    border-top: var(--border-width-thin) solid var(--input-border);
+}
+
+.formalizer-recommendations.hidden {
+    display: none;
+}
+
+.formalizer-recs-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.formalizer-recs-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.formalizer-recs-list li {
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+}
+
+/* После «Применить»: окно открыто, но виден только блок «чего не хватает». */
+.formalizer-popover.formalizer-applied .formalizer-hint,
+.formalizer-popover.formalizer-applied .formalizer-source,
+.formalizer-popover.formalizer-applied .formalizer-run,
+.formalizer-popover.formalizer-applied .formalizer-preview,
+.formalizer-popover.formalizer-applied .corrector-accept {
+    display: none;
+}
+
+/* Без превью сверху разделительная линия/отступ блока не нужны. */
+.formalizer-popover.formalizer-applied .formalizer-recommendations {
+    padding-top: 0;
+    border-top: none;
+}
+
+/* Кнопка формализации на панели нарушения. */
+.violation-formalize-bar {
+    display: flex;
+    margin-bottom: var(--spacing-sm);
+}
+
+.violation-formalize-btn {
+    background: var(--primary-subtle);
+    border: var(--border-width-thin) solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--primary);
+    transition: var(--transition-all);
+}
+
+.violation-formalize-btn:hover {
+    background: var(--primary);
+    color: var(--text-on-primary);
+}

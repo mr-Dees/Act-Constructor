@@ -74,7 +74,7 @@ MARKERS = {
     "reasons": "МАРКЕР_HOTEL",
     "consequences": "МАРКЕР_INDIA",
     "responsible": "МАРКЕР_JULIET",
-    "recommendations": "МАРКЕР_KILO",
+    "measures": "МАРКЕР_KILO",
 }
 
 _REFERENCE_VIOLATION_DICT = {
@@ -101,7 +101,7 @@ _REFERENCE_VIOLATION_DICT = {
     "reasons": {"enabled": True, "content": MARKERS["reasons"]},
     "consequences": {"enabled": True, "content": MARKERS["consequences"]},
     "responsible": {"enabled": True, "content": MARKERS["responsible"]},
-    "recommendations": {"enabled": True, "content": MARKERS["recommendations"]},
+    "measures": {"enabled": True, "content": MARKERS["measures"]},
 }
 
 

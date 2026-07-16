@@ -18,7 +18,7 @@ import {
     validateImageBytes,
 } from './violation-image-validator.js';
 import { CONTENT_TYPE_IMAGE, createContentItem } from './violation-content-item.js';
-import { sniffImageMagic } from './violation-file-reading.js';
+import { sniffImageMagic, RECOGNIZED_IMAGE_FORMATS } from './violation-file-reading.js';
 import { downscaleImage } from './violation-image-resize.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 
@@ -417,8 +417,12 @@ Object.assign(ViolationManager.prototype, {
         for (const result of processed) {
             if (!result.ok) {
                 if (result.reason === 'magic') {
+                    // Список форматов — из RECOGNIZED_IMAGE_FORMATS (то, что sniffer реально
+                    // умеет подтвердить), а не хардкод: если настройка разрешит формат вне
+                    // этого набора, сообщение честно назовёт проверяемые форматы, а не соврёт.
                     Notifications.warning(
-                        `Файл «${result.file.name}» не является изображением PNG/JPEG/GIF и не добавлен.`,
+                        `Файл «${result.file.name}» не удалось распознать как изображение поддерживаемого формата `
+                        + `(${RECOGNIZED_IMAGE_FORMATS.join('/')}) и он не добавлен.`,
                     );
                 } else {
                     console.error('Ошибка при чтении файла:', result.file.name, result.error);

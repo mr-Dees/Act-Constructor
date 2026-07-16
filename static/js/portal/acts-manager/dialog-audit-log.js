@@ -559,8 +559,8 @@ export class AuditLogDialog extends DialogBase {
         if (changes.type === 'violation' && changes.fields) {
             const fieldLabels = {
                 violated: 'Нарушено', established: 'Установлено',
-                reasons: 'Причины', consequences: 'Последствия',
-                responsible: 'Ответственные', recommendations: 'Рекомендации',
+                reasons: 'Причины', measures: 'Принятые меры', consequences: 'Последствия',
+                responsible: 'Ответственные',
             };
             const items = Object.entries(changes.fields)
                 .filter(([, v]) => v.changed)

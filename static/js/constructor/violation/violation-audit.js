@@ -3,7 +3,7 @@
  *
  * Журнал изменений фиксировал правки лишь двух полей нарушения
  * (violated/established) через per-keystroke debounce; остальные шесть полей
- * (описания/доп.материалы/причины/последствия/ответственные/рекомендации)
+ * (описания/доп.материалы/причины/принятые меры/последствия/ответственные)
  * проходили бесследно, а общий debounce-ключ склеивал правку обоих полей в
  * одну запись. Теперь снимок нарушений берётся при загрузке акта, а перед
  * каждым flush журнала синтезируется по ОДНОЙ записи modify_violation на
@@ -45,7 +45,7 @@ export class ViolationAudit {
     static _pendingSnapshot = null;
 
     /**
-     * Отпечаток текстового под-поля (reasons/consequences/responsible/recommendations).
+     * Отпечаток текстового под-поля (reasons/measures/consequences/responsible).
      * @param {Object} field
      * @returns {{enabled: boolean, content: string}}
      */
@@ -97,9 +97,9 @@ export class ViolationAudit {
                 items: Array.isArray(ac.items) ? ac.items.map(i => this._itemFingerprint(i)) : [],
             },
             reasons: this._textField(violation.reasons),
+            measures: this._textField(violation.measures),
             consequences: this._textField(violation.consequences),
             responsible: this._textField(violation.responsible),
-            recommendations: this._textField(violation.recommendations),
         });
     }
 

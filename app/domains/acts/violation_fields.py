@@ -24,7 +24,7 @@ Python. Соответствие пиннится двумя тест-страж
 (`build_violation`) и ``formatters/docx/styles.py``: 9pt-группа
 (`Sizes.violation_pt`) — `violated` / `established` / `descriptionList` /
 `additionalContent` (все ветки case/image-caption/freeText) → `small=True`.
-`reasons` / `consequences` / `responsible` / `recommendations` рендерятся без
+`reasons` / `measures` / `consequences` / `responsible` рендерятся без
 `size_pt` (дефолт `Sizes.body_pt`, 12pt; закреплено
 `test_reasons_block_stays_12pt_non_italic`) → `small=False`.
 """
@@ -68,17 +68,17 @@ VIOLATION_FIELDS: tuple[ViolationFieldDescriptor, ...] = (
         small=False, show_label_in_preview=True,
     ),
     ViolationFieldDescriptor(
-        key="consequences", label="Последствия", order=5, kind="optional_text",
+        key="measures", label="Принятые меры", order=5, kind="optional_text",
+        small=False, show_label_in_preview=True,
+    ),
+    ViolationFieldDescriptor(
+        key="consequences", label="Последствия", order=6, kind="optional_text",
         small=False, show_label_in_preview=True,
     ),
     ViolationFieldDescriptor(
         # Канон #11: "Ответственные" (не "Ответственный", как в DOCX-builder'е —
         # выравнивание подписи форматтеров будет отдельной задачей бэкбона).
-        key="responsible", label="Ответственные", order=6, kind="optional_text",
-        small=False, show_label_in_preview=True,
-    ),
-    ViolationFieldDescriptor(
-        key="recommendations", label="Рекомендации", order=7, kind="optional_text",
+        key="responsible", label="Ответственные", order=7, kind="optional_text",
         small=False, show_label_in_preview=True,
     ),
 )

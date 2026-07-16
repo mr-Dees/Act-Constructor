@@ -5,8 +5,10 @@
 import { PreviewManager } from '../preview/preview.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { AppState } from '../state/state-core.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
 import { Notifications } from '../../shared/notifications.js';
+import { FormalizerPopover } from '../text-actions/formalizer-popover.js';
 
 export class ViolationManager {
     constructor() {
@@ -198,25 +200,100 @@ export class ViolationManager {
             this.createAdditionalContentField(violation, isReadOnly)
         );
 
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'reasons', 'Причины', 'text', isReadOnly)
-        );
-
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'consequences', 'Последствия', 'text', isReadOnly)
-        );
-
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'responsible', 'Ответственные', 'text', isReadOnly)
-        );
-
-        optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'recommendations', 'Рекомендации', 'text', isReadOnly)
-        );
+        const reasonsField = this.createOptionalField(violation, 'reasons', 'Причины', 'text', isReadOnly);
+        const measuresField = this.createOptionalField(violation, 'measures', 'Принятые меры', 'text', isReadOnly);
+        const consequencesField = this.createOptionalField(violation, 'consequences', 'Последствия', 'text', isReadOnly);
+        const responsibleField = this.createOptionalField(violation, 'responsible', 'Ответственные', 'text', isReadOnly);
+        optionalFieldsContainer.appendChild(reasonsField);
+        optionalFieldsContainer.appendChild(measuresField);
+        optionalFieldsContainer.appendChild(consequencesField);
+        optionalFieldsContainer.appendChild(responsibleField);
 
         section.appendChild(optionalFieldsContainer);
 
+        // Формализация: раскладка свободного текста по полям карточки (не в RO-режиме).
+        if (!isReadOnly) {
+            // Номер пункта нарушения — это номер РОДИТЕЛЬСКОГО пункта (у самого
+            // violation-узла number вида «Нарушение N», не «5.x»).
+            const pointNumber = AppState.findParentNode(node?.id)?.number || '';
+            this._addFormalizeButton(section, violation, pointNumber, {
+                violated: violatedTextarea,
+                established: establishedTextarea,
+                reasons: reasonsField,
+                measures: measuresField,
+                consequences: consequencesField,
+                responsible: responsibleField,
+            });
+        }
+
         return section;
+    }
+
+    /**
+     * Добавляет кнопку «Формализовать из текста» вверху секции нарушения.
+     * Открывает панель-заполнитель; применение раскладывает извлечённые поля.
+     * @param {HTMLElement} section - Секция нарушения
+     * @param {Object} violation - Объект нарушения
+     * @param {string} pointNumber - Номер пункта (для заголовка панели)
+     * @param {Object} controls - Ссылки на DOM-контролы полей карточки
+     */
+    _addFormalizeButton(section, violation, pointNumber, controls) {
+        const bar = document.createElement('div');
+        bar.className = 'violation-formalize-bar';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'violation-formalize-btn';
+        btn.textContent = '✨ Формализовать из текста';
+        btn.title = 'Разложить свободный текст нарушения по полям карточки';
+        btn.addEventListener('click', () => {
+            FormalizerPopover.open({
+                violation,
+                pointNumber,
+                apply: (fields) => this._applyFormalized(violation, controls, fields),
+            });
+        });
+
+        bar.appendChild(btn);
+        section.insertBefore(bar, section.firstChild);
+    }
+
+    /**
+     * Пишет извлечённые формализацией поля в объект нарушения и его DOM-контролы.
+     * Что LLM не извлекла (пустая строка) — поле НЕ трогаем.
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} controls - Ссылки на DOM-контролы
+     * @param {Object} fields - Ответ формализатора (плоские строки)
+     */
+    _applyFormalized(violation, controls, fields) {
+        const setPlain = (name, textarea, value) => {
+            const v = (value || '').trim();
+            if (!v) return;                 // не извлечено — не затираем существующее
+            // Запись только через setViolationField — единственную защищённую точку
+            // (requireWrite-guard + превью); прямая запись миновала бы её.
+            this.setViolationField(violation, name, v);
+            if (textarea) textarea.value = v;
+        };
+        const setOptional = (name, container, value) => {
+            const v = (value || '').trim();
+            if (!v) return;
+            this.setViolationField(violation, `${name}.enabled`, true);
+            this.setViolationField(violation, `${name}.content`, v);
+            const cb = container.querySelector('.violation-field-toggle input[type="checkbox"]');
+            const content = container.querySelector('.violation-field-content');
+            const ta = container.querySelector('.violation-field-content textarea');
+            if (cb) cb.checked = true;
+            if (content) content.style.display = 'block';
+            if (ta) ta.value = v;
+        };
+
+        setPlain('violated', controls.violated, fields.violated);
+        setPlain('established', controls.established, fields.established);
+        setOptional('reasons', controls.reasons, fields.reasons);
+        setOptional('measures', controls.measures, fields.measures);
+        setOptional('consequences', controls.consequences, fields.consequences);
+        setOptional('responsible', controls.responsible, fields.responsible);
+        PreviewManager.updateBlock('violation', violation.id);
     }
 
     /**
@@ -339,7 +416,7 @@ export class ViolationManager {
 
             if (!isReadOnly) {
                 addButton.addEventListener('click', () => {
-                    if (this.addViolationListItem(violation)) {
+                    if (this.addViolationListItem(violation, fieldName)) {
                         this.renderList(listContainer, violation, fieldName, isReadOnly);
                     }
                 });
@@ -386,7 +463,10 @@ export class ViolationManager {
             const itemContainer = document.createElement('div');
             itemContainer.className = 'violation-list-item';
             // Подсветка пустого пункта (#9-Г, Wave 2): не блокирует ввод, только визуальный сигнал.
-            itemContainer.classList.toggle('violation-list-item--empty', !item.trim());
+            // String(...) — страховка от не-строкового элемента ([null]/число из
+            // легаси/битого акта): нормализатор дозаполняет ключи, но не приводит
+            // типы внутри items, иначе .trim() кинул бы TypeError и уронил рендер карточки.
+            itemContainer.classList.toggle('violation-list-item--empty', !String(item).trim());
 
             const input = document.createElement('input');
             input.type = 'text';
@@ -402,7 +482,7 @@ export class ViolationManager {
 
                 // Обновляем массив при вводе
                 input.addEventListener('input', () => {
-                    this.setViolationListItem(violation, index, input.value);
+                    this.setViolationListItem(violation, fieldName, index, input.value);
                     itemContainer.classList.toggle('violation-list-item--empty', !input.value.trim());
                 });
 
@@ -417,7 +497,7 @@ export class ViolationManager {
                         e.preventDefault();
                         input.value = originalValue;
                         violation[fieldName].items[index] = originalValue;
-                        itemContainer.classList.toggle('violation-list-item--empty', !originalValue.trim());
+                        itemContainer.classList.toggle('violation-list-item--empty', !String(originalValue).trim());
                         input.blur();
                         PreviewManager.updateBlock('violation', violation.id);
                     }
@@ -437,7 +517,7 @@ export class ViolationManager {
 
             if (!isReadOnly) {
                 deleteBtn.addEventListener('click', () => {
-                    if (this.removeViolationListItem(violation, index)) {
+                    if (this.removeViolationListItem(violation, fieldName, index)) {
                         this.renderList(container, violation, fieldName, isReadOnly);
                     }
                 });

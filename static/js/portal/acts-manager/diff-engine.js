@@ -301,7 +301,7 @@ export class DiffEngine {
     static _diffViolations(oldViols, newViols) {
         const result = {};
         const allKeys = new Set([...Object.keys(oldViols), ...Object.keys(newViols)]);
-        const fields = ['violated', 'established', 'reasons', 'consequences', 'responsible', 'recommendations'];
+        const fields = ['violated', 'established', 'reasons', 'measures', 'consequences', 'responsible'];
 
         for (const id of allKeys) {
             const oldV = oldViols[id];
@@ -412,12 +412,23 @@ export class DiffEngine {
 
     /**
      * Нормализованное строковое значение реквизита фактуры для сравнения.
-     * Массивы/объекты (metrics/process) — через JSON.stringify (порядок ключей
-     * стабилен: инвойсы строятся из одинаковых источников), скаляры — String().
+     * metrics/process сравниваем по ВИДИМЫМ кодам — в дифе показываются только
+     * *_code (см. diff-renderer._invoiceFieldText). Сравнение всего объекта
+     * через JSON.stringify реагировало бы на служебные атрибуты и помечало
+     * фактуру «изменено» при неизменном видимом тексте (фантомный дифф).
+     * Прочие объекты — JSON.stringify, скаляры — String().
      */
     static _invoiceFieldValue(inv, field) {
         const val = inv ? inv[field] : undefined;
         if (val === null || val === undefined) return '';
+        if (field === 'metrics' && Array.isArray(val)) {
+            return val.map(m => (m && (m.metric_code || m.code || m.metric_name)) || '')
+                .filter(Boolean).join(', ');
+        }
+        if (field === 'process' && Array.isArray(val)) {
+            return val.map(m => (m && (m.process_code || m.process_name)) || '')
+                .filter(Boolean).join(', ');
+        }
         if (typeof val === 'object') return JSON.stringify(val);
         return String(val);
     }

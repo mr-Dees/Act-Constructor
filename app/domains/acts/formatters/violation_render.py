@@ -55,9 +55,9 @@ def format_violation(
     add_description_list(lines, violation_data.get('descriptionList', {}))
     add_additional_content(lines, violation_data.get('additionalContent', {}))
     add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
+    add_labeled_section(lines, "Принятые меры", violation_data.get('measures', {}))
     add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
     add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
-    add_labeled_section(lines, "Рекомендации", violation_data.get('recommendations', {}))
 
     return "\n".join(lines)
 
@@ -83,8 +83,8 @@ def add_labeled_section(
     lines: list[str], label: str, data: dict, bold_wrap: Callable[[str], str],
 ) -> None:
     """
-    Добавляет опциональную секцию с меткой (Причины/Последствия/
-    Ответственные/Рекомендации) — только при enabled и непустом content.
+    Добавляет опциональную секцию с меткой (Причины/Принятые меры/
+    Последствия/Ответственные) — только при enabled и непустом content.
 
     Args:
         lines: Список строк для добавления

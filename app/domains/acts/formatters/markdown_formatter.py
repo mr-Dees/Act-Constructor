@@ -152,8 +152,8 @@ class MarkdownFormatter(BaseFormatter):
 
     def _add_labeled_section(self, lines: list[str], label: str, data: dict):
         """
-        Добавляет опциональную секцию с жирной меткой (Причины/Последствия/
-        Ответственные/Рекомендации) — только при enabled и непустом content.
+        Добавляет опциональную секцию с жирной меткой (Причины/Принятые меры/
+        Последствия/Ответственные) — только при enabled и непустом content.
 
         Args:
             lines: Список строк для добавления

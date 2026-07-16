@@ -54,6 +54,33 @@ class LLMHealthProbeSettings(BaseModel):
     timeout_sec: float = Field(default=5.0, gt=0.0)
 
 
+class TextActionsSettings(BaseModel):
+    """Настройки фичи «Корректор»: два режима правки выделенного текста —
+    орфография/пунктуация (``fix``) и улучшение читаемости/структуры
+    (``readability``).
+
+    Режим ``fix`` — перенос наработки D17 (папка 1). Дефолтная температура ниже
+    исходной D17 (0.7) — корректору нужна детерминированность правок; при желании
+    переопределяется через CHAT__TEXT_ACTIONS__CORRECTOR_TEMPERATURE. Режим
+    ``readability`` — базовый (доработка команды D17).
+    """
+
+    # None → использовать основную модель профиля чата (ChatDomainSettings.model).
+    # default_factory=lambda: None по той же причине, что fallback-поля ниже:
+    # settings_registry делает поля с default=None обязательными.
+    corrector_model: str | None = Field(default_factory=lambda: None)
+    corrector_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    # Режим «улучшение читаемости»: чуть выше корректорской, чтобы
+    # переструктурировать текст, но остаться верным фактам.
+    readability_temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    # Формализация нарушения (4 экстрактора D17): температура ~0 ради
+    # детерминизма извлечения. None-модель → основная модель профиля чата.
+    formalizer_model: str | None = Field(default_factory=lambda: None)
+    formalizer_temperature: float = Field(default=0.01, ge=0.0, le=2.0)
+    per_call_timeout_sec: float = Field(default=60.0, gt=0.0)
+    max_input_chars: int = Field(default=20000, ge=1)
+
+
 class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""
 
@@ -120,6 +147,7 @@ class ChatDomainSettings(BaseModel):
     health_probe: LLMHealthProbeSettings = Field(
         default_factory=LLMHealthProbeSettings,
     )
+    text_actions: TextActionsSettings = Field(default_factory=TextActionsSettings)
 
     # Оркестрация
     system_prompt: str = (

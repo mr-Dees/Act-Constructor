@@ -4,6 +4,8 @@
 import { TextBlockManager } from './textblock-core.js';
 import { getStructureLimits } from '../violation/violation-image-validator.js';
 import { FindBar } from '../search/find-bar.js';
+import { Notifications } from '../../shared/notifications.js';
+import { CorrectorPopover } from '../text-actions/corrector-popover.js';
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -92,6 +94,12 @@ Object.assign(TextBlockManager.prototype, {
                     🔍
                 </button>
             </div>
+
+            <div class="toolbar-group toolbar-group-corrector">
+                <button class="toolbar-btn" data-command="improveText" title="Корректор орфографии и пунктуации">
+                    ✨
+                </button>
+            </div>
         `;
 
         document.body.appendChild(toolbar);
@@ -127,6 +135,28 @@ Object.assign(TextBlockManager.prototype, {
                     const prefill = FindBar._selectionPrefill();
                     this.hideToolbar();
                     FindBar.open(prefill);
+                    return;
+                }
+
+                if (command === 'improveText') {
+                    // Корректор: плавающая перетаскиваемая панель. Выделение держим
+                    // через клон Range — редактор НЕ перефокусируем.
+                    const sel = window.getSelection();
+                    if (!sel || sel.isCollapsed) {
+                        Notifications.info('Выделите текст для корректуры');
+                        return;
+                    }
+                    const range = sel.getRangeAt(0).cloneRange();
+                    // Selection.toString() отдаёт переносы строк (<br> → \n), а
+                    // Range.toString() их теряет (только текстовые узлы). Корректору
+                    // нужны переносы, иначе многострочный текст схлопнется в одну
+                    // строку. Ср. FindBar._selectionPrefill (та же причина).
+                    const text = sel.toString();
+                    if (!text.trim()) {
+                        Notifications.info('Выделите текст для корректуры');
+                        return;
+                    }
+                    CorrectorPopover.open({ editor: this.activeEditor, range, text });
                     return;
                 }
 
@@ -395,7 +425,7 @@ Object.assign(TextBlockManager.prototype, {
             const command = btn.dataset.command;
 
             if (command === 'createLink' || command === 'createFootnote' || command === 'removeFormat'
-                || command === 'findReplace') {
+                || command === 'findReplace' || command === 'improveText') {
                 return; // Эти кнопки не имеют активного состояния
             }
 

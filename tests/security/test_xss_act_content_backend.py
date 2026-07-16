@@ -9,8 +9,8 @@ p/b/i/span/a/... и атрибуты {a:href,title; span:class,style;
 div/p:class,style; *:class}.
 
 Plain-text поля нарушения (violated/established, descriptionList.items[],
-additionalContent.items[].content/caption/filename, reasons/consequences/
-responsible/recommendations.content) через bleach НЕ гоняются — нигде не
+additionalContent.items[].content/caption/filename, reasons/measures/
+consequences/responsible.content) через bleach НЕ гоняются — нигде не
 рендерятся как innerHTML, поэтому хранятся дословно (см.
 TestSaveContentViolationFieldsStoredVerbatim).
 
@@ -187,9 +187,9 @@ def _data_with_violation(*, violated="", established="",
             )],
         ),
         reasons=ViolationOptionalFieldSchema(enabled=True, content=field_html),
+        measures=ViolationOptionalFieldSchema(enabled=True, content=field_html),
         consequences=ViolationOptionalFieldSchema(enabled=True, content=field_html),
         responsible=ViolationOptionalFieldSchema(enabled=True, content=field_html),
-        recommendations=ViolationOptionalFieldSchema(enabled=True, content=field_html),
     )
     return ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": []},
@@ -294,9 +294,9 @@ class TestSaveContentViolationFieldsStoredVerbatim:
         assert v.violated == "Ромашка & Ко"
         assert v.established == "доля < 5%"
         assert v.reasons.content == "условие a<b и c>d"
+        assert v.measures.content == "условие a<b и c>d"
         assert v.consequences.content == "условие a<b и c>d"
         assert v.responsible.content == "условие a<b и c>d"
-        assert v.recommendations.content == "условие a<b и c>d"
         assert v.additionalContent.items[0].content == "кейс & <тег>"
         assert v.additionalContent.items[0].caption == "подпись & <b>"
         assert v.descriptionList.items == ["пункт < 5%"]
@@ -327,7 +327,7 @@ class TestSaveContentViolationFieldsStoredVerbatim:
         assert item.content == raw
 
     async def test_optional_fields_stored_verbatim(self):
-        """reasons/consequences/responsible/recommendations.content — дословно."""
+        """reasons/measures/consequences/responsible.content — дословно."""
         svc, _ = _make_service()
         raw = '<p>r</p><svg onload="alert(1)"></svg>'
         data = _data_with_violation(field_html=raw)
@@ -335,7 +335,7 @@ class TestSaveContentViolationFieldsStoredVerbatim:
         await svc.save_content(act_id=1, data=data, username="12345")
 
         v = data.violations["v1"]
-        for fname in ("reasons", "consequences", "responsible", "recommendations"):
+        for fname in ("reasons", "measures", "consequences", "responsible"):
             assert getattr(v, fname).content == raw
 
     async def test_description_list_items_stored_verbatim(self):

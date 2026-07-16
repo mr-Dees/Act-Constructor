@@ -41,6 +41,7 @@ import {
     applySnapshotRestore,
 } from './act-search-replace.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
+import { makeDraggablePanel } from '../../shared/draggable-panel.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -196,15 +197,6 @@ export const FindBar = {
             <div class="act-find-row act-find-row-search">
                 <input type="text" class="act-find-input" data-role="find"
                        placeholder="Найти" aria-label="Найти" spellcheck="false" />
-                <div class="act-find-toggles" role="group" aria-label="Параметры поиска">
-                    <button type="button" class="act-find-toggle" data-toggle="caseSensitive"
-                            aria-pressed="false" title="Учитывать регистр">Aa</button>
-                    <button type="button" class="act-find-toggle" data-toggle="wholeWord"
-                            aria-pressed="false" title="Слово целиком">Слово</button>
-                    <button type="button" class="act-find-toggle" data-toggle="regex"
-                            aria-pressed="false"
-                            title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
-                </div>
                 <span class="act-find-counter" data-role="counter" aria-live="polite">0 / 0</span>
                 <div class="act-find-nav" role="group" aria-label="Навигация по совпадениям">
                     <button type="button" class="act-find-btn" data-role="prev"
@@ -215,13 +207,28 @@ export const FindBar = {
                 <button type="button" class="act-find-btn act-find-close" data-role="close"
                         title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
             </div>
-            <div class="act-find-row act-find-row-replace" data-role="replaceRow">
-                <input type="text" class="act-find-input" data-role="replace"
-                       placeholder="Заменить на" aria-label="Заменить на" spellcheck="false" />
-                <button type="button" class="act-find-action" data-role="replaceOne">Заменить</button>
-                <button type="button" class="act-find-action" data-role="replaceAll">Заменить всё</button>
-                <button type="button" class="act-find-action act-find-undo hidden" data-role="undo"
-                        title="Отменить последнюю замену">Отменить замену</button>
+            <div class="act-find-row act-find-row-options">
+                <div class="act-find-toggles" role="group" aria-label="Параметры поиска">
+                    <button type="button" class="act-find-toggle" data-toggle="caseSensitive"
+                            aria-pressed="false" title="Учитывать регистр">Aa</button>
+                    <button type="button" class="act-find-toggle" data-toggle="wholeWord"
+                            aria-pressed="false" title="Слово целиком">Слово</button>
+                    <button type="button" class="act-find-toggle" data-toggle="regex"
+                            aria-pressed="false"
+                            title="Регулярное выражение. \w, \d, \s — ASCII-only (не матчат кириллицу); для букв любого языка используйте \p{L}, для цифр \p{N}">.*</button>
+                </div>
+            </div>
+            <div class="act-find-replace-group" data-role="replaceRow">
+                <div class="act-find-row act-find-row-replace">
+                    <input type="text" class="act-find-input" data-role="replace"
+                           placeholder="Заменить на" aria-label="Заменить на" spellcheck="false" />
+                </div>
+                <div class="act-find-row act-find-row-actions">
+                    <button type="button" class="act-find-action" data-role="replaceOne">Заменить</button>
+                    <button type="button" class="act-find-action" data-role="replaceAll">Заменить всё</button>
+                    <button type="button" class="act-find-action act-find-undo hidden" data-role="undo"
+                            title="Отменить последнюю замену">Отменить замену</button>
+                </div>
             </div>
         `;
         document.body.appendChild(bar);
@@ -237,6 +244,15 @@ export const FindBar = {
         };
 
         this._bindEvents();
+        // Перетаскивание — за «раму» самой панели (по образцу заголовка корректора):
+        // навёлся на свободную зону/паддинг → курсор move → тянешь. Инпуты и кнопки
+        // исключены noDragSelector'ом, поэтому фокус/клики по ним работают штатно.
+        // Отдельный грип убран — он «съедал» и без того дефицитную ширину панели.
+        this._dragger = makeDraggablePanel({
+            panel: bar,
+            handle: bar,
+            storageKey: 'act-find-bar:pos',
+        });
     },
 
     /** @private Навешивает обработчики ввода/кнопок. */

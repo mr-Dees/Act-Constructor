@@ -38,7 +38,7 @@ function makeViolation() {
         reasons: { enabled: false, content: '' },
         consequences: { enabled: false, content: '' },
         responsible: { enabled: false, content: '' },
-        recommendations: { enabled: false, content: '' },
+        measures: { enabled: false, content: '' },
     };
 }
 
@@ -108,7 +108,7 @@ test('setViolationField пишет additionalContent.enabled → updateBlock', (
 test('addViolationListItem пушит пустой пункт и делает updateBlock', () => {
     reset();
     const v = makeViolation();
-    const ok = mutations.addViolationListItem.call({}, v);
+    const ok = mutations.addViolationListItem.call({}, v, 'descriptionList');
     assert.equal(ok, true);
     assert.deepEqual(v.descriptionList.items, ['']);
     assert.equal(previewCalls[0].fn, 'updateBlock');
@@ -118,7 +118,7 @@ test('setViolationListItem пишет пункт по индексу и дела
     reset();
     const v = makeViolation();
     v.descriptionList.items = ['a', 'b'];
-    const ok = mutations.setViolationListItem.call({}, v, 1, 'новый');
+    const ok = mutations.setViolationListItem.call({}, v, 'descriptionList', 1, 'новый');
     assert.equal(ok, true);
     assert.deepEqual(v.descriptionList.items, ['a', 'новый']);
     assert.equal(previewCalls[0].fn, 'scheduleTypingBlock');
@@ -128,7 +128,7 @@ test('removeViolationListItem удаляет пункт и делает updateBl
     reset();
     const v = makeViolation();
     v.descriptionList.items = ['a', 'b', 'c'];
-    const ok = mutations.removeViolationListItem.call({}, v, 1);
+    const ok = mutations.removeViolationListItem.call({}, v, 'descriptionList', 1);
     assert.equal(ok, true);
     assert.deepEqual(v.descriptionList.items, ['a', 'c']);
     assert.equal(previewCalls[0].fn, 'updateBlock');
@@ -179,9 +179,9 @@ test('read-only: list-мутаторы ничего не меняют и воз�
     reset(true);
     const v = makeViolation();
     v.descriptionList.items = ['a'];
-    assert.equal(mutations.addViolationListItem.call({}, v), false);
-    assert.equal(mutations.setViolationListItem.call({}, v, 0, 'x'), false);
-    assert.equal(mutations.removeViolationListItem.call({}, v, 0), false);
+    assert.equal(mutations.addViolationListItem.call({}, v, 'descriptionList'), false);
+    assert.equal(mutations.setViolationListItem.call({}, v, 'descriptionList', 0, 'x'), false);
+    assert.equal(mutations.removeViolationListItem.call({}, v, 'descriptionList', 0), false);
     assert.deepEqual(v.descriptionList.items, ['a']);
     assert.deepEqual(previewCalls, []);
 });

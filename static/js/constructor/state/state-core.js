@@ -720,6 +720,10 @@ export const AppState = {
                     enabled: violation.reasons?.enabled || false,
                     content: violation.reasons?.content || ''
                 },
+                measures: {
+                    enabled: violation.measures?.enabled || false,
+                    content: violation.measures?.content || ''
+                },
                 consequences: {
                     enabled: violation.consequences?.enabled || false,
                     content: violation.consequences?.content || ''
@@ -727,10 +731,6 @@ export const AppState = {
                 responsible: {
                     enabled: violation.responsible?.enabled || false,
                     content: violation.responsible?.content || ''
-                },
-                recommendations: {
-                    enabled: violation.recommendations?.enabled || false,
-                    content: violation.recommendations?.content || ''
                 }
             };
         }

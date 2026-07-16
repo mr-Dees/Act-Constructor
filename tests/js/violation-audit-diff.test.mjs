@@ -3,7 +3,7 @@
  *
  * Раньше журнал изменений фиксировал правки лишь двух полей нарушения
  * (violated/established) через per-keystroke debounce; остальные шесть полей
- * (описания/доп.материалы/причины/последствия/ответственные/рекомендации)
+ * (описания/доп.материалы/причины/принятые меры/последствия/ответственные)
  * проходили бесследно. Теперь снимок нарушений берётся при загрузке акта, а
  * перед КАЖДЫМ flush журнала синтезируется по одной записи modify_violation на
  * каждое изменившееся нарушение — независимо от того, какое поле правилось.
@@ -31,7 +31,7 @@ function makeViolation(over = {}) {
         reasons: { enabled: false, content: '' },
         consequences: { enabled: false, content: '' },
         responsible: { enabled: false, content: '' },
-        recommendations: { enabled: false, content: '' },
+        measures: { enabled: false, content: '' },
         ...over,
     };
 }

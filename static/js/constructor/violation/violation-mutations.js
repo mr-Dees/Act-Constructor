@@ -64,43 +64,48 @@ export const violationMutations = {
     },
 
     /**
-     * Пишет пункт маркированного списка описаний по индексу (печатный ввод).
+     * Пишет пункт маркированного списка по индексу (печатный ввод).
+     * Поле списка задаётся именем (как в renderList), а не прибито к
+     * descriptionList — убирает латентную связанность мутатора с одним полем.
      * @param {Object} violation - Объект нарушения
+     * @param {string} fieldName - Имя поля-списка ('descriptionList' | ...)
      * @param {number} index - Индекс пункта
      * @param {string} value - Новое значение пункта
      * @returns {boolean} true — записано; false — заблокировано read-only
      */
-    setViolationListItem(violation, index, value) {
+    setViolationListItem(violation, fieldName, index, value) {
         if (ValidationCore.requireWrite('cannotEdit')) return false;
 
-        violation.descriptionList.items[index] = value;
+        violation[fieldName].items[index] = value;
         _schedulePreview(violation.id, false);
         return true;
     },
 
     /**
-     * Добавляет пустой пункт в список описаний (дискретное действие).
+     * Добавляет пустой пункт в список (дискретное действие).
      * @param {Object} violation - Объект нарушения
+     * @param {string} fieldName - Имя поля-списка ('descriptionList' | ...)
      * @returns {boolean} true — добавлено; false — заблокировано read-only
      */
-    addViolationListItem(violation) {
+    addViolationListItem(violation, fieldName) {
         if (ValidationCore.requireWrite('cannotEdit')) return false;
 
-        violation.descriptionList.items.push('');
+        violation[fieldName].items.push('');
         _schedulePreview(violation.id, true);
         return true;
     },
 
     /**
-     * Удаляет пункт списка описаний по индексу (дискретное действие).
+     * Удаляет пункт списка по индексу (дискретное действие).
      * @param {Object} violation - Объект нарушения
+     * @param {string} fieldName - Имя поля-списка ('descriptionList' | ...)
      * @param {number} index - Индекс пункта
      * @returns {boolean} true — удалено; false — заблокировано read-only
      */
-    removeViolationListItem(violation, index) {
+    removeViolationListItem(violation, fieldName, index) {
         if (ValidationCore.requireWrite('cannotEdit')) return false;
 
-        violation.descriptionList.items.splice(index, 1);
+        violation[fieldName].items.splice(index, 1);
         _schedulePreview(violation.id, true);
         return true;
     },

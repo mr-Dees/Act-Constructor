@@ -29,7 +29,7 @@ function makeViol(over = {}) {
         reasons: { enabled: false, content: '' },
         consequences: { enabled: false, content: '' },
         responsible: { enabled: false, content: '' },
-        recommendations: { enabled: false, content: '' },
+        measures: { enabled: false, content: '' },
         ...over,
     };
 }

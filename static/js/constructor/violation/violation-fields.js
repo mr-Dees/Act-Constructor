@@ -20,9 +20,9 @@ export const VIOLATION_FIELDS = Object.freeze([
   Object.freeze({ key: 'descriptionList', label: '', order: 2, kind: 'list', small: true, showLabelInPreview: false }),
   Object.freeze({ key: 'additionalContent', label: '', order: 3, kind: 'additional', small: true, showLabelInPreview: false }),
   Object.freeze({ key: 'reasons', label: 'Причины', order: 4, kind: 'optional_text', small: false, showLabelInPreview: true }),
-  Object.freeze({ key: 'consequences', label: 'Последствия', order: 5, kind: 'optional_text', small: false, showLabelInPreview: true }),
-  Object.freeze({ key: 'responsible', label: 'Ответственные', order: 6, kind: 'optional_text', small: false, showLabelInPreview: true }),
-  Object.freeze({ key: 'recommendations', label: 'Рекомендации', order: 7, kind: 'optional_text', small: false, showLabelInPreview: true }),
+  Object.freeze({ key: 'measures', label: 'Принятые меры', order: 5, kind: 'optional_text', small: false, showLabelInPreview: true }),
+  Object.freeze({ key: 'consequences', label: 'Последствия', order: 6, kind: 'optional_text', small: false, showLabelInPreview: true }),
+  Object.freeze({ key: 'responsible', label: 'Ответственные', order: 7, kind: 'optional_text', small: false, showLabelInPreview: true }),
 ]);
 
 export const VIOLATION_LABELS = Object.freeze(

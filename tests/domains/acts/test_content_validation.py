@@ -186,7 +186,7 @@ def test_violation_empty_additional_content_case_is_warning():
 
 
 def test_violation_optional_fields_empty_not_counted():
-    """Опциональные поля (причины/последствия/ответственные/рекомендации)
+    """Опциональные поля (причины/принятые меры/последствия/ответственные)
     пустыми НЕ считаются — вне scope находки о пустых обязательных полях."""
     data = _act_with_violation({
         "id": "v1", "nodeId": "vnode1",
@@ -194,7 +194,7 @@ def test_violation_optional_fields_empty_not_counted():
         "reasons": {"enabled": True, "content": ""},
         "consequences": {"enabled": True, "content": ""},
         "responsible": {"enabled": True, "content": ""},
-        "recommendations": {"enabled": True, "content": ""},
+        "measures": {"enabled": True, "content": ""},
     })
     issues = collect_validation_issues(data)
     assert "violation_incomplete" not in _codes(issues)
@@ -384,8 +384,14 @@ def test_validate_tree_single_pass_traversal():
     дерева, не за 4 отдельных (было: calculate_tree_depth + 3×
     _validate_children_per_node, каждый со своим stack.pop()-обходом).
 
-    Проверяем spy-обёрткой над root-узлом: обход root.get("children") должен
-    случиться ровно один раз."""
+    Усиленный регресс-гард: шпионим доступ к ключу "children" на КАЖДОМ узле
+    дерева и обоими способами доступа — `.get("children")` и индексация
+    `node["children"]`. При едином обходе каждый узел посещается ровно раз, а
+    его дети читаются один раз → суммарных обращений ровно столько, сколько
+    узлов в дереве. Повторный проход по любому поддереву (дети уже собранных
+    узлов «не под шпионом» в прежней версии — шпионился только корень) или
+    доступ мимо `.get` через `node["children"]` поднимут счётчик выше числа
+    узлов и будут пойманы независимо от способа обхода."""
     svc, _saved = _svc()
     svc.acts_settings.textblocks.per_node = 5
     svc.acts_settings.violations.per_node = 5
@@ -394,24 +400,44 @@ def test_validate_tree_single_pass_traversal():
     access_log = []
 
     class SpyDict(dict):
+        """dict, логирующий любой доступ к ключу "children" (get и []-индексация)."""
         def get(self, key, *args):
             if key == "children":
-                access_log.append(1)
+                access_log.append(("get", id(self)))
             return super().get(key, *args)
 
-    root = SpyDict(id="root", label="Акт", children=_base_sections())
+        def __getitem__(self, key):
+            if key == "children":
+                access_log.append(("getitem", id(self)))
+            return super().__getitem__(key)
+
+    def _spy(node: dict) -> SpyDict:
+        """Рекурсивно оборачивает узел и всех его потомков в SpyDict."""
+        wrapped = SpyDict(node)
+        # __setitem__ не переопределён — присвоение шпиона не логируется.
+        wrapped["children"] = [_spy(child) for child in node.get("children", [])]
+        return wrapped
+
+    def _count_nodes(node: dict) -> int:
+        return 1 + sum(_count_nodes(child) for child in node.get("children", []))
+
+    raw_tree = {"id": "root", "label": "Акт", "children": _base_sections()}
+    node_count = _count_nodes(raw_tree)
+    root = _spy(raw_tree)
+
     data = ActDataSchema(
         tree={"id": "root", "label": "Акт", "children": _base_sections()},
         saveType="manual",
     )
     # Прямое присвоение обходит pydantic-нормализацию поля tree (иначе
     # field_validator пересоздаёт дерево через ActItemSchema.model_dump(),
-    # и spy-обёртка root-узла теряется).
+    # и spy-обёртки узлов теряются).
     data.tree = root
 
     svc._validate_tree(data)
 
-    assert len(access_log) == 1
+    # Ровно одно обращение к "children" на каждый узел → единый проход.
+    assert len(access_log) == node_count
 
 
 def test_validate_tree_depth_error_precedes_per_node_error():

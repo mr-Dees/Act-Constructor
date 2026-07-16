@@ -6,7 +6,7 @@
 inline.py при DOCX-экспорте.
 
 Plain-text поля нарушения (violated/established, descriptionList.items[],
-additionalContent.items[], reasons/consequences/responsible/recommendations)
+additionalContent.items[], reasons/measures/consequences/responsible)
 через этот модуль НЕ чистятся: нигде не рендерятся как innerHTML (форма —
 textarea/input, превью — textContent, DOCX — add_run литерально), поэтому
 bleach там был не нужен и вреден — портил текст («&» → «&amp;») и мог
@@ -307,8 +307,8 @@ def sanitize_act_data(data) -> None:
     - tree nodes[*].content (рекурсивно — узлы могут содержать HTML)
 
     Поля нарушений (violated/established, descriptionList.items[],
-    additionalContent.items[], reasons/consequences/responsible/
-    recommendations) СОЗНАТЕЛЬНО не трогаются: это plain-text поля, нигде не
+    additionalContent.items[], reasons/measures/consequences/responsible)
+    СОЗНАТЕЛЬНО не трогаются: это plain-text поля, нигде не
     рендерятся как innerHTML, bleach там только портил бы текст и терял его
     часть (см. модульный docstring и TestSaveContentViolationFieldsStoredVerbatim).
 
