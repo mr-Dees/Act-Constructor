@@ -23,6 +23,7 @@ import { makeDraggablePanel } from '../../shared/draggable-panel.js';
 import { ActSearchEngine } from '../search/act-search-engine.js';
 import { textBlockManager } from '../textblock/textblock-core.js';
 import { correctText } from './text-actions-client.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 
 export const CorrectorPopover = {
     _el: null,
@@ -287,9 +288,52 @@ export const CorrectorPopover = {
         range.insertNode(frag);
     },
 
-    _accept() {
+    // Текущий текст сохранённого диапазона, реконструированный так же,
+    // как _sourceText (Selection.toString): <br> → перевод строки.
+    // null — если диапазон недоступен (узлы удалены при правке).
+    _rangeText(range) {
+        try {
+            const holder = document.createElement('div');
+            holder.appendChild(range.cloneContents());
+            holder.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+            return holder.textContent || '';
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // Изменился ли исходный фрагмент с момента отправки на обработку.
+    // Нормализуем перед сравнением: _sourceText берётся через
+    // Selection.toString() (схлопывает прогоны пробелов по white-space:normal,
+    // хранит \n для <br>), а _rangeText — через textContent (пробелы не
+    // схлопывает). Без нормализации ловили бы ложное "изменён" на неизменённом
+    // тексте с двойными пробелами или хвостовыми переносами.
+    _textChanged(sent, current) {
+        if (current === null) return true;
+        const norm = (s) => String(s)
+            .replace(/\r\n/g, '\n')
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\s+$/, '');
+        return norm(sent) !== norm(current);
+    },
+
+    async _accept() {
         if (!this._corrected || !this._range || !this._editor) { this.close(); return; }
         const range = this._range;
+
+        // Гейт: если исходный фрагмент изменился с момента отправки на обработку —
+        // предупреждаем, что ручные правки будут перезаписаны. До вставки документ не трогаем.
+        if (this._textChanged(this._sourceText, this._rangeText(range))) {
+            const ok = await DialogManager.show({
+                type: 'warning',
+                title: 'Текст изменён',
+                message: 'Исправляемый текст был изменён. При принятии эти изменения будут потеряны. Вставить исправленный вариант?',
+                confirmText: 'Да',
+                cancelText: 'Нет',
+            });
+            if (!ok) { this.close(); return; }
+        }
+
         try {
             // Разрушительные капсулы: выносим границы наружу капсул, чтобы не оставить
             // «половину» капсулы, затем плоско заменяем (капсулы внутри удаляются — о чём
