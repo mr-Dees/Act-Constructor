@@ -39,6 +39,7 @@ export const CorrectorPopover = {
     _destructive: false,
     _mode: null,
     _hasRequested: false,
+    _lastError: false,
 
     /**
      * @param {{editor: HTMLElement, range: Range, text: string}} opts
@@ -54,6 +55,7 @@ export const CorrectorPopover = {
         // появляется по клику на нужный режим.
         this._mode = null;
         this._hasRequested = false;
+        this._lastError = false;
         this._syncModeButtons();
         this._destructive = this._detectDestructiveCapsules(range);
         this._el.classList.remove('hidden');
@@ -147,15 +149,17 @@ export const CorrectorPopover = {
     },
 
     // Клик по кнопке режима = запуск варианта: меняет активную кнопку и запрашивает
-    // результат. Запрос идёт при смене режима ЛИБО при первом клике из стартового
-    // состояния (когда обращения к модели ещё не было). Повторный клик по уже
-    // отработавшему режиму не дёргает модель зря — для этого есть кнопка ↻.
+    // результат. Запрос идёт при смене режима, при первом клике из стартового
+    // состояния (когда обращения к модели ещё не было) ЛИБО после ошибки —
+    // повторный клик по тому же режиму должен повторить неудавшийся запрос.
+    // Повторный клик по УСПЕШНО отработавшему режиму не дёргает модель зря —
+    // для этого есть кнопка ↻.
     _setMode(mode) {
         if (mode !== 'fix' && mode !== 'readability') return;
         const changed = mode !== this._mode;
         this._mode = mode;
         this._syncModeButtons();
-        if (changed || !this._hasRequested) this._request();
+        if (changed || !this._hasRequested || this._lastError) this._request();
     },
 
     // Стартовое состояние до первого запроса: подсказка «выберите режим», кнопки
@@ -178,6 +182,7 @@ export const CorrectorPopover = {
     async _request() {
         this._abort();
         this._hasRequested = true;
+        this._lastError = false;
         this._controller = new AbortController();
         this._setBusy(true);
         this._els.body.innerHTML = '<div class="corrector-status">Обрабатываю…</div>';
@@ -187,8 +192,10 @@ export const CorrectorPopover = {
             this._corrected = corrected;
             this._render();
             this._setBusy(false);
+            this._lastError = false;
         } catch (e) {
             if (e && e.name === 'AbortError') return;
+            this._lastError = true;
             this._corrected = '';
             this._els.body.innerHTML = '';
             const msg = document.createElement('div');
@@ -288,31 +295,63 @@ export const CorrectorPopover = {
         range.insertNode(frag);
     },
 
-    // Текущий текст сохранённого диапазона, реконструированный так же,
-    // как _sourceText (Selection.toString): <br> → перевод строки.
+    // Текущий текст сохранённого диапазона, реконструированный СИММЕТРИЧНО
+    // _sourceText (Selection.toString). Ключевой нюанс web-платформы:
+    // Selection.toString ставит перевод строки и на <br>, И на границах
+    // блочных элементов (<div>/<p>/<li>/…), а textContent границы блоков
+    // склеивает. Поэтому для выделения через две Enter-строки (нативный <div>)
+    // наивный textContent давал 'ab' против исходного 'a\nb' и ложно
+    // срабатывал гейт «Текст изменён». Здесь обходим фрагмент вручную,
+    // добавляя \n и на <br>, и на закрытии блочных элементов.
     // null — если диапазон недоступен (узлы удалены при правке).
     _rangeText(range) {
         try {
             const holder = document.createElement('div');
             holder.appendChild(range.cloneContents());
-            holder.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
-            return holder.textContent || '';
+            return this._serializeWithBreaks(holder);
         } catch (e) {
             return null;
         }
     },
 
+    // Сериализация DOM-фрагмента в plain-текст, зеркалящая Selection.toString:
+    // текстовые узлы — как есть, <br> → \n, закрытие блочного элемента —
+    // граница-\n (если строка ещё не завершена переводом). Инлайновые узлы
+    // (span-капсулы ссылок/сносок и т.п.) переносов не добавляют.
+    _serializeWithBreaks(root) {
+        const BLOCK = /^(?:DIV|P|LI|UL|OL|TR|TABLE|THEAD|TBODY|SECTION|ARTICLE|BLOCKQUOTE|PRE|FIGURE|FIGCAPTION|HEADER|FOOTER|ASIDE|NAV|MAIN|DL|DD|DT|H[1-6])$/;
+        let out = '';
+        const walk = (node) => {
+            for (const child of node.childNodes) {
+                if (child.nodeType === 3) {
+                    out += child.textContent;
+                } else if (child.nodeType === 1) {
+                    if (child.tagName === 'BR') { out += '\n'; continue; }
+                    const block = BLOCK.test(child.tagName);
+                    if (block && out && !out.endsWith('\n')) out += '\n';
+                    walk(child);
+                    if (block && out && !out.endsWith('\n')) out += '\n';
+                }
+            }
+        };
+        walk(root);
+        return out;
+    },
+
     // Изменился ли исходный фрагмент с момента отправки на обработку.
-    // Нормализуем перед сравнением: _sourceText берётся через
-    // Selection.toString() (схлопывает прогоны пробелов по white-space:normal,
-    // хранит \n для <br>), а _rangeText — через textContent (пробелы не
-    // схлопывает). Без нормализации ловили бы ложное "изменён" на неизменённом
-    // тексте с двойными пробелами или хвостовыми переносами.
+    // Обе стороны реконструируются симметрично (Selection.toString для _sourceText,
+    // _serializeWithBreaks для _rangeText), но остаточные различия платформы
+    // нормализуем: прогоны пробелов схлопываем (white-space:normal), прогоны
+    // переводов строк тоже (Selection.toString между блоками-параграфами может
+    // дать '\n\n', реконструкция — один '\n'), хвостовые пробелы/переносы
+    // отбрасываем. Реальные правки (иные слова, добавленный/убранный перенос)
+    // при этом остаются различимыми.
     _textChanged(sent, current) {
         if (current === null) return true;
         const norm = (s) => String(s)
             .replace(/\r\n/g, '\n')
             .replace(/[ \t]+/g, ' ')
+            .replace(/\n{2,}/g, '\n')
             .replace(/\s+$/, '');
         return norm(sent) !== norm(current);
     },
