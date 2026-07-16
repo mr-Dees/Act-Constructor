@@ -60,7 +60,7 @@
 
 /* Картинка дополнительного контента: по центру, не шире контентной области,
    высота ограничена долей листа (Б-1.6, значение приходит inline-стилем
-   из preview-violation-renderer по preview_max_height_percent). */
+   из preview-violation-renderer по image_max_height_percent). */
 .preview-violation-image-wrap {
     margin: var(--spacing-xs) 0;
     text-align: center;

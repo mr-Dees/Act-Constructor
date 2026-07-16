@@ -15,7 +15,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
-from app.domains.acts.block_types import LEAF_BLOCK_TYPES
+from app.domains.acts.block_types import LEAF_BLOCK_REFS, LEAF_BLOCK_TYPES
 from app.domains.acts.utils import ActDirectivesValidator, ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema
 
@@ -103,16 +103,19 @@ class ActContentRepository(BaseRepository):
 
         # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
         node_map = self._build_node_map(data.tree)
+        # Обратный индекс реально используемых id (находка #21) — отдельный
+        # набор, node_map им не расширяем (горячий путь сохранения).
+        used_refs = self._build_used_refs(data.tree)
 
         await self._save_tree(act_id, data.tree)
         dropped_tables = await self._save_tables(
-            act_id, audit_act_id, data, audit_point_map, node_map
+            act_id, audit_act_id, data, audit_point_map, node_map, used_refs["tables"]
         )
         dropped_textblocks = await self._save_textblocks(
-            act_id, audit_act_id, data, audit_point_map, node_map
+            act_id, audit_act_id, data, audit_point_map, node_map, used_refs["textBlocks"]
         )
         dropped_violations = await self._save_violations(
-            act_id, audit_act_id, data, audit_point_map, node_map
+            act_id, audit_act_id, data, audit_point_map, node_map, used_refs["violations"]
         )
         await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
         await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
@@ -269,6 +272,37 @@ class ActContentRepository(BaseRepository):
 
         return node_map
 
+    @staticmethod
+    def _build_used_refs(tree: dict) -> dict[str, set[str]]:
+        """
+        Обратный индекс (находка #21, Вариант Б): множество id, на которые
+        РЕАЛЬНО ссылается хотя бы один узел дерева через своё поле-ссылку
+        (tableId/textBlockId/violationId).
+
+        orphan-фильтр раньше проверял лишь существование узла с nodeId
+        записи (_build_node_map/node_map) — этого недостаточно: запись
+        могла указывать на существующий узел, который в реальности
+        ссылается на ДРУГУЮ запись словаря. Такой фантом переживал
+        фильтр. Обратный индекс закрывает это симметрично для tables/
+        textBlocks/violations.
+
+        Returns:
+            {dictName: {entry_id, ...}} — по одному множеству на словарь.
+        """
+        used: dict[str, set[str]] = {dict_name: set() for _, dict_name in LEAF_BLOCK_REFS.values()}
+        stack: list[dict] = [tree]
+
+        while stack:
+            node = stack.pop()
+            for ref_field, dict_name in LEAF_BLOCK_REFS.values():
+                ref = node.get(ref_field)
+                if ref:
+                    used[dict_name].add(ref)
+            for child in node.get("children", []):
+                stack.append(child)
+
+        return used
+
     async def _save_tree(self, act_id: int, tree: dict) -> None:
         """Обновляет дерево структуры акта."""
         await self.conn.execute(
@@ -284,12 +318,13 @@ class ActContentRepository(BaseRepository):
     async def _save_tables(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
-        node_map: dict[str, dict]
+        node_map: dict[str, dict], used_ids: set[str]
     ) -> int:
         """Пересоздаёт таблицы акта (batch INSERT через executemany).
 
         Returns:
-            Число таблиц-сирот (nodeId отсутствует в дереве), отброшенных
+            Число таблиц-сирот (nodeId отсутствует в дереве ИЛИ ни один узел
+            реально не ссылается на table_id — находка #21), отброшенных
             orphan-фильтром — сервис агрегирует это в warning пользователю.
         """
         await self.conn.execute(
@@ -301,9 +336,11 @@ class ActContentRepository(BaseRepository):
         dropped = 0
         for table_id, table_data in data.tables.items():
             node_id = table_data.nodeId
-            # Orphan-фильтр: таблица, чей nodeId отсутствует в дереве, не пишется
-            # (иначе в act_tables копятся записи без узла-владельца).
-            if node_id not in node_map:
+            # Orphan-фильтр: таблица, чей nodeId отсутствует в дереве ИЛИ на
+            # чей table_id ни один узел реально не ссылается (находка #21,
+            # обратная сверка) — не пишется (иначе в act_tables копятся
+            # записи без узла-владельца или фантомы с чужим nodeId).
+            if node_id not in node_map or table_id not in used_ids:
                 dropped += 1
                 continue
             info = node_map.get(node_id, {})
@@ -353,12 +390,13 @@ class ActContentRepository(BaseRepository):
     async def _save_textblocks(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
-        node_map: dict[str, dict]
+        node_map: dict[str, dict], used_ids: set[str]
     ) -> int:
         """Пересоздаёт текстовые блоки акта (batch INSERT через executemany).
 
         Returns:
-            Число текстблоков-сирот, отброшенных orphan-фильтром.
+            Число текстблоков-сирот, отброшенных orphan-фильтром (в т.ч. по
+            обратной сверке — находка #21).
         """
         await self.conn.execute(
             f"DELETE FROM {self.textblocks} WHERE act_id = $1",
@@ -369,9 +407,10 @@ class ActContentRepository(BaseRepository):
         dropped = 0
         for tb_id, tb_data in data.textBlocks.items():
             node_id = tb_data.nodeId
-            # Orphan-фильтр: текстблок без узла-владельца в дереве не пишется
-            # (единообразно с _save_tables, см. pbe-4).
-            if node_id not in node_map:
+            # Orphan-фильтр: текстблок без узла-владельца в дереве ИЛИ без
+            # обратной ссылки узла (находка #21) не пишется (единообразно
+            # с _save_tables, см. pbe-4).
+            if node_id not in node_map or tb_id not in used_ids:
                 dropped += 1
                 continue
             info = node_map.get(node_id, {})
@@ -411,12 +450,13 @@ class ActContentRepository(BaseRepository):
     async def _save_violations(
         self, act_id: int, audit_act_id: str | None,
         data: ActDataSchema, audit_point_map: dict,
-        node_map: dict[str, dict]
+        node_map: dict[str, dict], used_ids: set[str]
     ) -> int:
         """Пересоздаёт нарушения акта (batch INSERT через executemany).
 
         Returns:
-            Число нарушений-сирот, отброшенных orphan-фильтром.
+            Число нарушений-сирот, отброшенных orphan-фильтром (в т.ч. по
+            обратной сверке — находка #21).
         """
         await self.conn.execute(
             f"DELETE FROM {self.violations} WHERE act_id = $1",
@@ -427,9 +467,10 @@ class ActContentRepository(BaseRepository):
         dropped = 0
         for v_id, v_data in data.violations.items():
             node_id = v_data.nodeId
-            # Orphan-фильтр: нарушение без узла-владельца в дереве не пишется
-            # (единообразно с _save_tables, см. pbe-4).
-            if node_id not in node_map:
+            # Orphan-фильтр: нарушение без узла-владельца в дереве ИЛИ без
+            # обратной ссылки узла (находка #21) не пишется (единообразно
+            # с _save_tables, см. pbe-4).
+            if node_id not in node_map or v_id not in used_ids:
                 dropped += 1
                 continue
             info = node_map.get(node_id, {})

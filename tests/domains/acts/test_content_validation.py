@@ -122,6 +122,94 @@ def test_complete_table_no_issues():
     assert issues == []
 
 
+# ── Нарушения (Q1, wave 2): мягкое предупреждение о незаполненных полях ──
+
+def _act_with_violation(violation: dict, node_extra: dict | None = None):
+    """Валидный акт с одним узлом-нарушением в разделе 1."""
+    sections = _base_sections()
+    node = {
+        "id": "vnode1", "label": "Нарушение", "type": "violation",
+        "violationId": "v1", "children": [],
+    }
+    if node_extra:
+        node.update(node_extra)
+    sections[0]["children"] = [node]
+    return ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        violations={"v1": violation},
+        saveType="manual",
+    )
+
+
+def test_violation_empty_fields_is_warning():
+    """Пустые violated/established (дефолты схемы) → мягкое замечание."""
+    data = _act_with_violation({"id": "v1", "nodeId": "vnode1"})
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+    issue = next(i for i in issues if i["code"] == "violation_incomplete")
+    assert issue["severity"] == "warning"
+    assert issue["ref"] == "v1"
+    assert status_from_issues(issues) == "warning"
+
+
+def test_violation_complete_no_issue():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" not in _codes(issues)
+    assert issues == []
+
+
+def test_violation_empty_description_item_is_warning():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "descriptionList": {"enabled": True, "items": ["пункт 1", "  "]},
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+
+
+def test_violation_empty_additional_content_case_is_warning():
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "additionalContent": {
+            "enabled": True,
+            "items": [{"id": "c1", "type": "case", "content": ""}],
+        },
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" in _codes(issues)
+
+
+def test_violation_optional_fields_empty_not_counted():
+    """Опциональные поля (причины/принятые меры/последствия/ответственные)
+    пустыми НЕ считаются — вне scope находки о пустых обязательных полях."""
+    data = _act_with_violation({
+        "id": "v1", "nodeId": "vnode1",
+        "violated": "Нарушен пункт 1.1", "established": "Установлено расхождение",
+        "reasons": {"enabled": True, "content": ""},
+        "consequences": {"enabled": True, "content": ""},
+        "responsible": {"enabled": True, "content": ""},
+        "measures": {"enabled": True, "content": ""},
+    })
+    issues = collect_validation_issues(data)
+    assert "violation_incomplete" not in _codes(issues)
+
+
+def test_violation_uses_custom_label_in_message():
+    data = _act_with_violation(
+        {"id": "v1", "nodeId": "vnode1"},
+        node_extra={"customLabel": "Нарушение по кассе"},
+    )
+    issues = collect_validation_issues(data)
+    issue = next(i for i in issues if i["code"] == "violation_incomplete")
+    assert "Нарушение по кассе" in issue["message"]
+
+
 # ── Сервисный уровень: статус сохраняется и шлётся уведомление (#8) ──
 
 import pytest
@@ -170,6 +258,8 @@ def _svc():
     svc._audit.compute_field_diffs = AsyncMock(return_value=None)
     svc._versions = MagicMock()
     svc._versions.create_version = AsyncMock(return_value=1)
+    svc._invoice = MagicMock()
+    svc._invoice.get_invoices_for_act = AsyncMock(return_value=[])
     svc._crud = MagicMock()
     svc._crud.get_act_by_id = AsyncMock(return_value=MagicMock(km_number="КМ-01-00001"))
     return svc, saved
@@ -245,6 +335,143 @@ async def test_textblocks_per_node_limit_raises_validation_error():
     assert exc_info.value.status_code == 400
 
 
+async def test_violations_per_node_limit_raises_validation_error():
+    """#7: сервер отклоняет узел с N+1 нарушениями (paste/drag/undo обходили
+    фронт-гейт). Симметрия текстблочному лимиту B-13."""
+    svc, _saved = _svc()
+    svc.acts_settings.violations.per_node = 2
+    sections = _base_sections()
+    sections[0]["children"] = [
+        {"id": f"v{i}", "label": "Нарушение", "type": "violation",
+         "violationId": f"v{i}", "children": []}
+        for i in range(3)
+    ]
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        saveType="manual",
+    )
+    with pytest.raises(ActValidationError, match="нарушений") as exc_info:
+        await svc.save_content(act_id=1, data=data, username="12345")
+    assert exc_info.value.status_code == 400
+
+
+async def test_tables_per_node_limit_raises_validation_error():
+    """#7: сервер отклоняет узел с N+1 таблицами. Считаются ВСЕ таблицы, включая
+    закреплённые metrics/risk (паритет с фронт-гейтом добавления)."""
+    svc, _saved = _svc()
+    svc.acts_settings.tables.per_node = 2
+    sections = _base_sections()
+    # Одна из таблиц — закреплённая metrics: её тоже нужно учитывать.
+    sections[0]["children"] = [
+        {"id": "tbl0", "label": "Таблица", "type": "table",
+         "tableId": "tbl0", "kind": "metrics", "children": []},
+        {"id": "tbl1", "label": "Таблица", "type": "table",
+         "tableId": "tbl1", "children": []},
+        {"id": "tbl2", "label": "Таблица", "type": "table",
+         "tableId": "tbl2", "children": []},
+    ]
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": sections},
+        saveType="manual",
+    )
+    with pytest.raises(ActValidationError, match="таблиц") as exc_info:
+        await svc.save_content(act_id=1, data=data, username="12345")
+    assert exc_info.value.status_code == 400
+
+
+def test_validate_tree_single_pass_traversal():
+    """#14 код-ревью: глубина и три per-node лимита считаются за ОДИН обход
+    дерева, не за 4 отдельных (было: calculate_tree_depth + 3×
+    _validate_children_per_node, каждый со своим stack.pop()-обходом).
+
+    Проверяем spy-обёрткой над root-узлом: обход root.get("children") должен
+    случиться ровно один раз."""
+    svc, _saved = _svc()
+    svc.acts_settings.textblocks.per_node = 5
+    svc.acts_settings.violations.per_node = 5
+    svc.acts_settings.tables.per_node = 5
+
+    access_log = []
+
+    class SpyDict(dict):
+        def get(self, key, *args):
+            if key == "children":
+                access_log.append(1)
+            return super().get(key, *args)
+
+    root = SpyDict(id="root", label="Акт", children=_base_sections())
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    # Прямое присвоение обходит pydantic-нормализацию поля tree (иначе
+    # field_validator пересоздаёт дерево через ActItemSchema.model_dump(),
+    # и spy-обёртка root-узла теряется).
+    data.tree = root
+
+    svc._validate_tree(data)
+
+    assert len(access_log) == 1
+
+
+def test_validate_tree_depth_error_precedes_per_node_error():
+    """#14 код-ревью: при одновременном превышении глубины и per-node лимита
+    приоритет у ошибки глубины — как при прежних последовательных проверках,
+    где глубина проверялась ДО per-node. Регрессия на случай, если будущий
+    рефактор переставит порядок raise в едином обходе."""
+    svc, _saved = _svc()
+    svc.acts_settings.resource.max_tree_depth = 1
+    svc.acts_settings.textblocks.per_node = 2
+    # Узел на глубине 2 с 3 текстблоками: превышены И глубина (3 > 1), И лимит
+    # текстблоков (3 > 2). Ожидаем именно ошибку глубины.
+    deep_and_wide = {
+        "id": "root", "label": "Акт", "children": [
+            {"id": "s1", "label": "Секция", "type": "section", "children": [
+                {"id": "n", "label": "Узел", "type": "section", "children": [
+                    {"id": f"tb{i}", "label": "ТБ", "type": "textblock",
+                     "textBlockId": f"tb{i}", "children": []}
+                    for i in range(3)
+                ]},
+            ]},
+        ],
+    }
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    data.tree = deep_and_wide
+    with pytest.raises(ActValidationError, match="Глубина дерева"):
+        svc._validate_tree(data)
+
+
+def test_validate_tree_textblock_error_precedes_table_error():
+    """#14 код-ревью: при одновременном превышении лимитов текстблоков и таблиц
+    в одном узле приоритет у текстблоков (порядок проверок текстблоки →
+    нарушения → таблицы сохранён)."""
+    svc, _saved = _svc()
+    svc.acts_settings.textblocks.per_node = 2
+    svc.acts_settings.tables.per_node = 2
+    node_children = (
+        [{"id": f"tb{i}", "label": "ТБ", "type": "textblock",
+          "textBlockId": f"tb{i}", "children": []} for i in range(3)]
+        + [{"id": f"tbl{i}", "label": "Табл", "type": "table",
+            "tableId": f"tbl{i}", "children": []} for i in range(3)]
+    )
+    both_over = {
+        "id": "root", "label": "Акт", "children": [
+            {"id": "s1", "label": "Секция", "type": "section",
+             "children": node_children},
+        ],
+    }
+    data = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": _base_sections()},
+        saveType="manual",
+    )
+    data.tree = both_over
+    with pytest.raises(ActValidationError, match="текстовых блоков"):
+        svc._validate_tree(data)
+
+
 async def test_warning_act_manual_save_does_not_notify():
     """Статус warning (только пустые таблицы) портальное уведомление НЕ шлёт —
     даже при ручном сохранении: warning не критичен (решение пользователя)."""
@@ -262,4 +489,21 @@ async def test_warning_act_manual_save_does_not_notify():
         result = await svc.save_content(act_id=1, data=data, username="12345")
     assert result["validation_status"] == "warning"
     assert saved["validation_status"] == "warning"
+    emit.assert_not_called()
+
+
+async def test_violation_incomplete_manual_save_not_blocked():
+    """Незаполненное нарушение (Q1, wave 2): акт СОХРАНЯЕТСЯ (не 422/исключение),
+    статус помечается 'warning', уведомление НЕ шлётся — симметрично пустой
+    таблице (table_no_data)."""
+    svc, saved = _svc()
+    data = _act_with_violation({"id": "v1", "nodeId": "vnode1"})
+    with patch(
+        "app.domains.acts.services.notifications_producer.emit_act_notification",
+        new=AsyncMock(),
+    ) as emit:
+        result = await svc.save_content(act_id=1, data=data, username="12345")
+    assert result["validation_status"] == "warning"
+    assert saved["validation_status"] == "warning"
+    assert any(i["code"] == "violation_incomplete" for i in result["validation_issues"])
     emit.assert_not_called()

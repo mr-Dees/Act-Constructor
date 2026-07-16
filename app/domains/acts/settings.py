@@ -101,16 +101,24 @@ class ImagesSettings(BaseModel):
     константа VIOLATION_IMAGE_URL_MAX_LENGTH в schemas/act_content.py;
     она обязана быть заведомо выше max_file_size с учётом
     base64-оверхеда (×4/3 + префикс).
+
+    Пороги согласованы с SecuritySettings.max_request_size (общий с доменом
+    chat лимит тела HTTP-запроса, который сам НЕ поднимаем): дефолты — сырые
+    (pre-base64) байты, а на провод внутри JSON акта уходит base64 (+×4/3).
+    Инвариант — tests/domains/acts/test_acts_limits_api.py::
+    test_image_budgets_fit_in_http_request_size_limit.
     """
-    max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
-    max_total_size_per_act: int = Field(default=30 * 1024 * 1024, gt=0)
+    max_file_size: int = Field(default=4 * 1024 * 1024, gt=0)
+    max_total_size_per_act: int = Field(default=5 * 1024 * 1024, gt=0)
     # webp исключён сознательно: python-docx (без Pillow) не встраивает его
     # в DOCX — картинка молча расходилась бы между превью и экспортом.
     allowed_mime_types: list[str] = Field(
         default=["image/jpeg", "image/png", "image/gif"]
     )
     max_items_per_violation: int = Field(default=50, gt=0)
-    preview_max_height_percent: int = Field(default=40, gt=0, le=100)
+    # Потолок высоты картинки нарушения (% полезной высоты листа A4). Управляет
+    # и превью (maxHeight), и DOCX-экспортом (_scale_picture, #13).
+    image_max_height_percent: int = Field(default=40, gt=0, le=100)
 
 
 class TablesSettings(BaseModel):
@@ -125,6 +133,23 @@ class TablesSettings(BaseModel):
     max_rows: int = Field(default=64, gt=0)
     max_cols: int = Field(default=16, gt=0)
     min_col_width_px: int = Field(default=80, gt=0)
+    # Максимальное число таблиц-детей одного узла дерева (#7). Фронт ограничивает
+    # добавление таблиц узлу, но paste/drag/undo и прямой API проверку обходили —
+    # серверный гейт в ActContentService._validate_tree. Считаются ВСЕ таблицы,
+    # включая закреплённые metrics/risk (паритет с фронт-гейтом добавления).
+    # Отдаётся через GET /acts/limits (tables.per_node).
+    per_node: int = Field(default=10, gt=0)
+
+
+class ViolationsSettings(BaseModel):
+    """
+    Лимит нарушений-детей одного узла дерева (#7).
+
+    Фронт ограничивает добавление нарушений узлу, но paste/drag/undo и прямой
+    API проверку обходили — серверный гейт в ActContentService._validate_tree.
+    Отдаётся через GET /acts/limits (violations.per_node).
+    """
+    per_node: int = Field(default=10, gt=0)
 
 
 class TextblocksSettings(BaseModel):
@@ -187,6 +212,7 @@ class ActsSettings(BaseModel):
     images: ImagesSettings = ImagesSettings()
     tables: TablesSettings = TablesSettings()
     textblocks: TextblocksSettings = TextblocksSettings()
+    violations: ViolationsSettings = ViolationsSettings()
     sanitizer: SanitizerSettings = SanitizerSettings()
     # Kill-switch телеметрии здоровья редактора (§6.8). Выключено → эндпоинт
     # /acts/editor-telemetry отвечает 204 без записи, а фронт (получив флаг

@@ -249,6 +249,46 @@ class TestGreenplumSchemaCompatibility:
                 f"должна быть вырезана (директива владельца)"
             )
 
+    def test_act_content_versions_has_all_snapshot_columns_both_schemas(self):
+        """Колонки снимка версии из create_version присутствуют в CREATE TABLE
+        обеих схем.
+
+        create_tables_if_not_exist создаёт таблицу целиком из schema.sql и НЕ
+        добавляет колонки в существующие таблицы. При пересоздании БД колонка
+        обязана прийти из schema.sql — иначе INSERT в create_version упадёт на
+        отсутствующей колонке (например invoices_data), откатывая всё
+        сохранение акта. Регрессия связывает список колонок INSERT'а
+        (ActContentVersionRepository.create_version) со схемой, чтобы новая
+        колонка снимка не могла попасть в репозиторий мимо DDL.
+        """
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        # Колонки, которые пишет ActContentVersionRepository.create_version.
+        required_columns = [
+            "act_id", "version_number", "save_type", "username",
+            "tree_data", "tables_data", "textblocks_data", "violations_data",
+            "invoices_data",
+        ]
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            create_stmt = None
+            for raw in DatabaseAdapter._split_sql_statements(content):
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{PREFIX}act_content_versions" in cleaned
+                ):
+                    create_stmt = cleaned
+                    break
+            assert create_stmt is not None, (
+                f"{db_type}/schema.sql: CREATE TABLE act_content_versions не найдено"
+            )
+            for col in required_columns:
+                assert re.search(rf'\b{col}\b', create_stmt), (
+                    f"{db_type}/schema.sql: колонка {col} отсутствует в "
+                    f"act_content_versions — create_version.INSERT упадёт при "
+                    f"пересоздании БД"
+                )
+
     def test_no_pl_pgsql_triggers(self, gp_schema_files):
         """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
         UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний

@@ -2,12 +2,12 @@
  * Обработчик контекстного меню для нарушений
  */
 import { ContextMenuManager } from './context-menu-core.js';
-import { PreviewManager } from '../preview/preview.js';
 import {
     CONTENT_TYPE_CASE,
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from '../violation/violation-content-item.js';
+import { getImageLimits } from '../violation/violation-image-validator.js';
 
 export class ViolationContextMenu {
     constructor() {
@@ -61,12 +61,18 @@ export class ViolationContextMenu {
             {label: '📄 Добавить текст', action: CONTENT_TYPE_FREE_TEXT}
         ];
 
+        // Единый гейт лимита (#4): при достижении лимита пункты добавления
+        // строятся в disabled-виде — реальный отказ всё равно проверяется
+        // в addContentItemAtPosition, здесь только UX-подсказка заранее.
+        const itemsCount = violation.additionalContent?.items?.length || 0;
+        const limitReached = itemsCount >= getImageLimits().maxItemsPerViolation;
+
         addItems.forEach(item => {
             menu.appendChild(this.createMenuItem(item.label, () => {
                 this.handleAddContent(violation, item.action, contentContainer, insertPosition);
                 this.removeExistingMenu();
                 ContextMenuManager.hide();
-            }));
+            }, false, limitReached));
         });
 
         if (itemId !== null) {
@@ -81,10 +87,22 @@ export class ViolationContextMenu {
         return menu;
     }
 
-    createMenuItem(label, clickHandler, isDanger = false) {
+    createMenuItem(label, clickHandler, isDanger = false, disabled = false) {
         const item = document.createElement('div');
         item.className = 'violation-context-menu-item';
         item.textContent = label;
+
+        if (disabled) {
+            item.setAttribute('aria-disabled', 'true');
+            item.style.cssText = `
+                padding: 8px 16px;
+                cursor: default;
+                font-size: 0.875rem;
+                user-select: none;
+                color: var(--text-disabled, #999);
+            `;
+            return item;
+        }
 
         const dangerColor = isDanger ? 'color: var(--danger, #dc3545);' : '';
         item.style.cssText = `
@@ -154,25 +172,9 @@ export class ViolationContextMenu {
     handleDelete(violation, itemId, contentContainer) {
         if (!violation || !itemId || !contentContainer) return;
 
-        const itemIndex = violation.additionalContent.items.findIndex(
-            item => item.id === itemId
-        );
-
-        if (itemIndex === -1) return;
-
-        violation.additionalContent.items.splice(itemIndex, 1);
-
-        // Переиндексируем order
-        violation.additionalContent.items.forEach((item, idx) => {
-            item.order = idx;
-        });
-
-        const itemsContainer = contentContainer.querySelector('.additional-content-items');
-        if (itemsContainer && violationManager?.renderContentItems) {
-            violationManager.renderContentItems(violation, itemsContainer);
-        }
-
-        PreviewManager?.update?.();
+        // Гейт read-only (#11) — внутри removeContentItem, тем же
+        // guard'ом, что и остальные мутации нарушения.
+        violationManager?.removeContentItem?.(violation, itemId, contentContainer);
     }
 
     removeExistingMenu() {

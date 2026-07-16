@@ -642,6 +642,8 @@ export class LockManager {
                                 console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
                             } else {
                                 console.log('[LockManager] Контент акта сохранён');
+                                // #5: PUT подтверждён — коммитим отложенный снимок аудита нарушений.
+                                window.ViolationAudit?.confirmSave?.();
                                 // Синхронизируем флаг StorageManager после успешного сохранения
                                 if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
                                     StorageManager.markAsSyncedWithDB();

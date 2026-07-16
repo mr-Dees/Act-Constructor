@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.config import SecuritySettings
 from app.domains.acts.api import get_api_routers
 from app.domains.acts.deps import _get_acts_settings
 from app.domains.acts.schemas.act_content import (
@@ -29,6 +30,7 @@ from app.domains.acts.settings import (
     ImagesSettings,
     TablesSettings,
     TextblocksSettings,
+    ViolationsSettings,
 )
 
 
@@ -43,18 +45,18 @@ class TestImagesSettingsDefaults:
 
     def test_defaults(self):
         s = ImagesSettings()
-        assert s.max_file_size == 10 * 1024 * 1024
-        assert s.max_total_size_per_act == 30 * 1024 * 1024
+        assert s.max_file_size == 4 * 1024 * 1024
+        assert s.max_total_size_per_act == 5 * 1024 * 1024
         assert s.allowed_mime_types == [
             "image/jpeg", "image/png", "image/gif",
         ]
         assert s.max_items_per_violation == 50
-        assert s.preview_max_height_percent == 40
+        assert s.image_max_height_percent == 40
 
     def test_acts_settings_includes_images(self):
         s = ActsSettings()
         assert isinstance(s.images, ImagesSettings)
-        assert s.images.max_file_size == 10 * 1024 * 1024
+        assert s.images.max_file_size == 4 * 1024 * 1024
 
     def test_url_max_length_covers_max_file_size_in_base64(self):
         """Инвариант согласованности лимитов (fce3e4e ↔ ImagesSettings).
@@ -68,6 +70,28 @@ class TestImagesSettingsDefaults:
         base64_len = (s.max_file_size + 2) // 3 * 4
         prefix_margin = 64  # запас на data:image/jpeg;base64, и подобные
         assert VIOLATION_IMAGE_URL_MAX_LENGTH > base64_len + prefix_margin
+
+    def test_image_budgets_fit_in_http_request_size_limit(self):
+        """Инвариант (#2, КРИТ): base64-раздутый бюджет картинок влезает в лимит запроса.
+
+        Бюджет картинок (ImagesSettings) считается в СЫРЫХ байтах, а на провод
+        внутри JSON акта уходит base64 (+×4/3). RequestSizeLimitMiddleware
+        режет тело запроса по SecuritySettings.max_request_size — если
+        base64-раздутая сумма его превышает, весь акт не сохраняется (413) и
+        правки пользователя теряются. max_request_size — общий с доменом
+        chat лимит, его НЕЛЬЗЯ поднимать под картинки; согласовываем в
+        обратную сторону — бюджет картинок должен быть заведомо меньше.
+
+        1_500_000 байт — резерв на data-URL-префиксы каждой картинки и
+        не-картиночное тело акта (дерево/таблицы/текстблоки).
+        """
+        images = ImagesSettings()
+        security = SecuritySettings()
+        assert (
+            images.max_total_size_per_act * 4 // 3 + 1_500_000
+            <= security.max_request_size
+        )
+        assert images.max_file_size * 4 // 3 <= security.max_request_size
 
     def test_mime_whitelist_matches_schema_url_whitelist(self):
         """MIME-whitelist настроек согласован с regex-whitelist'ом схемы url."""
@@ -92,16 +116,22 @@ class TestStructureSettingsDefaults:
         assert s.max_rows == 64
         assert s.max_cols == 16
         assert s.min_col_width_px == 80
+        assert s.per_node == 10
 
     def test_textblocks_defaults(self):
         s = TextblocksSettings()
         assert s.font_size_min == 8
         assert s.font_size_max == 72
 
+    def test_violations_defaults(self):
+        s = ViolationsSettings()
+        assert s.per_node == 10
+
     def test_acts_settings_includes_tables_and_textblocks(self):
         s = ActsSettings()
         assert isinstance(s.tables, TablesSettings)
         assert isinstance(s.textblocks, TextblocksSettings)
+        assert isinstance(s.violations, ViolationsSettings)
 
     def test_settings_defaults_match_schema_fallbacks(self):
         """Дефолты настроек == фолбэк-константы схемы (не должны разъезжаться)."""
@@ -144,19 +174,20 @@ class TestActsLimitsEndpoint:
         body = resp.json()
 
         assert body["images"] == {
-            "max_file_size": 10 * 1024 * 1024,
-            "max_total_size_per_act": 30 * 1024 * 1024,
+            "max_file_size": 4 * 1024 * 1024,
+            "max_total_size_per_act": 5 * 1024 * 1024,
             "allowed_mime_types": [
                 "image/jpeg", "image/png", "image/gif",
             ],
             "max_items_per_violation": 50,
-            "preview_max_height_percent": 40,
+            "image_max_height_percent": 40,
         }
         # Границы таблиц/шрифта — из настроек ACTS__TABLES__/TEXTBLOCKS__
         assert body["tables"] == {
             "max_rows": TABLE_MAX_ROWS,
             "max_cols": TABLE_MAX_COLS,
             "min_col_width_px": 80,
+            "per_node": 10,
         }
         assert body["textblocks"] == {
             "font_size_min": FONT_SIZE_MIN,
@@ -164,8 +195,12 @@ class TestActsLimitsEndpoint:
             "font_size_default": 16,
             "per_node": 10,
         }
+        # #7: лимит нарушений на узел — из настроек ACTS__VIOLATIONS__
+        assert body["violations"] == {"per_node": 10}
         # Фактические значения границ (пин против случайной правки дефолтов)
-        assert body["tables"] == {"max_rows": 64, "max_cols": 16, "min_col_width_px": 80}
+        assert body["tables"] == {
+            "max_rows": 64, "max_cols": 16, "min_col_width_px": 80, "per_node": 10,
+        }
         assert body["textblocks"] == {
             "font_size_min": 8, "font_size_max": 72, "font_size_default": 16, "per_node": 10,
         }
@@ -181,16 +216,20 @@ class TestActsLimitsEndpoint:
             app.include_router(router, prefix=f"/api/v1{prefix}")
         app.dependency_overrides[get_username] = lambda: USERNAME
         app.dependency_overrides[_get_acts_settings] = lambda: ActsSettings(
-            tables=TablesSettings(max_rows=100, max_cols=20, min_col_width_px=50),
+            tables=TablesSettings(max_rows=100, max_cols=20, min_col_width_px=50, per_node=7),
             textblocks=TextblocksSettings(font_size_min=6, font_size_max=96, font_size_default=24),
+            violations=ViolationsSettings(per_node=4),
             images=ImagesSettings(max_items_per_violation=80),
         )
         with TestClient(app) as client:
             body = client.get("/api/v1/acts/limits").json()
-        assert body["tables"] == {"max_rows": 100, "max_cols": 20, "min_col_width_px": 50}
+        assert body["tables"] == {
+            "max_rows": 100, "max_cols": 20, "min_col_width_px": 50, "per_node": 7,
+        }
         assert body["textblocks"] == {
             "font_size_min": 6, "font_size_max": 96, "font_size_default": 24, "per_node": 10,
         }
+        assert body["violations"] == {"per_node": 4}
         assert body["images"]["max_items_per_violation"] == 80
 
     def test_limits_not_shadowed_by_act_id_route(self):

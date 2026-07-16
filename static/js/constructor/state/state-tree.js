@@ -399,13 +399,14 @@ Object.assign(AppState, {
         const depthCheck = this._checkDepthConstraints(draggedNode, targetNode, targetNodeId, position);
         if (!depthCheck.valid) return depthCheck;
 
-        // PERSIST-2: лимит текстблоков-на-узел. _performMove вставляет мимо
-        // insertNodeAt (свой push/splice), поэтому без явной проверки drag мог
-        // дать новому родителю N+1 текстблоков. canInsertTextBlockSubtree сам
-        // исключает draggedNode из подсчёта newParent — reorder внутри ОДНОГО
-        // родителя (draggedNode уже физически в его children) не отказывает ложно.
-        const textBlockLimitCheck = ValidationTree.canInsertTextBlockSubtree(newParent.id, draggedNode);
-        if (!textBlockLimitCheck.valid) return textBlockLimitCheck;
+        // PERSIST-2/#7: лимиты блоков-на-узел (текстблоки/нарушения/таблицы).
+        // _performMove вставляет мимо insertNodeAt (свой push/splice), поэтому
+        // без явной проверки drag мог дать новому родителю N+1 блоков.
+        // canInsertSubtree сам исключает draggedNode из подсчёта newParent —
+        // reorder внутри ОДНОГО родителя (draggedNode уже физически в его
+        // children) не отказывает ложно.
+        const blockLimitCheck = ValidationTree.canInsertSubtree(newParent.id, draggedNode);
+        if (!blockLimitCheck.valid) return blockLimitCheck;
 
         const firstLevelCheck = this._checkFirstLevelConstraints(
             draggedNode,

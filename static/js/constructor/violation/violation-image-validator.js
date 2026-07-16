@@ -19,11 +19,11 @@ import { CONTENT_TYPE_IMAGE } from './violation-content-item.js';
 
 /** Дефолтные лимиты — зеркало ImagesSettings (app/domains/acts/settings.py). */
 export const DEFAULT_IMAGE_LIMITS = {
-    maxFileSize: 10 * 1024 * 1024,
-    maxTotalSizePerAct: 30 * 1024 * 1024,
+    maxFileSize: 4 * 1024 * 1024,
+    maxTotalSizePerAct: 5 * 1024 * 1024,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif'],
     maxItemsPerViolation: 50,
-    previewMaxHeightPercent: 40,
+    imageMaxHeightPercent: 40,
 };
 
 /**
@@ -40,8 +40,10 @@ export const DEFAULT_STRUCTURE_LIMITS = {
     fontSizeMax: AppConfig.limits.textblock.fontSizeMax,
     // Базовый размер текстблока (px) — единый источник для редактора/превью.
     fontSizeDefault: AppConfig.limits.textblock.fontSizeDefault,
-    // B-13: макс. число текстблоков на узел — фолбэк до ответа /acts/limits.
+    // B-13/#7: макс. число блоков на узел — фолбэк до ответа /acts/limits.
     textBlocksPerNode: AppConfig.content.limits.textBlocksPerNode,
+    violationsPerNode: AppConfig.content.limits.violationsPerNode,
+    tablesPerNode: AppConfig.content.limits.tablesPerNode,
 };
 
 let _limits = { ...DEFAULT_IMAGE_LIMITS };
@@ -71,13 +73,15 @@ export function loadImageLimits() {
                     _limits.allowedMimeTypes = img.allowed_mime_types;
                 }
                 if (typeof img.max_items_per_violation === 'number') _limits.maxItemsPerViolation = img.max_items_per_violation;
-                if (typeof img.preview_max_height_percent === 'number') _limits.previewMaxHeightPercent = img.preview_max_height_percent;
+                if (typeof img.image_max_height_percent === 'number') _limits.imageMaxHeightPercent = img.image_max_height_percent;
             }
             const tbl = data && data.tables;
             if (tbl) {
                 if (typeof tbl.max_rows === 'number') _structure.maxRows = tbl.max_rows;
                 if (typeof tbl.max_cols === 'number') _structure.maxCols = tbl.max_cols;
                 if (typeof tbl.min_col_width_px === 'number') _structure.minColWidthPx = tbl.min_col_width_px;
+                // #7: серверный лимит числа таблиц на узел.
+                if (typeof tbl.per_node === 'number') _structure.tablesPerNode = tbl.per_node;
             }
             const tb = data && data.textblocks;
             if (tb) {
@@ -87,6 +91,11 @@ export function loadImageLimits() {
                 if (typeof tb.font_size_default === 'number') _structure.fontSizeDefault = tb.font_size_default;
                 // B-13: серверный лимит числа текстблоков на узел.
                 if (typeof tb.per_node === 'number') _structure.textBlocksPerNode = tb.per_node;
+            }
+            const vio = data && data.violations;
+            if (vio) {
+                // #7: серверный лимит числа нарушений на узел.
+                if (typeof vio.per_node === 'number') _structure.violationsPerNode = vio.per_node;
             }
             // B-5/4е: единый allowlist санитайзера из той же выдачи /acts/limits.
             if (data && data.sanitizer) {
@@ -119,7 +128,8 @@ export function getImageLimits() {
  *
  * @returns {{maxRows:number, maxCols:number, minColWidthPx:number,
  *            fontSizeMin:number, fontSizeMax:number, fontSizeDefault:number,
- *            textBlocksPerNode:number}}
+ *            textBlocksPerNode:number, violationsPerNode:number,
+ *            tablesPerNode:number}}
  */
 export function getStructureLimits() {
     return _structure;
@@ -166,18 +176,26 @@ export function estimateActImageBytes(violations) {
 }
 
 /**
- * Валидирует файл картинки до чтения в base64.
+ * Абсурдный сырой потолок: не читаем/не декодируем гигантские файлы ДО ресайза.
+ * Реальный размерный гейт (#2) работает ПОСЛЕ ресайза по ужатым байтам —
+ * validateImageBytes.
+ */
+export const ABSURD_RAW_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Проверяет ТИП файла ДО чтения/ресайза (#26 magic-sniff — отдельно, async).
+ * Размер (per-file/суммарный) сюда НЕ входит: он считается ПОСЛЕ ресайза по
+ * ужатым байтам (validateImageBytes), иначе крупное фото отклонилось бы раньше,
+ * чем успело ужаться.
  *
  * @param {File} file - Принимаемый файл
  * @param {Object} [context] - Контекст приёма
- * @param {number} [context.existingTotalBytes=0] - Суммарный размер уже
- *        добавленных картинок акта (включая принятые ранее в этой пачке)
  * @param {number} [context.itemsCount=0] - Текущее число элементов
  *        дополнительного контента нарушения
  * @param {Object} [context.limits] - Явные лимиты (для тестов)
  * @returns {{ok: boolean, reason: string}} Результат с причиной отказа
  */
-export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0, limits = null } = {}) {
+export function validateImageType(file, { itemsCount = 0, limits = null } = {}) {
     const lim = limits || _limits;
     if (!file) {
         return { ok: false, reason: 'Файл не передан' };
@@ -189,13 +207,6 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
                 + 'Разрешены: JPEG, PNG, GIF.',
         };
     }
-    if (file.size > lim.maxFileSize) {
-        return {
-            ok: false,
-            reason: `Файл «${file.name || ''}» слишком большой (${formatMb(file.size)} МБ). `
-                + `Лимит на файл — ${formatMb(lim.maxFileSize)} МБ.`,
-        };
-    }
     if (itemsCount >= lim.maxItemsPerViolation) {
         return {
             ok: false,
@@ -203,11 +214,41 @@ export function validateImageFile(file, { existingTotalBytes = 0, itemsCount = 0
                 + `(${lim.maxItemsPerViolation}).`,
         };
     }
-    if (existingTotalBytes + file.size > lim.maxTotalSizePerAct) {
+    if (typeof file.size === 'number' && file.size > ABSURD_RAW_MAX_BYTES) {
+        return {
+            ok: false,
+            reason: `Файл «${file.name || ''}» слишком большой (${formatMb(file.size)} МБ) для обработки.`,
+        };
+    }
+    return { ok: true, reason: '' };
+}
+
+/**
+ * Проверяет РАЗМЕР картинки ПОСЛЕ ресайза (#2): per-file + накопительный
+ * суммарный лимит акта — по УЖАТЫМ байтам dataUrl (estimateDataUrlBytes).
+ *
+ * @param {number} bytes - Размер ужатой картинки в байтах
+ * @param {Object} [context] - Контекст приёма
+ * @param {number} [context.existingTotalBytes=0] - Суммарный размер уже
+ *        добавленных картинок акта (включая принятые ранее в этой пачке)
+ * @param {string} [context.name] - Имя файла для сообщения об отказе
+ * @param {Object} [context.limits] - Явные лимиты (для тестов)
+ * @returns {{ok: boolean, reason: string}} Результат с причиной отказа
+ */
+export function validateImageBytes(bytes, { existingTotalBytes = 0, name = '', limits = null } = {}) {
+    const lim = limits || _limits;
+    if (bytes > lim.maxFileSize) {
+        return {
+            ok: false,
+            reason: `Файл «${name}» слишком большой (${formatMb(bytes)} МБ) даже после сжатия. `
+                + `Лимит на файл — ${formatMb(lim.maxFileSize)} МБ.`,
+        };
+    }
+    if (existingTotalBytes + bytes > lim.maxTotalSizePerAct) {
         return {
             ok: false,
             reason: `Суммарный размер картинок акта превысит лимит ${formatMb(lim.maxTotalSizePerAct)} МБ. `
-                + `Файл «${file.name || ''}» не добавлен.`,
+                + `Файл «${name}» не добавлен.`,
         };
     }
     return { ok: true, reason: '' };
@@ -218,7 +259,8 @@ window.ViolationImageValidator = {
     loadImageLimits,
     getImageLimits,
     getStructureLimits,
-    validateImageFile,
+    validateImageType,
+    validateImageBytes,
     estimateDataUrlBytes,
     estimateActImageBytes,
 };

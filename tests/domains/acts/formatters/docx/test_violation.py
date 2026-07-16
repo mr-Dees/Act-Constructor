@@ -4,6 +4,7 @@ from docx.oxml.ns import qn
 from docx.shared import Emu, Pt, Twips
 
 from app.domains.acts.formatters.docx.builders.violation import (
+    _USABLE_HEIGHT_TWIPS,
     _USABLE_WIDTH_TWIPS,
     _decode_data_url,
     _scale_picture,
@@ -30,6 +31,7 @@ def _v(**overrides):
         id="v1", nodeId="5.1", violated="Текст нарушения",
         established="Текст установлено",
         reasons=ViolationOptionalFieldSchema(enabled=True, content="Причина-X"),
+        measures=ViolationOptionalFieldSchema(enabled=True, content="Мера-M"),
         consequences=ViolationOptionalFieldSchema(enabled=True, content="Последствие-Y"),
         responsible=ViolationOptionalFieldSchema(enabled=True, content="Иванов И.И."),
     )
@@ -84,9 +86,9 @@ def test_description_list_bullets_9pt_italic(doc):
 
 
 def test_reasons_block_stays_12pt_non_italic(doc):
-    """Причины/Последствия/Ответственный — 12pt без курсива."""
+    """Причины/Принятые меры/Последствия/Ответственные — 12pt без курсива."""
     build_violation(doc, _v())
-    for label in ("Причины:", "Последствия:", "Ответственный:"):
+    for label in ("Причины:", "Принятые меры:", "Последствия:", "Ответственные:"):
         label_run, body_run = _runs_for_label(doc, label)
         assert label_run is not None and body_run is not None
         assert label_run.font.size == Pt(Sizes.body_pt)
@@ -124,9 +126,9 @@ def test_labels_are_underlined(doc):
     build_violation(doc, _v())
     label_runs = [
         r for p in doc.paragraphs for r in p.runs
-        if r.text.strip() in {"Причины:", "Последствия:", "Ответственный:"}
+        if r.text.strip() in {"Причины:", "Принятые меры:", "Последствия:", "Ответственные:"}
     ]
-    assert len(label_runs) == 3
+    assert len(label_runs) == 4
     assert all(r.underline for r in label_runs)
 
 
@@ -135,7 +137,7 @@ def test_labels_are_underlined(doc):
 def _img_item(**overrides):
     base = dict(
         id="img1", type="image", url=_PNG_1PX_DATA_URL,
-        caption="", filename="screen.png", order=0,
+        caption="", filename="screen.png",
     )
     base.update(overrides)
     return ViolationContentItemSchema(**base)
@@ -321,12 +323,20 @@ def test_image_placeholder_is_9pt_italic(doc):
     assert run.italic is True
 
 
-def test_empty_case_not_rendered_and_not_numbered(doc):
-    """Пустой кейс пропускается и не двигает нумерацию (как в MD/TXT)."""
-    build_violation(doc, _v_with_items(_case(""), _case("Единственный")))
+def test_empty_case_rendered_and_numbered(doc):
+    """Q1: пустой кейс рендерится (метка+пустое тело) и двигает нумерацию.
+
+    Пустой первый кейс занимает «Кейс 1», следующий непустой становится
+    «Кейс 2» — единое правило нумерации всех форматов (MD/TXT/превью).
+    """
+    build_violation(doc, _v_with_items(_case(""), _case("Второй")))
+    labels = [
+        r.text.strip() for p in doc.paragraphs for r in p.runs
+        if r.text.strip().startswith("Кейс")
+    ]
+    assert labels == ["Кейс 1:", "Кейс 2:"]
     text = "\n".join(p.text for p in doc.paragraphs)
-    assert "Кейс 1: Единственный" in text
-    assert "Кейс 2:" not in text
+    assert "Кейс 2: Второй" in text
 
 
 class _StubShape:
@@ -360,3 +370,27 @@ def test_scale_picture_normal_still_scales():
     _scale_picture(shape, width_percent=50)
     assert shape.width == usable * 50 // 100
     assert shape.height == shape.width  # пропорции 1:1 сохранены
+
+
+def test_scale_picture_caps_tall_image_at_height_ceiling():
+    """#13: узкая высокая картинка досжимается по потолку высоты (и ширина тоже).
+
+    width=100% дало бы полную полезную ширину, но высота втрое больше →
+    выше потолка. Итог: высота = потолок, ширина досжата тем же масштабом,
+    пропорция 1:3 сохранена.
+    """
+    usable_w = int(Twips(_USABLE_WIDTH_TWIPS))
+    ceiling = int(Twips(_USABLE_HEIGHT_TWIPS)) * 40 // 100
+    shape = _StubShape(width=usable_w, height=usable_w * 3)
+    _scale_picture(shape, width_percent=100, max_height_percent=40)
+    assert shape.height == ceiling
+    assert abs(shape.height - shape.width * 3) <= 2
+
+
+def test_scale_picture_wide_image_not_capped_by_height():
+    """#13: широкая невысокая картинка потолком высоты не трогается."""
+    usable_w = int(Twips(_USABLE_WIDTH_TWIPS))
+    shape = _StubShape(width=usable_w, height=usable_w // 10)
+    _scale_picture(shape, width_percent=100, max_height_percent=40)
+    assert shape.width == usable_w
+    assert shape.height == usable_w // 10

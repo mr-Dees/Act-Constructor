@@ -30,15 +30,17 @@ async def get_acts_limits(
     """Возвращает лимиты картинок нарушений и границы таблиц/текстблоков.
 
     Фронт читает один раз при инициализации конструктора: валидация
-    картинок (MIME/размер/число), границы grid/fontSize, лимит числа
-    текстблоков на узел (textblocks.per_node) и allowlist санитайзера
-    (секция sanitizer) синхронизируются с серверными настройками
+    картинок (MIME/размер/число), границы grid/fontSize, лимиты числа
+    блоков на узел (textblocks/tables/violations.per_node) и allowlist
+    санитайзера (секция sanitizer) синхронизируются с серверными настройками
     (ACTS__IMAGES__* / ACTS__TABLES__* / ACTS__TEXTBLOCKS__* /
-    ACTS__SANITIZER__*) — единый источник для UI-гейтов, схемы и DOMPurify.
+    ACTS__VIOLATIONS__* / ACTS__SANITIZER__*) — единый источник для UI-гейтов,
+    схемы и DOMPurify.
     """
     images = acts_cfg.images
     tables = acts_cfg.tables
     textblocks = acts_cfg.textblocks
+    violations = acts_cfg.violations
     sanitizer = acts_cfg.sanitizer
     return {
         "images": {
@@ -46,18 +48,22 @@ async def get_acts_limits(
             "max_total_size_per_act": images.max_total_size_per_act,
             "allowed_mime_types": images.allowed_mime_types,
             "max_items_per_violation": images.max_items_per_violation,
-            "preview_max_height_percent": images.preview_max_height_percent,
+            "image_max_height_percent": images.image_max_height_percent,
         },
         "tables": {
             "max_rows": tables.max_rows,
             "max_cols": tables.max_cols,
             "min_col_width_px": tables.min_col_width_px,
+            "per_node": tables.per_node,
         },
         "textblocks": {
             "font_size_min": textblocks.font_size_min,
             "font_size_max": textblocks.font_size_max,
             "font_size_default": textblocks.font_size_default,
             "per_node": textblocks.per_node,
+        },
+        "violations": {
+            "per_node": violations.per_node,
         },
         "sanitizer": {
             "allowed_tags": sanitizer.allowed_tags,

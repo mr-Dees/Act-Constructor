@@ -3,8 +3,14 @@
  *
  * Паритет ПОЛНОТЫ данных с DOCX (build_violation): полные тексты всех полей
  * без обрезки, полный список описаний (descriptionList), полные кейсы и
- * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подписи-ярлыки
- * остаются превью-стилем (решение Д.3 — паритет данных, не букв подписей).
+ * свободные тексты, реальные картинки с подписью (H4/M.3/M.5). Подпись
+ * responsible и шаблоны кейс/свободный-текст берутся из контракта
+ * violation-fields.js (Task 1); остальные подписи-ярлыки — превью-стилем.
+ * Q1: пустые поля рендерятся как «метка + пустое тело», без «—» и без
+ * фильтрации по trim() (ядро/кейсы/пункты списка — у них есть метка/маркер).
+ * Исключение — свободный текст (freeText): у него нет метки, поэтому пустой
+ * freeText — буквально нечего рендерить; паритет с DOCX/MD/TXT, которые его
+ * пропускают (см. collectViolationLines).
  */
 import { getImageLimits } from '../violation/violation-image-validator.js';
 import {
@@ -12,14 +18,28 @@ import {
     CONTENT_TYPE_FREE_TEXT,
     CONTENT_TYPE_IMAGE,
 } from '../violation/violation-content-item.js';
+import { VIOLATION_LABELS, CASE_LABEL_TEMPLATE, FREE_TEXT_LABEL } from '../violation/violation-fields.js';
+import { computeAdditionalContentNumbers } from '../violation/violation-numbering.js';
+import { buildImagePlaceholder, renderImageWithFallback } from '../violation/violation-image-render.js';
 
-/** Высота листа A4 в мм — база для ограничения высоты картинок (Б-1.6). */
+/** Высота листа A4 в мм (Б-1.6). */
 const SHEET_HEIGHT_MM = 297;
+/**
+ * Поля листа сверху/снизу в мм — как в preview-page.css (.preview-sheet
+ * padding: 10mm ...) и в DOCX (styles.Margins.top/bottom = 567 твипов ≈ 10мм).
+ */
+const PAGE_MARGIN_VERTICAL_MM = 10;
+/**
+ * Полезная высота листа (без полей) — база для image_max_height_percent (#13).
+ * Паритет с DOCX _USABLE_HEIGHT_TWIPS (docx/builders/violation.py): тот же
+ * процент должен давать ту же физическую высоту картинки в превью и в Word.
+ */
+const USABLE_HEIGHT_MM = SHEET_HEIGHT_MM - 2 * PAGE_MARGIN_VERTICAL_MM;
 
 /**
  * Чистая модель строк нарушения — полные тексты, как в DOCX.
- * Семантика нумерации кейсов и сброса счётчиков — как в
- * docx/builders/violation.py и MD/TXT-форматтерах.
+ * Нумерация кейсов и сброс счётчика — через computeAdditionalContentNumbers
+ * (Task 2, violation-numbering.js): нумеруются ВСЕ кейсы, включая пустые.
  *
  * Флаг `small` помечает поля, которые в Word рендерятся 9pt-курсивом
  * (Нарушено/Установлено/descriptionList/additionalContent — см. styles.Sizes.
@@ -33,43 +53,40 @@ const SHEET_HEIGHT_MM = 297;
 export function collectViolationLines(violation) {
     const lines = [];
 
-    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '—', small: true });
-    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '—', small: true });
+    lines.push({ type: 'line', label: 'Нарушено', text: violation.violated || '', small: true });
+    lines.push({ type: 'line', label: 'Установлено', text: violation.established || '', small: true });
 
     if (violation.descriptionList?.enabled) {
-        const items = (violation.descriptionList.items || []).filter(item => item && item.trim());
+        const items = violation.descriptionList.items || [];
         if (items.length > 0) {
-            lines.push({ type: 'list', label: 'В том числе', items, small: true });
+            lines.push({ type: 'list', label: '', items, small: true });
         }
     }
 
     if (violation.additionalContent?.enabled) {
-        let caseNumber = 1;
-        let textNumber = 1;
-        for (const item of violation.additionalContent.items || []) {
+        const items = violation.additionalContent.items || [];
+        const numbering = computeAdditionalContentNumbers(items);
+        items.forEach((item, i) => {
             if (item.type === CONTENT_TYPE_CASE) {
-                if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Кейс ${caseNumber}`, text: item.content, small: true });
-                    caseNumber++;
-                }
+                const label = CASE_LABEL_TEMPLATE.replace('{n}', numbering[i].number);
+                lines.push({ type: 'line', label, text: item.content || '', small: true });
             } else if (item.type === CONTENT_TYPE_IMAGE) {
                 lines.push({ type: 'image', item });
-                caseNumber = 1;
             } else if (item.type === CONTENT_TYPE_FREE_TEXT) {
+                // Пустой freeText не имеет метки — у него нет что рендерить
+                // (паритет с DOCX/MD/TXT, которые пустой freeText пропускают).
                 if (item.content?.trim()) {
-                    lines.push({ type: 'line', label: `Текст ${textNumber}`, text: item.content, small: true });
-                    textNumber++;
+                    lines.push({ type: 'line', label: FREE_TEXT_LABEL, text: item.content, small: true });
                 }
-                caseNumber = 1;
             }
-        }
+        });
     }
 
     const optionalFields = [
         ['reasons', 'Причины'],
         ['measures', 'Принятые меры'],
         ['consequences', 'Последствия'],
-        ['responsible', 'Ответственный за решение проблем'],
+        ['responsible', VIOLATION_LABELS.responsible],
     ];
     for (const [key, label] of optionalFields) {
         const field = violation[key];
@@ -85,12 +102,12 @@ export function collectViolationLines(violation) {
  * Чистый маппинг item.width / лимита высоты → inline-стиль картинки превью.
  *
  * @param {Object} item - Элемент типа image (поле width: 0 — авто)
- * @param {number} previewMaxHeightPercent - Лимит высоты, % высоты листа
+ * @param {number} imageMaxHeightPercent - Лимит высоты, % высоты листа
  * @returns {{width: string, maxHeight: string}} Значения CSS-свойств
  */
-export function imagePresentationStyle(item, previewMaxHeightPercent) {
+export function imagePresentationStyle(item, imageMaxHeightPercent) {
     const width = item && item.width > 0 ? `${item.width}%` : '';
-    const heightMm = SHEET_HEIGHT_MM * (previewMaxHeightPercent || 40) / 100;
+    const heightMm = USABLE_HEIGHT_MM * (imageMaxHeightPercent || 40) / 100;
     // Округление до 0.1 мм, без хвоста «.0».
     const maxHeight = `${parseFloat(heightMm.toFixed(1))}mm`;
     return { width, maxHeight };
@@ -148,10 +165,12 @@ export class PreviewViolationRenderer {
         const line = document.createElement('div');
         line.className = small ? 'preview-violation-line preview-violation-line--small'
                                : 'preview-violation-line';
-        const labelEl = document.createElement('span');
-        labelEl.className = 'preview-violation-label';
-        labelEl.textContent = `${label}:`;
-        line.appendChild(labelEl);
+        if (label) {
+            const labelEl = document.createElement('span');
+            labelEl.className = 'preview-violation-label';
+            labelEl.textContent = `${label}:`;
+            line.appendChild(labelEl);
+        }
         container.appendChild(line);
 
         const list = document.createElement('ul');
@@ -173,38 +192,37 @@ export class PreviewViolationRenderer {
     static _addImage(container, item) {
         const wrap = document.createElement('div');
         wrap.className = 'preview-violation-image-wrap';
+        const placeholderText = `Изображение: ${item.filename || ''}`;
+        const placeholderClassName = 'preview-violation-line preview-violation-line--small';
 
         if (!item.url) {
             // Пустой url (черновик) → плейсхолдер, как в DOCX/MD/TXT.
-            const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line preview-violation-line--small';
-            placeholder.textContent = `Изображение: ${item.filename || ''}`;
-            wrap.appendChild(placeholder);
+            wrap.appendChild(buildImagePlaceholder(placeholderText, placeholderClassName));
             container.appendChild(wrap);
             this._appendCaption(container, item);
             return;
         }
 
-        const img = document.createElement('img');
-        img.className = 'preview-violation-image';
-        img.alt = item.caption || item.filename || '';
-        const style = imagePresentationStyle(item, getImageLimits().previewMaxHeightPercent);
-        // Явная ширина — рендерим ровно как DOCX (_scale_picture задаёт только
-        // ширину, без потолка высоты). Авторазмер (width=0) — ограничиваем
-        // высоту долей листа, чтобы огромная картинка не разнесла скролл (Б-1.6).
-        if (style.width) {
-            img.style.width = style.width;
-        } else {
-            img.style.maxHeight = style.maxHeight;
-        }
-        img.onerror = () => {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'preview-violation-line preview-violation-line--small';
-            placeholder.textContent = `Изображение: ${item.filename || ''}`;
-            wrap.replaceChildren(placeholder);
-        };
-        img.src = item.url;
-        wrap.appendChild(img);
+        const style = imagePresentationStyle(item, getImageLimits().imageMaxHeightPercent);
+        // #27: onerror ДО src + текст-плейсхолдер при битой картинке — общее
+        // ядро с редактором (violation-rendering.js).
+        renderImageWithFallback(wrap, {
+            src: item.url,
+            alt: item.caption || item.filename || '',
+            imgClassName: 'preview-violation-image',
+            placeholderText,
+            placeholderClassName,
+            configureImg: (img) => {
+                // Явная ширина задаёт width; потолок высоты
+                // (image_max_height_percent) применяется ВСЕГДА — и при явной
+                // ширине, и при авторазмере (#13). Паритет с DOCX
+                // _scale_picture, который досжимает по высоте в обеих ветках.
+                if (style.width) {
+                    img.style.width = style.width;
+                }
+                img.style.maxHeight = style.maxHeight;
+            },
+        });
         container.appendChild(wrap);
         this._appendCaption(container, item);
     }

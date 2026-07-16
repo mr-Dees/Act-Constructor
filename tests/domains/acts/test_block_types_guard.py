@@ -11,8 +11,9 @@
 - (б, в, г) семантически: фикстура-акт с одним блоком данного типа
   прогоняется через DOCX-, markdown- и text-форматтеры, маркер контента
   блока обязан попасть в вывод;
-- (д) HTML-поля блоков (textblock.content, violation.violated/established)
-  проходят sanitize_act_data — грязный HTML вычищается, текст остаётся.
+- (д) textblock.content проходит sanitize_act_data (грязный HTML вычищается,
+  текст остаётся); violation.violated/established — plain-text поля,
+  sanitize_act_data их НЕ трогает, хранятся дословно.
 
 Новый тип, добавленный в LEAF_BLOCK_TYPES, провалит параметризацию
 (нет фикстуры → явный fail с подсказкой), пока не появятся payload
@@ -192,7 +193,7 @@ class TestFormattersCoverEveryLeafType:
 
 
 class TestSanitizerCoversHtmlFields:
-    """(д) HTML-поля блоков проходят sanitize_act_data."""
+    """(д) textblock.content чистится; violation.violated/established — дословно."""
 
     DIRTY = f"<script>alert(1)</script><b>{MARKER}</b>"
 
@@ -207,7 +208,8 @@ class TestSanitizerCoversHtmlFields:
         assert "<script>" not in content, "textblock.content не прошёл санитизацию"
         assert MARKER in content, "санитайзер не должен терять легитимный текст"
 
-    def test_violation_html_fields_sanitized(self):
+    def test_violation_html_fields_stored_verbatim(self):
+        """violation.violated/established — plain-text, sanitize_act_data не трогает."""
         data = _make_act_data(NODE_TYPE_VIOLATION)
         violation = data["violations"][f"{NODE_TYPE_VIOLATION}_1"]
         violation["violated"] = self.DIRTY
@@ -216,10 +218,9 @@ class TestSanitizerCoversHtmlFields:
 
         sanitize_act_data(model)
 
-        sanitized = model.violations[f"{NODE_TYPE_VIOLATION}_1"]
+        result = model.violations[f"{NODE_TYPE_VIOLATION}_1"]
         for field_name in ("violated", "established"):
-            value = getattr(sanitized, field_name)
-            assert "<script>" not in value, (
-                f"violation.{field_name} не прошёл санитизацию"
+            value = getattr(result, field_name)
+            assert value == self.DIRTY, (
+                f"violation.{field_name} должен храниться дословно"
             )
-            assert MARKER in value, "санитайзер не должен терять легитимный текст"

@@ -9,7 +9,11 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
-from app.domains.acts.block_types import NODE_TYPE_TEXTBLOCK
+from app.domains.acts.block_types import (
+    NODE_TYPE_TABLE,
+    NODE_TYPE_TEXTBLOCK,
+    NODE_TYPE_VIOLATION,
+)
 from app.domains.acts.exceptions import AccessDeniedError, ActValidationError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
@@ -25,7 +29,6 @@ from app.domains.acts.services.content_validation import (
     status_from_issues,
 )
 from app.domains.acts.settings import ActsSettings
-from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.utils.html_sanitizer import sanitize_act_data, sanitize_tree_nodes
 
 logger = logging.getLogger("audit_workstation.service.acts.content")
@@ -155,6 +158,12 @@ class ActContentService:
 
             # Создаём снэпшот версии только для manual/periodic
             if data.saveType in ("manual", "periodic"):
+                # Фактуры в снимок берём из БД (act_invoices уже синхронизированы
+                # save_content выше через _sync_invoices) как {node_id: реквизиты}
+                # — та же форма, что поле invoices в GET /acts/{id}/content, чтобы
+                # обе стороны диффа версий были структурно одинаковыми.
+                invoices_list = await self._invoice.get_invoices_for_act(act_id)
+                invoices_snapshot = {inv["node_id"]: inv for inv in invoices_list}
                 await self._versions.create_version(
                     act_id=act_id,
                     username=username,
@@ -163,6 +172,7 @@ class ActContentService:
                     tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
                     textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
                     violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
+                    invoices=invoices_snapshot,
                     max_versions=self.acts_settings.audit_log.max_content_versions,
                 )
 
@@ -258,47 +268,77 @@ class ActContentService:
         sanitize_tree_nodes(node)
 
     def _validate_tree(self, data: ActDataSchema) -> None:
-        """Проверяет структуру дерева перед сохранением."""
+        """Проверяет структуру дерева перед сохранением.
+
+        Глубина и лимиты числа блоков-детей одного узла (B-13 текстблоки, #7
+        нарушения и таблицы) считаются за ОДИН обход дерева (#14 код-ревью —
+        раньше на каждое сохранение дерево обходилось 4 раза). Фронт
+        ограничивает добавление блоков узлу, но paste/drag/undo и прямой API
+        эти проверки обходили — считаем детей нужного type у каждого узла
+        дерева, паритет с фронт-гейтами вставки.
+
+        Порядок ошибок сохранён как при последовательных проверках: глубина →
+        корневой id → текстблоки → нарушения → таблицы.
+        """
         tree = data.tree
         if not tree:
             return
 
+        # (node_type, лимит-на-узел, подпись для сообщения об ошибке)
+        type_limits = (
+            (NODE_TYPE_TEXTBLOCK, self.acts_settings.textblocks.per_node, "текстовых блоков"),
+            (NODE_TYPE_VIOLATION, self.acts_settings.violations.per_node, "нарушений"),
+            (NODE_TYPE_TABLE, self.acts_settings.tables.per_node, "таблиц"),
+        )
+        # Типы с несконфигурированным (не int) лимитом — лимит не применяем
+        # (настройки не заданы или замоканы в тестах; в проде per_node всегда
+        # int из ACTS__*__PER_NODE).
+        active_limits = {
+            node_type: max_per_node
+            for node_type, max_per_node, _label in type_limits
+            if isinstance(max_per_node, int)
+        }
+
+        max_depth = 0
+        # Первое превышение лимита на узел по каждому типу, в порядке обхода
+        # (stack.pop() + stack.extend) — совпадает с порядком прежних раздельных
+        # проходов, т.к. порядок посещения узлов не зависит от node_type.
+        first_over_limit: dict[str, int] = {}
+        stack = [(tree, 0)]
+        while stack:
+            node, depth = stack.pop()
+            if depth > max_depth:
+                max_depth = depth
+            children = node.get("children")
+            if not isinstance(children, list):
+                continue
+            if active_limits:
+                counts: dict[str, int] = {}
+                for child in children:
+                    if not isinstance(child, dict):
+                        continue
+                    child_type = child.get("type")
+                    if child_type in active_limits:
+                        counts[child_type] = counts.get(child_type, 0) + 1
+                for node_type, count in counts.items():
+                    if count > active_limits[node_type] and node_type not in first_over_limit:
+                        first_over_limit[node_type] = count
+            stack.extend((child, depth + 1) for child in children)
+
         # Проверка глубины
-        depth = ActTreeUtils.calculate_tree_depth(tree)
-        if depth > self.acts_settings.resource.max_tree_depth:
+        if max_depth > self.acts_settings.resource.max_tree_depth:
             raise ActValidationError(
-                f"Глубина дерева ({depth}) превышает максимум ({self.acts_settings.resource.max_tree_depth})"
+                f"Глубина дерева ({max_depth}) превышает максимум ({self.acts_settings.resource.max_tree_depth})"
             )
 
         # Проверка наличия корневого узла
         if not tree.get('id'):
             raise ActValidationError("Дерево должно иметь корневой узел с id")
 
-        # Лимит числа текстблоков-детей одного узла (B-13). Фронт ограничивает
-        # добавление блоков узлу, но прямой API эту проверку обходил. Считаем
-        # детей type='textblock' у каждого узла дерева.
-        self._validate_textblocks_per_node(tree)
-
-    def _validate_textblocks_per_node(self, tree: dict) -> None:
-        """Проверяет, что число текстблоков-детей узла не превышает per_node (B-13)."""
-        max_per_node = self.acts_settings.textblocks.per_node
-        if not isinstance(max_per_node, int):
-            # Настройки не сконфигурированы (или замоканы в тестах) — лимит не
-            # применяем. В проде per_node всегда int из ACTS__TEXTBLOCKS__PER_NODE.
-            return
-        stack = [tree]
-        while stack:
-            node = stack.pop()
-            children = node.get("children")
-            if not isinstance(children, list):
-                continue
-            textblock_count = sum(
-                1 for child in children
-                if isinstance(child, dict) and child.get("type") == NODE_TYPE_TEXTBLOCK
-            )
-            if textblock_count > max_per_node:
+        for node_type, max_per_node, item_label in type_limits:
+            if node_type in first_over_limit:
+                count = first_over_limit[node_type]
                 raise ActValidationError(
-                    f"Узел содержит слишком много текстовых блоков "
-                    f"({textblock_count}), максимум — {max_per_node}"
+                    f"Узел содержит слишком много {item_label} "
+                    f"({count}), максимум — {max_per_node}"
                 )
-            stack.extend(children)

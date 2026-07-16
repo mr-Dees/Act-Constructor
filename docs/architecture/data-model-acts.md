@@ -175,7 +175,6 @@ underline}` **вырезан целиком** (директива владель
 | `url`      | str, default `""`                  | URL изображения (для `image`)             |
 | `caption`  | str, default `""`                  | подпись изображения                       |
 | `filename` | str, default `""`                  | имя файла                                 |
-| `order`    | int ≥ 0                            | порядок отображения                       |
 | `width`    | int 0–100, default `0`             | ширина картинки, % полезной ширины листа (0 = авто: натуральный размер с потолком по ширине) |
 
 ---
@@ -330,6 +329,8 @@ isPinnedTable(node) {
 **Чистка при перемещении.** Если узел уезжает за пределы раздела 5, `_clearInvoiceRecursive` стирает `invoice` у узла и всех потомков (`state-tree.js:1024`). Аналогично при добавлении ребёнка к TB-leaf — родитель перестаёт быть листом, и его `invoice` удаляется (`state-tree.js:126`).
 
 **Дополнительные denormalized-поля в `act_invoices`.** `verification_status` (`pending|verified|rejected`, default `pending`), `audit_act_id`, `audit_point_id`, `etl_loading_id`, `create_date`, `created_by` — заполняются бэком, не приходят с фронта.
+
+**Restore версии переприкрепляет фактуры.** Отдельный канал — `AuditLogService.restore_version` (`audit_log_service.py`). При восстановлении версии фактуры её снимка (`act_content_versions.invoices_data`, см. §10) заново прикрепляются через `ActInvoiceRepository.save_invoice` (UPSERT по `(act_id, node_id)`), `verification_status` при этом сбрасывается в `pending` (восстановленная фактура требует повторной верификации). `invoiceNodeIds` restore-данных выставляется из снимка, поэтому финальный `_sync_invoices` (см. п.3 выше) удаляет только фактуры узлов вне снимка, а не все фактуры акта.
 
 ---
 
@@ -512,7 +513,7 @@ isPinnedTable(node) {
   2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации и `field_validator`'ы на `TableSchema.grid`/`colWidths`. Политика незнакомых полей задана явно: словарные схемы и `ActDataSchema` — `extra="forbid"` (незадекларированное поле → 422), узлы дерева (`ActItemSchema`) — явный `extra="ignore"` с нормализацией через `model_dump` (дерево хранится нормализованным). При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — новые поля добавляются опциональными с `default=` и обязательно декларируются в схеме.
   3. Денормализация — если меняется набор флагов в `act_tables` (например, новый тип спец-таблицы), нужно одновременно обновить SQL-миграции (новая колонка, индекс при необходимости) и `ActContentRepository._load_tables`/`_save_tables`.
 
-**Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:345`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data` по номерам версий, для просмотра истории и восстановления. Это версионирование данных конкретного акта, а не схемы.
+**Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:345`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` по номерам версий, для просмотра истории и восстановления. `invoices_data` (JSONB, `NOT NULL DEFAULT '{}'`) — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Это версионирование данных конкретного акта, а не схемы.
 
 **Рекомендации при изменении модели.**
 

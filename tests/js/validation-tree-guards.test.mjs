@@ -14,6 +14,7 @@ import { AppState } from '../../static/js/constructor/state/state-core.js';
 import '../../static/js/constructor/state/state-tree.js';
 import '../../static/js/constructor/state/state-content.js';
 import { ValidationTree } from '../../static/js/constructor/validation/validation-tree.js';
+import { AppConfig } from '../../static/js/shared/app-config.js';
 import {
     getStructureLimits,
     resetImageLimitsForTests,
@@ -70,11 +71,12 @@ test('canAddSibling запрещает обычного соседа на 0 ур
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// PERSIST-2: canInsertTextBlockSubtree — лимит текстблоков при вставке
-// ГОТОВОГО поддерева (undo/paste, insertNodeAt не зовёт canAddContent)
+// PERSIST-2/#7: canInsertSubtree — лимиты блоков (текстблоки/нарушения/таблицы)
+// при вставке ГОТОВОГО поддерева (undo/paste/drag, insertNodeAt не зовёт
+// canAddContent). Обобщено с прежней canInsertTextBlockSubtree.
 // ──────────────────────────────────────────────────────────────────────────
 
-test('canInsertTextBlockSubtree: родитель на лимите + корень-textblock → отказ', () => {
+test('canInsertSubtree: родитель на лимите + корень-textblock → отказ', () => {
     getStructureLimits().textBlocksPerNode = 1;
     AppState.treeData = {
         id: 'root', label: 'Акт', children: [
@@ -86,12 +88,12 @@ test('canInsertTextBlockSubtree: родитель на лимите + корен
     AppState._rebuildNodeIndex();
 
     const newTextBlock = { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] };
-    const result = ValidationTree.canInsertTextBlockSubtree('p', newTextBlock);
+    const result = ValidationTree.canInsertSubtree('p', newTextBlock);
     assert.equal(result.valid, false);
     assert.match(result.message, /текстовых блоков/);
 });
 
-test('canInsertTextBlockSubtree: родитель НЕ на лимите → success', () => {
+test('canInsertSubtree: родитель НЕ на лимите → success', () => {
     getStructureLimits().textBlocksPerNode = 2;
     AppState.treeData = {
         id: 'root', label: 'Акт', children: [
@@ -103,10 +105,10 @@ test('canInsertTextBlockSubtree: родитель НЕ на лимите → suc
     AppState._rebuildNodeIndex();
 
     const newTextBlock = { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] };
-    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', newTextBlock).valid, true);
+    assert.equal(ValidationTree.canInsertSubtree('p', newTextBlock).valid, true);
 });
 
-test('canInsertTextBlockSubtree: корень поддерева — не textblock, прямая проверка родителя не применяется', () => {
+test('canInsertSubtree: корень поддерева — не textblock, прямая проверка родителя не применяется', () => {
     getStructureLimits().textBlocksPerNode = 1;
     AppState.treeData = {
         id: 'root', label: 'Акт', children: [
@@ -119,10 +121,10 @@ test('canInsertTextBlockSubtree: корень поддерева — не textbl
 
     // Вставляем item (не сам textblock) — родитель получает не-textblock ребёнка.
     const itemNode = { id: 'sub', type: 'item', children: [] };
-    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', itemNode).valid, true);
+    assert.equal(ValidationTree.canInsertSubtree('p', itemNode).valid, true);
 });
 
-test('canInsertTextBlockSubtree: узел поддерева нарушает ТЕКУЩИЙ лимит (самосогласованность) → отказ', () => {
+test('canInsertSubtree: узел поддерева нарушает ТЕКУЩИЙ лимит (самосогласованность) → отказ', () => {
     getStructureLimits().textBlocksPerNode = 2;
     AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
     AppState._rebuildNodeIndex();
@@ -136,11 +138,11 @@ test('canInsertTextBlockSubtree: узел поддерева нарушает Т
             { id: 'tb3', type: 'textblock', textBlockId: 'tb3', children: [] },
         ],
     };
-    const result = ValidationTree.canInsertTextBlockSubtree('p', subtree);
+    const result = ValidationTree.canInsertSubtree('p', subtree);
     assert.equal(result.valid, false, 'самосогласованность поддерева нарушена под текущим лимитом');
 });
 
-test('canInsertTextBlockSubtree: поддерево самосогласовано → success', () => {
+test('canInsertSubtree: поддерево самосогласовано → success', () => {
     getStructureLimits().textBlocksPerNode = 3;
     AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
     AppState._rebuildNodeIndex();
@@ -152,19 +154,19 @@ test('canInsertTextBlockSubtree: поддерево самосогласован
             { id: 'tb3', type: 'textblock', textBlockId: 'tb3', children: [] },
         ],
     };
-    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', subtree).valid, true);
+    assert.equal(ValidationTree.canInsertSubtree('p', subtree).valid, true);
 });
 
-test('canInsertTextBlockSubtree: лимит не задан (не число) → проверка не применяется', () => {
+test('canInsertSubtree: лимит текстблоков не задан (не число) → фолбэк block-types, малое поддерево проходит', () => {
     getStructureLimits().textBlocksPerNode = undefined;
     AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
     AppState._rebuildNodeIndex();
 
     const newTextBlock = { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] };
-    assert.equal(ValidationTree.canInsertTextBlockSubtree('p', newTextBlock).valid, true);
+    assert.equal(ValidationTree.canInsertSubtree('p', newTextBlock).valid, true);
 });
 
-test('canInsertTextBlockSubtree: move/reorder — node уже физически среди children родителя, не считается дважды', () => {
+test('canInsertSubtree: move/reorder — node уже физически среди children родителя, не считается дважды', () => {
     getStructureLimits().textBlocksPerNode = 2;
     AppState.treeData = {
         id: 'root', label: 'Акт', children: [
@@ -180,11 +182,11 @@ test('canInsertTextBlockSubtree: move/reorder — node уже физически
     // не вырезал его из children) — проверка родителя того же узла не должна
     // отказывать (иначе обычный reorder внутри родителя ложно бы блокировался).
     const tb1 = AppState.findNodeById('p').children[0];
-    const result = ValidationTree.canInsertTextBlockSubtree('p', tb1);
+    const result = ValidationTree.canInsertSubtree('p', tb1);
     assert.equal(result.valid, true, 'узел не должен учитываться дважды относительно самого себя');
 });
 
-test('canInsertTextBlockSubtree: move в ДРУГОЙ родитель на лимите → отказ (чужой узел туда ещё не входит)', () => {
+test('canInsertSubtree: move в ДРУГОЙ родитель на лимите → отказ (чужой узел туда ещё не входит)', () => {
     getStructureLimits().textBlocksPerNode = 1;
     AppState.treeData = {
         id: 'root', label: 'Акт', children: [
@@ -199,6 +201,197 @@ test('canInsertTextBlockSubtree: move в ДРУГОЙ родитель на ли
     AppState._rebuildNodeIndex();
 
     const tb1 = AppState.findNodeById('src').children[0];
-    const result = ValidationTree.canInsertTextBlockSubtree('dst', tb1);
+    const result = ValidationTree.canInsertSubtree('dst', tb1);
     assert.equal(result.valid, false, 'dst уже на лимите своим собственным tb2 — чужой узел не помещается');
+});
+
+// ── #7: обобщение на нарушения ──────────────────────────────────────────────
+
+test('canInsertSubtree: родитель на лимите нарушений + корень-violation → отказ', () => {
+    getStructureLimits().violationsPerNode = 1;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'v1', type: 'violation', violationId: 'v1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const newViolation = { id: 'v2', type: 'violation', violationId: 'v2', children: [] };
+    const result = ValidationTree.canInsertSubtree('p', newViolation);
+    assert.equal(result.valid, false);
+    assert.match(result.message, /нарушений/);
+});
+
+test('canInsertSubtree: поддерево нарушает лимит нарушений (самосогласованность) → отказ', () => {
+    getStructureLimits().violationsPerNode = 2;
+    AppState.treeData = { id: 'root', label: 'Акт', children: [{ id: 'p', label: 'Пункт', children: [] }] };
+    AppState._rebuildNodeIndex();
+
+    const subtree = {
+        id: 'sub', type: 'item', children: [
+            { id: 'v1', type: 'violation', violationId: 'v1', children: [] },
+            { id: 'v2', type: 'violation', violationId: 'v2', children: [] },
+            { id: 'v3', type: 'violation', violationId: 'v3', children: [] },
+        ],
+    };
+    assert.equal(ValidationTree.canInsertSubtree('p', subtree).valid, false);
+});
+
+test('canInsertSubtree: reorder нарушения ВНУТРИ родителя на лимите — node не считается дважды → success', () => {
+    getStructureLimits().violationsPerNode = 2;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'v1', type: 'violation', violationId: 'v1', children: [] },
+                { id: 'v2', type: 'violation', violationId: 'v2', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const v1 = AppState.findNodeById('p').children[0];
+    assert.equal(ValidationTree.canInsertSubtree('p', v1).valid, true,
+        'self-exclusion по id: reorder внутри родителя на лимите не блокируется');
+});
+
+// ── #7: обобщение на таблицы (считаются ВСЕ, включая закреплённые) ──────────
+
+test('canInsertSubtree: родитель на лимите таблиц + корень-table → отказ', () => {
+    getStructureLimits().tablesPerNode = 1;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 't1', type: 'table', tableId: 't1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const newTable = { id: 't2', type: 'table', tableId: 't2', children: [] };
+    const result = ValidationTree.canInsertSubtree('p', newTable);
+    assert.equal(result.valid, false);
+    assert.match(result.message, /таблиц/);
+});
+
+test('canInsertSubtree: закреплённые metrics/risk-таблицы учитываются в лимите таблиц', () => {
+    getStructureLimits().tablesPerNode = 2;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 'm1', type: 'table', tableId: 'm1', kind: 'metrics', children: [] },
+                { id: 't1', type: 'table', tableId: 't1', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    // p уже на лимите (2/2, одна из них закреплённая metrics) — новый table не влезет.
+    const newTable = { id: 't2', type: 'table', tableId: 't2', children: [] };
+    assert.equal(ValidationTree.canInsertSubtree('p', newTable).valid, false,
+        'закреплённая metrics считается наравне с обычными таблицами');
+});
+
+test('canInsertSubtree: reorder таблицы ВНУТРИ родителя на лимите — node не считается дважды → success', () => {
+    getStructureLimits().tablesPerNode = 2;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', children: [
+                { id: 't1', type: 'table', tableId: 't1', children: [] },
+                { id: 't2', type: 'table', tableId: 't2', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const t1 = AppState.findNodeById('p').children[0];
+    assert.equal(ValidationTree.canInsertSubtree('p', t1).valid, true,
+        'self-exclusion по id: reorder таблицы внутри родителя на лимите не блокируется');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// #8: canAddContent (кнопка «Добавить …») — _validateContentLimits раньше
+// override'ил статичный лимит (block-types.js, по 10) рантайм-значением
+// из /acts/limits только для textBlocks; нарушения и таблицы оставались на
+// захардкоженных 10, и кнопка добавления пропускала бы N+1 узел, если админ
+// снизил лимит в настройках (сервер бы такой N+1 уже отклонил при сохранении).
+// ──────────────────────────────────────────────────────────────────────────
+
+test('canAddContent: рантайм-лимит нарушений ниже статичного (10) → 4-е нарушение отклонено', () => {
+    getStructureLimits().violationsPerNode = 3;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', type: 'item', children: [
+                { id: 'v1', type: 'violation', violationId: 'v1', children: [] },
+                { id: 'v2', type: 'violation', violationId: 'v2', children: [] },
+                { id: 'v3', type: 'violation', violationId: 'v3', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const node = AppState.findNodeById('p');
+    const result = ValidationTree.canAddContent(node, AppConfig.nodeTypes.VIOLATION);
+    assert.equal(result.valid, false, 'рантайм-лимит (3) уже достигнут — 4-е нарушение не должно проходить');
+    assert.match(result.message, /нарушений/);
+});
+
+test('canAddContent: рантайм-лимит таблиц ниже статичного (10) → 4-я таблица отклонена', () => {
+    getStructureLimits().tablesPerNode = 3;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', type: 'item', children: [
+                { id: 't1', type: 'table', tableId: 't1', children: [] },
+                { id: 't2', type: 'table', tableId: 't2', children: [] },
+                { id: 't3', type: 'table', tableId: 't3', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const node = AppState.findNodeById('p');
+    const result = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+    assert.equal(result.valid, false, 'рантайм-лимит (3) уже достигнут — 4-я таблица не должна проходить');
+    assert.match(result.message, /таблиц/);
+});
+
+test('canAddContent: рантайм-лимит не задан (не число) → фолбэк на статичный лимит block-types (10)', () => {
+    getStructureLimits().violationsPerNode = undefined;
+    getStructureLimits().tablesPerNode = undefined;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', type: 'item', children: [
+                { id: 'v1', type: 'violation', violationId: 'v1', children: [] },
+                { id: 'v2', type: 'violation', violationId: 'v2', children: [] },
+                { id: 'v3', type: 'violation', violationId: 'v3', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const node = AppState.findNodeById('p');
+    // 3 уже есть, статичный лимит — 10: 4-е нарушение должно проходить (рантайм
+    // отсутствует и не должен подставиться как 0/undefined).
+    const result = ValidationTree.canAddContent(node, AppConfig.nodeTypes.VIOLATION);
+    assert.equal(result.valid, true, 'без валидного рантайм-значения должен работать статичный лимит (10)');
+});
+
+test('canAddContent: рантайм-лимит текстблоков (поведение не изменилось) — ниже статичного → отказ', () => {
+    getStructureLimits().textBlocksPerNode = 3;
+    AppState.treeData = {
+        id: 'root', label: 'Акт', children: [
+            { id: 'p', label: 'Пункт', type: 'item', children: [
+                { id: 'tb1', type: 'textblock', textBlockId: 'tb1', children: [] },
+                { id: 'tb2', type: 'textblock', textBlockId: 'tb2', children: [] },
+                { id: 'tb3', type: 'textblock', textBlockId: 'tb3', children: [] },
+            ] },
+        ],
+    };
+    AppState._rebuildNodeIndex();
+
+    const node = AppState.findNodeById('p');
+    const result = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TEXTBLOCK);
+    assert.equal(result.valid, false, 'рантайм-лимит текстблоков (3) должен по-прежнему учитываться');
+    assert.match(result.message, /текстовых блоков/);
 });

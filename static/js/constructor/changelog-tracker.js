@@ -12,6 +12,13 @@ export class ChangelogTracker {
     static MAX_ENTRIES = 500;
     /** Одноразовый флаг показа уведомления о квоте, чтобы не спамить юзера каждые 1 сек debounce. */
     static _quotaWarned = false;
+    /**
+     * Хуки, вызываемые в начале flush() (до сбора записей). Регистрируются как
+     * app-lifetime side effect модулей-потребителей (см. violation-audit.js) —
+     * не сбрасываются в destroy(). Позволяют синтезировать записи на всех
+     * flush-сайтах без ручной синхронизации новых мест сохранения.
+     */
+    static _preFlushHooks = [];
 
     /**
      * Инициализация с actId, загрузка из localStorage
@@ -79,10 +86,30 @@ export class ChangelogTracker {
     }
 
     /**
+     * Регистрирует pre-flush hook (см. _preFlushHooks). Хук может звать record();
+     * его записи попадут в текущий flush.
+     * @param {Function} fn
+     */
+    static registerPreFlushHook(fn) {
+        if (typeof fn === 'function') this._preFlushHooks.push(fn);
+    }
+
+    /**
      * Вернуть и очистить все записи (flush при сохранении)
      * @returns {Array} Массив записей
      */
     static flush() {
+        // Pre-flush хуки (diff-синтез аудита нарушений и т.п.) — ДО сбора
+        // записей, чтобы их record() попал в текущий flush. Изоляция: сбой
+        // одного хука не должен рушить сохранение акта.
+        for (const hook of this._preFlushHooks) {
+            try {
+                hook();
+            } catch (err) {
+                console.error('ChangelogTracker: ошибка pre-flush hook:', err);
+            }
+        }
+
         // Срабатываем все pending debounce — добавляем их записи немедленно
         for (const key of Object.keys(this._debounceTimers)) {
             const pending = this._debounceTimers[key];

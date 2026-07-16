@@ -3,14 +3,56 @@
  * Поддержка Ctrl+V для изображений и текста
  */
 
-import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { AppConfig } from '../../shared/app-config.js';
 import {
     CONTENT_TYPE_CASE,
     CONTENT_TYPE_FREE_TEXT,
-    CONTENT_TYPE_IMAGE,
 } from './violation-content-item.js';
+
+/**
+ * Строгий маркер кейса: «Кейс» + номер + разделитель в начале строки.
+ * Флаг i ловит «кейс» в любом регистре; класс разделителей —
+ * точка / двоеточие / скобка / дефис / en-dash / em-dash. Требует РОВНО
+ * такой префикс: «Кейсы …», «Кейс 7 без разделителя» — уже не кейс.
+ */
+const CASE_PREFIX_RE = /^Кейс\s*\d+\s*[.:)\-–—]/i;
+
+/**
+ * Определяет тип вставляемого из буфера текста и очищает содержимое.
+ * Кейс — только при строгом совпадении CASE_PREFIX_RE; тогда снимается
+ * РОВНО совпавший префикс (не фиксированные 4 символа). Иначе — произвольный
+ * текст без изменений.
+ *
+ * @param {string} textContent - Оригинальный текст буфера (ожидается .trim()'нутым)
+ * @returns {{type: string, content: string}}
+ */
+export function parseClipboardText(textContent) {
+    if (CASE_PREFIX_RE.test(textContent)) {
+        return {
+            type: CONTENT_TYPE_CASE,
+            content: textContent.replace(CASE_PREFIX_RE, '').trim(),
+        };
+    }
+    return { type: CONTENT_TYPE_FREE_TEXT, content: textContent };
+}
+
+/**
+ * true, если стандартную вставку в этот target перехватывать НЕЛЬЗЯ:
+ * поле ввода (textarea/input) или contenteditable-редактор (текстблок).
+ * Иначе Ctrl+V в редакторе, когда мышь/фокус рядом с зоной нарушения,
+ * ушёл бы в дополнительный контент (#19).
+ *
+ * @param {EventTarget} target - e.target события paste
+ * @returns {boolean}
+ */
+export function pasteTargetIsEditable(target) {
+    if (!target) return false;
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return true;
+    if (target.closest && target.closest('[contenteditable="true"]')) return true;
+    return false;
+}
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -19,15 +61,24 @@ Object.assign(ViolationManager.prototype, {
      */
     setupPasteHandler() {
         document.addEventListener('paste', async (e) => {
-            // Проверяем, есть ли текущий активный контейнер
-            if (!this.currentActiveContainer) {
-                return;
-            }
+            // Режим просмотра: вставка в дополнительный контент запрещена (#1).
+            // Глобальный слушатель живёт всегда — guard именно здесь обязателен.
+            if (AppConfig.readOnlyMode?.isReadOnly) return;
 
-            // Если вставка происходит в textarea или input внутри дополнительного контента —
-            // не перехватываем, позволяем стандартное поведение браузера
-            const target = e.target;
-            if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+            // Стандартную вставку в поля ввода и contenteditable-редактор
+            // (текстблок) не перехватываем — даже если мышь/фокус рядом с зоной
+            // нарушения (#19). Без этого Ctrl+V в текстблоке уходил бы в
+            // дополнительный контент по hover-модели.
+            if (pasteTargetIsEditable(e.target)) return;
+
+            // Целевую зону определяем по ФОКУСУ (activeElement), а НЕ по hover (#19):
+            // hover-модель (currentActiveContainer/cursorInsertPosition) осталась
+            // только для визуального индикатора позиции при drag файлов. Контейнер
+            // зоны focusable (tabindex=0) — клик по нему даёт фокус.
+            const targetContainer = document.activeElement && document.activeElement.closest
+                ? document.activeElement.closest('.additional-content-wrapper')
+                : null;
+            if (!targetContainer) {
                 return;
             }
 
@@ -37,7 +88,6 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            const targetContainer = this.currentActiveContainer;
             const itemsContainer = targetContainer.querySelector('.additional-content-items');
             const violationId = itemsContainer?.dataset.violationId;
 
@@ -52,92 +102,62 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
-            // Определяем позицию вставки на основе положения курсора
-            const insertIndex = this.cursorInsertPosition !== null
-                ? this.cursorInsertPosition
-                : violation.additionalContent.items.length;
+            // Под focus-моделью вставляем в КОНЕЦ зоны (#19): позиция курсора мыши
+            // неактуальна — вставка инициирована с клавиатуры по фокусу.
+            const insertIndex = violation.additionalContent.items.length;
 
-            let hasImage = false;
-            let imageItem = null;
+            // Собираем ВСЕ картинки буфера (не только последнюю, #28) и
+            // отдельно наличие текста.
+            const imageFiles = [];
             let textItem = null;
 
-            // Сначала определяем, что есть в буфере
             for (let i = 0; i < items.length; i++) {
                 const item = items[i];
                 if (item.type.indexOf('image') !== -1) {
-                    hasImage = true;
-                    imageItem = item;
+                    const file = item.getAsFile();
+                    if (file) imageFiles.push(file);
                 } else if (item.type === 'text/plain') {
                     textItem = item;
                 }
             }
 
-            // Обрабатываем изображение если есть
-            if (hasImage && imageItem) {
+            // Картинки идут ТЕМ ЖЕ конвейером, что drop/upload (#28):
+            // filterAcceptedImageFiles → диалог качества (Q3) → ресайз → bulk (#29).
+            // Собственного FileReader и логики «только последняя картинка» больше нет.
+            if (imageFiles.length > 0) {
                 e.preventDefault();
-                const file = imageItem.getAsFile();
 
-                if (file) {
-                    // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
-                    const accepted = this.filterAcceptedImageFiles([file], violation);
-                    if (accepted.length === 0) return;
+                // Тип-валидация ДО чтения (H6/#26) — warning с причиной отказа.
+                const accepted = this.filterAcceptedImageFiles(imageFiles, violation);
+                if (accepted.length === 0) return;
 
-                    const reader = new FileReader();
-
-                    reader.onload = (event) => {
-                        const timestamp = Date.now();
-                        const extension = file.type.split('/')[1] || 'png';
-                        const filename = `pasted_image_${timestamp}.${extension}`;
-
-                        this.addContentItemAtPosition(violation, CONTENT_TYPE_IMAGE, targetContainer, insertIndex, {
-                            url: event.target.result,
-                            filename: filename
-                        });
-
-                        Notifications.success('Изображение добавлено из буфера обмена');
-                    };
-
-                    reader.onerror = (error) => {
-                        console.error('Error reading image:', error);
-                        Notifications.error('Ошибка при чтении изображения');
-                    };
-
-                    reader.readAsDataURL(file);
-                }
+                // insertIndex зафиксирован синхронно ДО async-чтения (приемлемо);
+                // тост об успехе с верным числом покажет insertImageFilesInOrder.
+                this.promptQualityThenInsertImages(violation, targetContainer, insertIndex, accepted);
             }
-            // Обрабатываем текст только если нет изображения
+            // Текст обрабатываем только если картинок в буфере нет.
             else if (textItem) {
                 const textContent = e.clipboardData.getData('text/plain').trim();
 
                 if (textContent) {
                     e.preventDefault();
 
-                    // Определяем тип: кейс или текст
-                    const normalizedText = textContent.toLowerCase();
-                    const startsWithCase = normalizedText.startsWith('кейс');
+                    // Строгий маркер кейса (#5): «Кейс N<разделитель>» снимается
+                    // ровно по совпадению, иначе — произвольный текст как есть.
+                    const { type, content } = parseClipboardText(textContent);
+                    const message = type === CONTENT_TYPE_CASE
+                        ? 'Кейс добавлен из буфера обмена'
+                        : 'Текст добавлен из буфера обмена';
 
-                    let type, content, message;
-
-                    if (startsWithCase) {
-                        type = CONTENT_TYPE_CASE;
-                        // Убираем "кейс" (4 символа) и затем номер с разделителем
-                        content = textContent
-                            .substring(4)
-                            .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')
-                            .trim();
-                        message = 'Кейс добавлен из буфера обмена';
-                    } else {
-                        type = CONTENT_TYPE_FREE_TEXT;
-                        content = textContent;
-                        message = 'Текст добавлен из буфера обмена';
-                    }
-
-                    // Добавляем элемент в определенную позицию
-                    this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
+                    // Единый гейт лимита (#4) уже мог отказать (Notifications.warning
+                    // показан внутри) — тогда false, и success не зовём, чтобы не
+                    // подтверждать вставку, которой не произошло. updateBlock делает
+                    // сама addContentItemAtPosition — без двойного апдейта (#29).
+                    const added = this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
                         content: content
                     });
+                    if (!added) return;
 
-                    PreviewManager.updateBlock('violation', violation.id);
                     Notifications.success(message);
                 }
             }

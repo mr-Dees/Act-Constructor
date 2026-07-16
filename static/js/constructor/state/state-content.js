@@ -22,6 +22,7 @@ import {
     KIND_REGULAR_RISK,
     KIND_TAX_RISK,
 } from '../table/table-kind.js';
+import { createDefaultViolationShape } from '../violation/violation-normalize.js';
 
 Object.assign(AppState, {
     /**
@@ -195,35 +196,12 @@ Object.assign(AppState, {
      * @returns {Object} Объект нарушения
      */
     _createViolationObject(violationId, nodeId) {
+        // Эталонная дефолт-форма — единый источник с normalizeViolations (#20),
+        // иначе два места с одинаковой формой дрейфуют друг от друга.
         return {
             id: violationId,
             nodeId,
-            violated: '',
-            established: '',
-            descriptionList: {
-                enabled: false,
-                items: []
-            },
-            additionalContent: {
-                enabled: false,
-                items: []
-            },
-            reasons: {
-                enabled: false,
-                content: ''
-            },
-            measures: {
-                enabled: false,
-                content: ''
-            },
-            consequences: {
-                enabled: false,
-                content: ''
-            },
-            responsible: {
-                enabled: false,
-                content: ''
-            }
+            ...createDefaultViolationShape()
         };
     },
 

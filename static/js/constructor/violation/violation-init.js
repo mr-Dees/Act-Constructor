@@ -9,11 +9,14 @@ import { ViolationManager } from './violation-core.js';
 // через EscapeStack в violation-core.js), остальные
 // методы — в соседних модулях. Импорт здесь делает модуль самодостаточным
 // при импорте violationManager из любого места (не только из entry).
+import './violation-mutations.js';
 import './violation-paste.js';
 import './violation-additional-content.js';
 import './violation-rendering.js';
 import './violation-drag-drop.js';
 import './violation-file-upload.js';
+// diff-аудит правок нарушений (#17): регистрирует pre-flush hook в ChangelogTracker.
+import './violation-audit.js';
 
 // Создаем глобальный экземпляр менеджера нарушений
 export const violationManager = new ViolationManager();
