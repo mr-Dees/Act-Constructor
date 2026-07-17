@@ -25,6 +25,15 @@ export class StorageManager {
     static _saveTimeout = null;
 
     /**
+     * Период дебаунса автосохранения в localStorage, мс.
+     * Инициализируется фолбэком из AppConfig, при инициализации менеджера
+     * переопределяется значением с бэка (`autoSavePeriodSeconds` из /config/lock).
+     * @private
+     * @type {number}
+     */
+    static _autoSaveDebounceMs = AppConfig.localStorage.autoSaveDebounce;
+
+    /**
      * Интервал периодического автосохранения в localStorage
      * @private
      * @type {number|null}
@@ -207,6 +216,10 @@ export class StorageManager {
             this._checkLocalStorageAvailable();
             this._setupEventHandlers();
             this._updateSaveIndicator();
+            // Подгрузка периода автосохранения с бэка (fire-and-forget):
+            // дебаунс актуален только после первой правки пользователя, поэтому
+            // ждать ответ не нужно; ошибка fetch оставляет фолбэк.
+            this._loadAutoSaveConfig();
 
             console.log('StorageManager инициализирован (без автовосстановления)');
         } catch (error) {
@@ -227,6 +240,26 @@ export class StorageManager {
             localStorage.removeItem(testKey);
         } catch (e) {
             throw new Error('localStorage недоступен');
+        }
+    }
+
+    /**
+     * Загружает период автосохранения с сервера (образец — LockManager._loadConfig).
+     * Берёт `autoSavePeriodSeconds` (секунды) из /config/lock и переводит в мс.
+     * При ошибке/отсутствии значения оставляет фолбэк — инициализацию не роняет.
+     * @private
+     */
+    static async _loadAutoSaveConfig() {
+        try {
+            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/lock'));
+            if (!response.ok) throw new Error('Не удалось загрузить период автосохранения');
+            const config = await response.json();
+            const seconds = config?.autoSavePeriodSeconds;
+            if (Number.isFinite(seconds) && seconds > 0) {
+                this._autoSaveDebounceMs = seconds * 1000;
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки периода автосохранения, используем значение по умолчанию:', error);
         }
     }
 
@@ -651,7 +684,7 @@ export class StorageManager {
 
         this._saveTimeout = setTimeout(() => {
             this.saveState(true);
-        }, AppConfig.localStorage.autoSaveDebounce);
+        }, this._autoSaveDebounceMs);
     }
 
     /**
@@ -1183,7 +1216,7 @@ export class StorageManager {
             button.classList.add('local-only');
             button.disabled = false;
             button.title = 'Сохранить в базу данных (Ctrl+S)';
-            label.textContent = 'Только локально';
+            label.textContent = 'Локально';
         } else {
             // Белый: полностью синхронизировано
             button.classList.add('saved');

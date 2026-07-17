@@ -19,29 +19,6 @@
         </div>
         <div class="settings-menu-body">
             <div class="settings-menu-section">
-                <h5 class="settings-section-title">Внешний вид</h5>
-
-                <div class="settings-option">
-                    <div class="settings-option-info">
-                        <div class="settings-option-label">Тема оформления</div>
-                        <div class="settings-option-desc">Переключение между светлой и тёмной темой</div>
-                    </div>
-                    <label class="theme-switch">
-                        <input type="checkbox" id="themeToggle">
-                        <span class="theme-slider"></span>
-                    </label>
-                </div>
-                <div class="theme-label" id="themeToggleLabel">Светлая</div>
-
-                <label class="settings-checkbox">
-                    <input type="checkbox" id="showActHeaderToggle" checked>
-                    <span class="settings-checkbox-label">Показывать шапку акта</span>
-                </label>
-            </div>
-
-            <hr class="settings-divider">
-
-            <div class="settings-menu-section">
                 <h5 class="settings-section-title">Корректор текста</h5>
 
                 <div class="settings-option">
@@ -53,34 +30,6 @@
                         <button type="button" class="oarb-mode-switch__btn" data-corrector-diff-option="inline" aria-pressed="false">В строку</button>
                         <button type="button" class="oarb-mode-switch__btn" data-corrector-diff-option="panes2" aria-pressed="true">2 окна</button>
                         <button type="button" class="oarb-mode-switch__btn" data-corrector-diff-option="panes3" aria-pressed="false">3 окна</button>
-                    </div>
-                </div>
-            </div>
-
-            <hr class="settings-divider">
-
-            <div class="settings-menu-section">
-                <h5 class="settings-section-title">Файлы и сохранение</h5>
-
-                <label class="settings-checkbox">
-                    <input type="checkbox" id="downloadPromptToggle" checked>
-                    <span class="settings-checkbox-label">Показывать диалог перед загрузкой файлов</span>
-                </label>
-
-                <label class="settings-checkbox">
-                    <input type="checkbox" id="autoSaveToggle" checked>
-                    <span class="settings-checkbox-label">Включить автосохранение в localStorage</span>
-                </label>
-
-                <div id="autoSavePeriodContainer" class="auto-save-period-row">
-                    <div class="period-label">
-                        <span>Период автосохранения</span>
-                    </div>
-                    <div class="period-input-group">
-                        <input type="number" id="autoSavePeriodInput" min="1" max="60" value="3">
-                        <span class="period-unit">секунд</span>
-                        <span class="info-icon"
-                              title="Слишком частое автосохранение может снизить производительность. Рекомендуется 3-5 секунд.">ⓘ</span>
                     </div>
                 </div>
             </div>
@@ -116,6 +65,29 @@
                 </div>
                 {% endif %}
                 {% endfor %}
+            </div>
+
+            <hr class="settings-divider">
+
+            <div class="settings-menu-section">
+                <h5 class="settings-section-title">Внешний вид</h5>
+
+                <label class="settings-checkbox">
+                    <input type="checkbox" id="showActHeaderToggle" checked>
+                    <span class="settings-checkbox-label">Показывать шапку акта</span>
+                </label>
+
+                <div class="settings-option settings-option--disabled">
+                    <div class="settings-option-info">
+                        <div class="settings-option-label">Тема оформления</div>
+                        <div class="settings-option-desc">Переключение между светлой и тёмной темой</div>
+                    </div>
+                    <label class="theme-switch">
+                        <input type="checkbox" id="themeToggle" disabled>
+                        <span class="theme-slider"></span>
+                    </label>
+                </div>
+                <div class="theme-label" id="themeToggleLabel">Светлая</div>
             </div>
 
             <hr class="settings-divider">
