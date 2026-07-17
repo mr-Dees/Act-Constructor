@@ -68,8 +68,8 @@ test.describe('Ctrl+S during edit @smoke', () => {
       // БЕЗ flush pending textarea.
       await page.keyboard.press('Control+s');
 
-      // Дать save'у отработать: forceSaveAsync (rAF + 100ms) +
-      // generateBtn.click() → PUT (network round-trip).
+      // Дать save'у отработать: NavigationManager.saveToDatabase() → PUT
+      // (network round-trip).
       await page.waitForTimeout(3000);
 
       // Reload + проверить.

@@ -49,10 +49,6 @@ test.describe('Textblock alignment round-trip (TB-1)', () => {
     await page.keyboard.press('Control+s');
     await waitForSaveComplete(page);
 
-    // Ctrl+S заодно генерирует файлы акта и предлагает их скачать —
-    // модалка перехватывает клики, отказываемся.
-    await page.getByRole('button', { name: 'Не нужно' }).click({ timeout: 10000 });
-
     // Превью (DOMPurify-профиль 'acts') показывает центр: на step1 лист
     // содержит центрированный блочный элемент с нашим текстом.
     await page.locator('.step[data-step="1"]').click();

@@ -198,7 +198,8 @@ export class App {
                 console.log('Save indicator clicked, disabled:', newBtn.disabled);
 
                 if (!newBtn.disabled) {
-                    StorageManager.forceSave();
+                    // Клик по индикатору = Ctrl+S: сохраняем акт в БД.
+                    NavigationManager.saveToDatabase();
                 }
             });
 
@@ -231,13 +232,16 @@ export class App {
                     activeEl.blur();
                 }
 
-                // Сохранение с блокировкой + генерация
-                await StorageManager.forceSaveAsync();
-
-                // Генерация уже внутри блокирует отслеживание
-                const generateBtn = document.getElementById('generateBtn');
-                if (generateBtn) {
-                    generateBtn.click();
+                if (e.shiftKey) {
+                    // Ctrl+Shift+S — «Генерация»: сохранение в БД + генерация +
+                    // скачивание. Эквивалент клика по кнопке «Генерация».
+                    const generateBtn = document.getElementById('generateBtn');
+                    if (generateBtn) {
+                        generateBtn.click();
+                    }
+                } else {
+                    // Ctrl+S — только сохранение акта в БД (без генерации и скачивания)
+                    await NavigationManager.saveToDatabase();
                 }
             }
         });

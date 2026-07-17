@@ -119,35 +119,7 @@ export class NavigationManager {
             }
 
         } catch (error) {
-            // 409 Conflict на save: лок акта был снят (фоновый autoExit по
-            // неактивности — вкладка была в фоне). В отличие от обычного
-            // autoExit'а, тут save НЕ прошёл (markAsSyncedWithDB не вызвался) —
-            // изменения НЕ записаны в БД. Ставим ОТДЕЛЬНЫЙ флаг `sessionLockLost`
-            // (не `sessionAutoExited`, у которого плашка лжёт «изменения
-            // сохранены») и редиректим на список. Черновик в localStorage НЕ
-            // трогаем — он остаётся последним носителем несохранённых правок.
-            if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
-                console.warn('[NavigationManager] LockLostError на save → редирект на список актов (изменения НЕ в БД)');
-                sessionStorage.setItem('sessionLockLost', 'true');
-                // Снимаем браузерный beforeunload-warning. allowUnload() НЕ
-                // чистит localStorage — только ставит флаг программного выхода,
-                // так что локальный черновик сохраняется.
-                if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                    StorageManager.allowUnload();
-                }
-                // Жёсткий редирект без confirmNavigation: save вернул 409,
-                // markAsSyncedWithDB не вызвался, hasUnsavedChanges=true →
-                // confirmNavigation показал бы кастомную плашку «Несохранённые
-                // изменения. Уйти?» и блокировал бы навигацию. Сессия уже
-                // завершена — спрашивать поздно.
-                window.location.href = AppConfig.api.getUrl('/acts');
-                return;
-            }
-            console.error('Ошибка при обработке:', error);
-            Notifications.error(
-                `Произошла ошибка: ${error.message}`,
-                AppConfig.notifications.duration.error
-            );
+            this._handleSaveExportError(error);
         } finally {
             // Разблокируем кнопку
             generateBtn.disabled = false;
@@ -170,6 +142,70 @@ export class NavigationManager {
     }
 
     /**
+     * Сохранение акта в БД без экспорта файлов.
+     *
+     * Используется горячей клавишей Ctrl+S и кликом по индикатору сохранности.
+     * Повторяет db-ветку _handleSaveAndExport (снимок в localStorage делает сам
+     * saveActContent при успехе), включая обработку 409/LockLost. Экспорт файлов
+     * и диалог скачивания сюда НЕ входят — они только на Ctrl+Shift+S / кнопке.
+     */
+    static async saveToDatabase() {
+        // Проверка наличия выбранного акта
+        if (!window.currentActId) {
+            Notifications.warning('Сначала выберите акт');
+            return;
+        }
+
+        // Коммитим зависшие правки (textblock в debounce, ячейка таблицы) до
+        // чтения state в save — иначе последняя правка ушла бы со старым content.
+        StorageManager._flushPendingEdits();
+
+        // Предупреждения о незаполненности — всегда, не блокируют (#8: WIP-акт
+        // сохраняется в БД как есть).
+        this._showContentWarnings();
+
+        try {
+            await this._saveToDatabase();
+        } catch (error) {
+            this._handleSaveExportError(error);
+        }
+    }
+
+    /**
+     * Единая обработка ошибки сохранения/экспорта.
+     *
+     * LockLostError (лок снят, 409): save НЕ прошёл — изменения НЕ записаны в БД.
+     * Ставим ОТДЕЛЬНЫЙ флаг `sessionLockLost` (не `sessionAutoExited`, у которого
+     * плашка лжёт «изменения сохранены») и жёстко редиректим на список актов.
+     * Черновик в localStorage НЕ трогаем — он остаётся последним носителем
+     * несохранённых правок. Прочие ошибки — уведомление.
+     * @private
+     */
+    static _handleSaveExportError(error) {
+        if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
+            console.warn('[NavigationManager] LockLostError на save → редирект на список актов (изменения НЕ в БД)');
+            sessionStorage.setItem('sessionLockLost', 'true');
+            // Снимаем браузерный beforeunload-warning. allowUnload() НЕ чистит
+            // localStorage — только ставит флаг программного выхода, так что
+            // локальный черновик сохраняется.
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
+            }
+            // Жёсткий редирект без confirmNavigation: save вернул 409,
+            // markAsSyncedWithDB не вызвался, hasUnsavedChanges=true →
+            // confirmNavigation показал бы плашку «Несохранённые изменения. Уйти?»
+            // и блокировал бы навигацию. Сессия уже завершена — спрашивать поздно.
+            window.location.href = AppConfig.api.getUrl('/acts');
+            return;
+        }
+        console.error('Ошибка при обработке:', error);
+        Notifications.error(
+            `Произошла ошибка: ${error.message}`,
+            AppConfig.notifications.duration.error
+        );
+    }
+
+    /**
      * Экспорт файлов в выбранных форматах
      * @private
      * @param {string[]} formats - Массив форматов для экспорта
@@ -177,7 +213,7 @@ export class NavigationManager {
     static async _exportFiles(formats) {
         try {
             await APIClient.generateAct(formats);
-            // Уведомления и диалог скачивания показаны в APIClient.generateAct
+            // Уведомления показаны в APIClient.generateAct
         } catch (err) {
             console.error('Ошибка экспорта файлов:', err);
             throw err; // Пробрасываем ошибку выше

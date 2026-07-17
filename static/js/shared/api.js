@@ -251,17 +251,8 @@ export class APIClient {
      * @private
      */
     static async _handleDownloadPrompt(results, successCount) {
-        const shouldDownload = await DialogManager.show({
-            title: 'Скачать созданные файлы?',
-            message: `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,
-            icon: '📥',
-            confirmText: 'Скачать все',
-            cancelText: 'Не нужно'
-        });
-
-        if (shouldDownload) {
-            await this._downloadAllFiles(results);
-        }
+        // Скачиваем сразу, без диалога-вопроса.
+        await this._downloadAllFiles(results);
     }
 
     /**
