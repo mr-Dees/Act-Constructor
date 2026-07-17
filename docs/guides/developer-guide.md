@@ -1142,7 +1142,7 @@ DomainDescriptor(
 | `act_invoices` | Прикрепленные фактуры | FK → acts, CASCADE |
 | `{REF_HADOOP_TABLES}` | Реестр таблиц Hadoop для поиска фактур | Справочная |
 | `audit_log` | Журнал операций (JSONB details) | FK → acts, CASCADE |
-| `act_content_versions` | Снимки содержимого для истории | FK → acts, CASCADE |
+| `act_content_versions` | Снимки содержимого для истории; дедуп по `content_hash` | FK → acts, CASCADE |
 
 **Домен администрирования — 4 таблицы:**
 
@@ -3395,7 +3395,7 @@ LIMIT 20;
 [2] Редактирование под act_lock          PATCH /api/v1/acts/{id}/content
         ↓                                 (требует активный lock на пользователя)
 [3] Сохранение версий контента           StorageManager → debounce 3s + periodic 2min
-        ↓                                 → act_content_versions snapshot (max 50)
+        ↓                                 → act_content_versions snapshot (max 50, дедуп по content_hash)
 [4] Отправка на рассмотрение             POST /api/v1/acts/{id}/send (получение СЗ-номера)
         ↓                                 → service_note + service_note_date
 [5] Принятие / отклонение
@@ -3438,7 +3438,7 @@ LIMIT 20;
 
 Две независимые системы:
 
-**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое сохранение содержимого создаёт запись со снимком `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` (все JSONB), `version_number` инкрементируется. `invoices_data` — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
+**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое `manual`/`periodic`-сохранение содержимого создаёт запись со снимком `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` (все JSONB), `version_number` инкрементируется. Исключение — дедуп: `create_version` считает канонический SHA-256 содержимого (колонка `content_hash`) и при совпадении с хэшем последней версии снимок НЕ создаёт — no-op сохранение неизменённого акта не плодит версию-дубль и не вытесняет реальную из кольца `max_content_versions`. Дедуп покрывает и снимки-предохранители `restore_version` (централизован в репозитории), best-effort без блокировок; волатильные поля фактур (`id`/таймстемпы) в хэш не входят. `invoices_data` — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
 
 **2. Аудит-лог — `{PREFIX}audit_log`** (`migrations/postgresql/schema.sql:338`). Запись о каждом действии (создание, редактирование, lock, отправка СЗ, экспорт). Сервис — `app/domains/acts/services/audit_log_service.py`. Здесь же лежит diff между версиями (по элементам дерева и ячейкам таблиц).
 

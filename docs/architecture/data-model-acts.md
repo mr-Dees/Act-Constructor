@@ -516,6 +516,8 @@ isPinnedTable(node) {
 
 **Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:345`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` по номерам версий, для просмотра истории и восстановления. `invoices_data` (JSONB, `NOT NULL DEFAULT '{}'`) — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Это версионирование данных конкретного акта, а не схемы.
 
+**Дедупликация версий.** Колонка `content_hash` (VARCHAR(64), nullable) хранит канонический SHA-256 содержимого снимка. При `manual`/`periodic`-сохранении `ActContentVersionRepository.create_version` сравнивает хэш нового снимка с хэшем последней версии акта и при совпадении INSERT пропускает (возвращает `None`) — no-op сохранение неизменённого акта не плодит версию-дубль и не вытесняет реальную из кольца `max_content_versions`. Хэш считается по каноническому JSON (`sort_keys` + компактные разделители), волатильные поля фактур (`id`/`created_at`/`updated_at`) из него исключены (иначе UPSERT-бамп `updated_at` ложно ломал бы дедуп). Дедуп покрывает и снимки-предохранители `restore_version` (централизован в репозитории), best-effort — без блокировок на горячем пути. На развёрнутых БД колонка добавляется вручную (`create_tables_if_not_exist` ALTER-миграций не делает): `ALTER TABLE {SCHEMA}.{PREFIX}act_content_versions ADD COLUMN content_hash VARCHAR(64);`.
+
 **Рекомендации при изменении модели.**
 
 - Новые поля узлов или контейнеров добавлять с `default=` и явной декларацией в схеме: для словарных схем действует `extra="forbid"` — незадекларированное поле от фронта отклоняется 422.
