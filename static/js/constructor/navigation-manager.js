@@ -40,13 +40,30 @@ export class NavigationManager {
 
     /**
      * Сохранение акта и экспорт выбранных форматов — действие кнопки-индикатора
-     * в шапке и горячей клавиши Ctrl+Shift+S.
-     *
-     * Обычный режим: всегда сохраняем в БД, затем генерируем и скачиваем форматы,
-     * выбранные в настройках (если ни одного — только сохранение в БД).
-     * Read-only: сохранять в БД нельзя — доступно только скачивание файлов.
+     * в шапке и горячей клавиши Ctrl+Shift+S. Всегда сохраняем в БД (если есть
+     * что синхронизировать), затем генерируем и скачиваем выбранные в настройках
+     * форматы. Read-only: в БД не пишем — доступно только скачивание файлов.
      */
     static async saveAndExport() {
+        return this._runSave(true);
+    }
+
+    /**
+     * Быстрое сохранение акта в БД без экспорта — горячая клавиша Ctrl+S.
+     * В режиме просмотра — no-op с уведомлением (запись в БД недоступна).
+     */
+    static async saveToDatabase() {
+        return this._runSave(false);
+    }
+
+    /**
+     * Общая воронка сохранения для Ctrl+S (withExport=false) и Ctrl+Shift+S /
+     * кнопки-индикатора (withExport=true). Единый гард от повторного запуска,
+     * read-only-ветка и dirty-гейт сохранения в БД — для обеих точек входа.
+     * @private
+     * @param {boolean} withExport - генерировать и скачивать выбранные форматы
+     */
+    static async _runSave(withExport) {
         // Проверка наличия выбранного акта
         if (!window.currentActId) {
             Notifications.warning('Сначала выберите акт');
@@ -57,15 +74,22 @@ export class NavigationManager {
         if (this._actionInFlight) return;
 
         // Коммитим зависшие правки (textblock в debounce, ячейка таблицы) ДО
-        // валидации и чтения exportData(). Save/export-методы api.js флашат
-        // повторно (идемпотентно), но валидация ниже тоже читает state.
+        // валидации, чтения exportData() и проверки dirty-состояния. Save/export-
+        // методы api.js флашат повторно (идемпотентно), но валидация и dirty-гейт
+        // ниже тоже читают state.
         StorageManager._flushPendingEdits();
 
-        const formats = FormatMenuManager.getSelectedFormats();
         const isReadOnly = !!AppConfig.readOnlyMode?.isReadOnly;
+        const formats = withExport ? FormatMenuManager.getSelectedFormats() : [];
 
-        // Read-only: в БД не пишем, доступно только скачивание выбранных форматов.
+        // Read-only: сохранять в БД нельзя ни на одной точке входа.
         if (isReadOnly) {
+            if (!withExport) {
+                // Ctrl+S в режиме просмотра — сохранять нечего и некуда.
+                Notifications.warning(AppConfig.readOnlyMode.messages.cannotSave);
+                return;
+            }
+            // Ctrl+Shift+S / кнопка: доступно только скачивание выбранных форматов.
             if (formats.length === 0) {
                 Notifications.warning('Выберите формат экспорта в настройках');
                 return;
@@ -93,7 +117,11 @@ export class NavigationManager {
 
         this._actionInFlight = true;
         try {
-            // 1. Сохранение в БД — всегда.
+            // 1. Сохранение в БД — всегда. Ручной save persist'ит ТЕКУЩЕЕ
+            // состояние, включая только что закоммиченные pending-правки (H5-A:
+            // ячейка/textblock в редактировании). Гейтить по dirty-флагу нельзя —
+            // он под-репортит такие правки, и save молча потерял бы их (PUT
+            // читает exportActData(), а не флаг).
             await this._saveToDatabase();
 
             // 2. Экспорт файлов (если в настройках выбраны форматы).
@@ -118,36 +146,6 @@ export class NavigationManager {
         } catch (err) {
             console.error('Ошибка сохранения в БД:', err);
             throw err; // Пробрасываем ошибку выше
-        }
-    }
-
-    /**
-     * Сохранение акта в БД без экспорта файлов.
-     *
-     * Используется горячей клавишей Ctrl+S (быстрое сохранение только в БД).
-     * Снимок в localStorage делает сам saveActContent при успехе, включая
-     * обработку 409/LockLost. Экспорт файлов и скачивание сюда НЕ входят — они
-     * на Ctrl+Shift+S и кнопке-индикаторе в шапке (saveAndExport).
-     */
-    static async saveToDatabase() {
-        // Проверка наличия выбранного акта
-        if (!window.currentActId) {
-            Notifications.warning('Сначала выберите акт');
-            return;
-        }
-
-        // Коммитим зависшие правки (textblock в debounce, ячейка таблицы) до
-        // чтения state в save — иначе последняя правка ушла бы со старым content.
-        StorageManager._flushPendingEdits();
-
-        // Предупреждения о незаполненности — всегда, не блокируют (#8: WIP-акт
-        // сохраняется в БД как есть).
-        this._showContentWarnings();
-
-        try {
-            await this._saveToDatabase();
-        } catch (error) {
-            this._handleSaveExportError(error);
         }
     }
 
