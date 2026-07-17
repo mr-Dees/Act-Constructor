@@ -111,6 +111,7 @@ async def get_lock_config(
         "inactivityCheckIntervalSeconds": acts_cfg.lock.inactivity_check_interval_seconds,
         "minExtensionIntervalMinutes": acts_cfg.lock.min_extension_interval_minutes,
         "inactivityDialogTimeoutSeconds": acts_cfg.lock.inactivity_dialog_timeout_seconds,
+        "autoSavePeriodSeconds": acts_cfg.autosave.period_seconds,
     }
 
 
