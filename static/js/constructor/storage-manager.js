@@ -982,100 +982,6 @@ export class StorageManager {
     }
 
     /**
-     * Принудительно сохраняет состояние (вызывается кнопкой или Ctrl+S)
-     *
-     * @returns {boolean} true если сохранение успешно
-     */
-    static forceSave() {
-        // Блокируем сохранение в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            Notifications.warning(AppConfig.readOnlyMode.messages.cannotSave);
-            return false;
-        }
-
-        // Отменяем pending дебаунс, если есть
-        if (this._saveTimeout) {
-            clearTimeout(this._saveTimeout);
-            this._saveTimeout = null;
-        }
-
-        // Выполняем сохранение (silent режим)
-        const success = this.saveState(true);
-
-        if (success) {
-            Notifications.success('Изменения сохранены');
-        } else {
-            // Если сохранение не удалось, возвращаем state в 'unsaved'.
-            this._setState('unsaved');
-        }
-
-        return success;
-    }
-
-    /**
-     * Асинхронная версия принудительного сохранения
-     *
-     * Блокирует отслеживание изменений на время выполнения операции.
-     * Используется когда нужна гарантия последовательного выполнения.
-     *
-     * @returns {Promise<boolean>} Promise с результатом сохранения
-     */
-    static async forceSaveAsync() {
-        return new Promise((resolve) => {
-            // Блокируем отслеживание на время сохранения и последующих операций.
-            this.disableTracking();
-
-            // Декремент гарантируется РОВНО один раз. На счастливом пути его
-            // делает отложенный setTimeout (трекинг включается ПОСЛЕ ре-рендера
-            // генерации — enableTrackingAfterSave). Если кадр/таймер не сработают
-            // (вкладка в фоне, страница уничтожается) или планирование RAF кинет
-            // — декремент делает синхронный catch, иначе _trackingDepth залипнет
-            // > 0 и markAsUnsaved() станет no-op'ом (тихая потеря правок, #5).
-            let released = false;
-            const release = () => {
-                if (released) return;
-                released = true;
-                this.enableTracking();
-            };
-
-            // B-14: страховочный таймер ВНЕ requestAnimationFrame. RAF не
-            // гарантирован в фоновой вкладке/при уничтожении страницы — без него
-            // _trackingDepth залип бы >0 и markAsUnsaved() стал бы no-op'ом
-            // (тихая потеря правок). setTimeout надёжнее RAF и идемпотентно
-            // отпускает трекинг (release защищён released-флагом).
-            const safety = setTimeout(release, AppConfig.timings.enableTrackingAfterSave + 1000);
-
-            try {
-                requestAnimationFrame(() => {
-                    let result = false;
-                    let threw = false;
-                    try {
-                        result = this.forceSave();
-                    } catch (error) {
-                        threw = true;
-                        console.error('Ошибка в forceSaveAsync:', error);
-                    } finally {
-                        // Отложенный тайминг сохраняем — трекинг включается
-                        // через AppConfig.timings.enableTrackingAfterSave, а не
-                        // синхронно (иначе ре-рендер генерации пометил бы только
-                        // что сохранённый акт грязным).
-                        setTimeout(() => {
-                            clearTimeout(safety);
-                            release();
-                            resolve(threw ? false : result);
-                        }, AppConfig.timings.enableTrackingAfterSave);
-                    }
-                });
-            } catch (error) {
-                console.error('Ошибка планирования forceSaveAsync:', error);
-                clearTimeout(safety);
-                release();
-                resolve(false);
-            }
-        });
-    }
-
-    /**
      * Временно отключает отслеживание изменений (инкремент глубины, M.11).
      *
      * Используется для операций, которые модифицируют состояние,
@@ -1296,7 +1202,8 @@ export class StorageManager {
         this._resetDbSaveFailureState();
 
         // Сбрасываем счётчик трекинга: teardown не должен оставить отслеживание
-        // выключенным, если forceSaveAsync не успел вернуть его кадром (#5).
+        // выключенным, если асинхронная операция (save/generate/load) отключила
+        // его и не успела вернуть до уничтожения страницы (#5).
         this._trackingDepth = 0;
     }
 
