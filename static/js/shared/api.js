@@ -158,7 +158,8 @@ export class APIClient {
             this._showGenerationResults(successCount, errorCount, results);
 
             if (successCount > 0) {
-                await this._handleDownloadPrompt(results);
+                // Скачиваем созданные файлы сразу, без диалога-вопроса.
+                await this._downloadAllFiles(results);
             }
 
             return successCount > 0;
@@ -244,15 +245,6 @@ export class APIClient {
                 AppConfig.notifications.duration.longSuccess
             );
         }
-    }
-
-    /**
-     * Обрабатывает предложение скачать созданные файлы
-     * @private
-     */
-    static async _handleDownloadPrompt(results) {
-        // Скачиваем сразу, без диалога-вопроса.
-        await this._downloadAllFiles(results);
     }
 
     /**

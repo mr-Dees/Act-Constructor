@@ -9,7 +9,6 @@ import { EscapeStack } from '../../shared/escape-stack.js';
 export class SettingsMenuManager {
     /** @private Состояние настроек приложения */
     static _state = {
-        theme: 'light',
         showActHeader: true
     };
 
@@ -326,14 +325,6 @@ export class SettingsMenuManager {
         }
     }
 
-    /**
-     * Возвращает копию текущих настроек
-     *
-     * @returns {Object} Объект с текущими настройками
-     */
-    static getSettings() {
-        return {...this._state};
-    }
 }
 
 // Инициализация при загрузке страницы
