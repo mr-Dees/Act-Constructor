@@ -53,7 +53,7 @@ test.describe('Edit item title @smoke', () => {
 
     // Сохранение в БД через прямой API-вызов (PUT /api/v1/acts/{id}/content).
     // Идёт от текущего AppState (AppState.exportData) — даёт надёжный E2E
-    // без зависимости от UI-флоу generateBtn.
+    // без зависимости от UI-флоу кнопки сохранения.
     const saveStatus = await page.evaluate(async (actId) => {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-expect-error AppState — глобал из state-core.js

@@ -5,7 +5,7 @@ import { test, expect, openAct, SEED_ACTS } from '../fixtures';
  * таблицы (textarea сфокусирован, без blur) изменения теряются —
  * `startEditingCell` коммитит `textarea.value` в `table.grid[r][c].content`
  * ТОЛЬКО на blur/Enter. Real-flow App.js Ctrl+S handler:
- *   forceSaveAsync() → generateBtn.click() → PUT /content
+ *   commitPendingEdit() → NavigationManager.saveToDatabase() → PUT /content
  * — pending textarea НЕ флёшится перед `AppState.exportData()` →
  * сохраняется старое (либо пустое — `startEditingCell` зачищает
  * `cellEl.textContent = ''` при входе в edit, и без commit'а пусто и
@@ -21,7 +21,7 @@ import { test, expect, openAct, SEED_ACTS } from '../fixtures';
  *    `<textarea>` внутри, `cellEl.textContent = ''`.
  *  - typing в textarea → НЕ синхронизируется с grid до finishEditing.
  *  - page.keyboard.press('Control+s') → keydown на document (window):
- *    App._handleKeyDown (app.js:149) → forceSaveAsync + generateBtn.click()
+ *    App._setupGlobalKeyboardShortcuts → commitPendingEdit + saveToDatabase()
  *    → navigation-manager.js → PUT /content с AppState.exportData().
  *  - reload → старое/пустое значение в ячейке.
  */

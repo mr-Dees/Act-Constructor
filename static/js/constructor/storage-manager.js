@@ -1186,13 +1186,13 @@ export class StorageManager {
 
         if (!button || !label) return;
 
-        // Read-only режим: индикатор всегда заблокирован,
-        // никакие изменения не сохраняются.
+        // Read-only режим: сохранять в БД нельзя, но кнопка остаётся активной —
+        // по ней доступно скачивание выбранных форматов (saveAndExport).
         if (typeof AppConfig !== 'undefined' && AppConfig.readOnlyMode?.isReadOnly) {
             button.classList.remove('unsaved', 'local-only');
             button.classList.add('saved');
-            button.disabled = true;
-            button.title = 'Режим только для чтения';
+            button.disabled = false;
+            button.title = 'Только чтение — сохранить нельзя, доступно скачивание файлов';
             label.textContent = 'Только чтение';
             return;
         }
@@ -1200,24 +1200,26 @@ export class StorageManager {
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');
 
-        // Упрощенная и более понятная логика
+        // Кнопка всегда активна: клик = сохранить в БД + сгенерировать и скачать
+        // выбранные форматы. Цвет и подпись отражают статус сохранности.
+        const actionTitle = 'Сохранить и скачать (Ctrl+Shift+S)';
         if (this._hasUnsavedChanges) {
             // Красный: есть изменения, которые не сохранены даже в localStorage
             button.classList.add('unsaved');
             button.disabled = false;
-            button.title = 'Сохранить изменения (Ctrl+S)';
+            button.title = actionTitle;
             label.textContent = 'Не сохранено';
         } else if (!this._isSyncedWithDB && window.currentActId) {
             // Желтый: сохранено в localStorage, но не в БД
             button.classList.add('local-only');
             button.disabled = false;
-            button.title = 'Сохранить в базу данных (Ctrl+S)';
+            button.title = actionTitle;
             label.textContent = 'Локально';
         } else {
             // Белый: полностью синхронизировано
             button.classList.add('saved');
-            button.disabled = true;
-            button.title = 'Все изменения сохранены';
+            button.disabled = false;
+            button.title = actionTitle;
             label.textContent = 'Сохранено';
         }
 

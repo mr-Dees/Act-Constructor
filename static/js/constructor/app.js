@@ -198,8 +198,9 @@ export class App {
                 console.log('Save indicator clicked, disabled:', newBtn.disabled);
 
                 if (!newBtn.disabled) {
-                    // Клик по индикатору = Ctrl+S: сохраняем акт в БД.
-                    NavigationManager.saveToDatabase();
+                    // Клик по индикатору = сохранить в БД + сгенерировать и
+                    // скачать выбранные в настройках форматы (Ctrl+Shift+S).
+                    NavigationManager.saveAndExport();
                 }
             });
 
@@ -233,12 +234,9 @@ export class App {
                 }
 
                 if (e.shiftKey) {
-                    // Ctrl+Shift+S — «Генерация»: сохранение в БД + генерация +
-                    // скачивание. Эквивалент клика по кнопке «Генерация».
-                    const generateBtn = document.getElementById('generateBtn');
-                    if (generateBtn) {
-                        generateBtn.click();
-                    }
+                    // Ctrl+Shift+S — сохранение в БД + генерация + скачивание.
+                    // Эквивалент клика по кнопке-индикатору в шапке.
+                    await NavigationManager.saveAndExport();
                 } else {
                     // Ctrl+S — только сохранение акта в БД (без генерации и скачивания)
                     await NavigationManager.saveToDatabase();
@@ -398,19 +396,13 @@ export class App {
         // Добавляем класс к body для глобальных стилей
         document.body.classList.add('read-only-mode');
 
-        // Отключаем кнопку сохранения
+        // Кнопка-индикатор в read-only остаётся активной: сохранять в БД нельзя,
+        // но скачивание выбранных форматов доступно (NavigationManager.saveAndExport).
         const saveIndicatorBtn = document.getElementById('saveIndicatorBtn');
         if (saveIndicatorBtn) {
-            saveIndicatorBtn.disabled = true;
-            saveIndicatorBtn.title = AppConfig.readOnlyMode.messages.cannotSave;
-            saveIndicatorBtn.classList.add('disabled');
-        }
-
-        // Отключаем кнопку генерации
-        const generateBtn = document.getElementById('generateBtn');
-        if (generateBtn) {
-            // Генерация всё ещё доступна для просмотра, но без сохранения в БД
-            // Оставляем активной для экспорта
+            saveIndicatorBtn.disabled = false;
+            saveIndicatorBtn.title = 'Только чтение — сохранить нельзя, доступно скачивание файлов';
+            saveIndicatorBtn.classList.remove('disabled');
         }
 
         // Скрываем тулбар форматирования в режиме просмотра

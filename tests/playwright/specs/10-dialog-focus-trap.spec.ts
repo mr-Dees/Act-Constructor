@@ -12,8 +12,8 @@ test.describe('Dialog focus trap @smoke', () => {
   test('DialogManager.show: focus уходит внутрь, Tab циклит, фокус восстанавливается', async ({ page }) => {
     await openAct(page, SEED_ACTS.empty);
 
-    // Передаём фокус на известный enabled-элемент в шапке (actsMenuBtn).
-    // saveIndicatorBtn в дефолтном состоянии disabled, .focus() на нём — no-op.
+    // Передаём фокус на известный enabled-элемент в шапке (actsMenuBtn) —
+    // стабильный триггер, не зависящий от статуса сохранности акта.
     const trigger = page.locator('#actsMenuBtn');
     await trigger.focus();
     await expect(trigger).toBeFocused();
@@ -60,7 +60,7 @@ test.describe('Dialog focus trap @smoke', () => {
     await page.keyboard.press('Shift+Tab');
     await expect(confirmBtn).toBeFocused();
 
-    // Закрываем диалог Esc — ожидаем, что фокус вернётся на saveIndicatorBtn.
+    // Закрываем диалог Esc — ожидаем, что фокус вернётся на исходный триггер (actsMenuBtn).
     await page.keyboard.press('Escape');
 
     // Дожидаемся резолва промиса (закрытие диалога завершено).

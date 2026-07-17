@@ -48,16 +48,16 @@
 
 /* Состояние: полностью сохранено (белый) */
 .save-indicator-button.saved {
-    cursor: default;
+    cursor: pointer;
     background: var(--save-saved-white-bg);
     border-color: var(--save-saved-white-border);
     color: var(--save-saved-white);
     box-shadow: var(--shadow-glow-sm) var(--save-saved-glow);
 }
 
-/* Сохранённое состояние неактивно (disabled): при наведении кнопка не должна
- * сдвигаться и менять рамку/фон, как это делает базовый .header-action-btn:hover.
- * Полностью нейтрализуем единый hover, удерживая «белый» вид. */
+/* Сохранённое состояние: кнопка кликабельна (сохранить+скачать), но визуально
+ * остаётся «белой» — при наведении не сдвигается и не меняет рамку/фон, как это
+ * делает базовый .header-action-btn:hover. Нейтрализуем единый hover. */
 .save-indicator-button.saved:hover {
     background: var(--save-saved-white-bg);
     border-color: var(--save-saved-white-border);

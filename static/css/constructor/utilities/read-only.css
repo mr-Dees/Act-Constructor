@@ -119,12 +119,6 @@ body.read-only-mode .context-menu-item[data-action="deleteColumn"] {
     display: none !important;
 }
 
-/* Индикатор сохранения в режиме просмотра */
-body.read-only-mode #saveIndicatorBtn.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 /* Drag-and-drop отключен */
 body.read-only-mode .tree-node[draggable="true"] {
     cursor: default;

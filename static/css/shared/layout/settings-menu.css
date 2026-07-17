@@ -258,12 +258,6 @@
     transform: translateX(var(--theme-slider-dot-translate));
 }
 
-.theme-label {
-    font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-medium);
-    color: var(--text-secondary);
-}
-
 /* Задизейбленная опция (базы знаний «источников» и «инструментов») */
 .settings-option--disabled {
     opacity: 0.45;

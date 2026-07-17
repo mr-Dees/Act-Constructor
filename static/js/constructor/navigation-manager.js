@@ -14,25 +14,14 @@ import { AppConfig } from '../shared/app-config.js';
 import { Notifications } from '../shared/notifications.js';
 
 export class NavigationManager {
+    /** Гард от повторного запуска «сохранить и скачать» во время выполнения. */
+    static _actionInFlight = false;
+
     /**
      * Настройка обработчиков навигации
      */
     static setup() {
-        this._setupStepButtons();
         this._setupHeaderNavigation();
-        this._setupSaveButton();
-    }
-
-    /**
-     * Настройка кнопок навигации между шагами
-     * @private
-     */
-    static _setupStepButtons() {
-        const nextBtn = document.getElementById('nextBtn');
-        const backBtn = document.getElementById('backBtn');
-
-        nextBtn?.addEventListener('click', () => App.goToStep(2));
-        backBtn?.addEventListener('click', () => App.goToStep(1));
     }
 
     /**
@@ -50,45 +39,47 @@ export class NavigationManager {
     }
 
     /**
-     * Настройка кнопки "Сохранить и экспортировать"
-     * @private
+     * Сохранение акта и экспорт выбранных форматов — действие кнопки-индикатора
+     * в шапке и горячей клавиши Ctrl+Shift+S.
+     *
+     * Обычный режим: всегда сохраняем в БД, затем генерируем и скачиваем форматы,
+     * выбранные в настройках (если ни одного — только сохранение в БД).
+     * Read-only: сохранять в БД нельзя — доступно только скачивание файлов.
      */
-    static _setupSaveButton() {
-        const generateBtn = document.getElementById('generateBtn');
-        generateBtn?.addEventListener('click', async () => {
-            await this._handleSaveAndExport(generateBtn);
-        });
-    }
-
-    /**
-     * Обработка сохранения и экспорта
-     * @private
-     * @param {HTMLElement} generateBtn - Кнопка сохранения
-     */
-    static async _handleSaveAndExport(generateBtn) {
+    static async saveAndExport() {
         // Проверка наличия выбранного акта
         if (!window.currentActId) {
             Notifications.warning('Сначала выберите акт');
             return;
         }
 
-        // Воронка «Сохранить и экспортировать»: коммитим зависшие правки
-        // (textblock в debounce, ячейка таблицы) ДО валидации и чтения
-        // exportData() в save/export. Save/export-методы api.js флашат повторно
-        // (идемпотентно), но валидация ниже тоже читает state — флашим здесь.
+        // Гард от повторного запуска, пока предыдущий save/export не завершился.
+        if (this._actionInFlight) return;
+
+        // Коммитим зависшие правки (textblock в debounce, ячейка таблицы) ДО
+        // валидации и чтения exportData(). Save/export-методы api.js флашат
+        // повторно (идемпотентно), но валидация ниже тоже читает state.
         StorageManager._flushPendingEdits();
 
-        // Получаем выбранные действия
-        const selectedFormats = FormatMenuManager.getSelectedFormats();
-        const shouldSaveToDb = selectedFormats.includes('db');
-        const exportFormats = selectedFormats.filter(f => f !== 'db');
+        const formats = FormatMenuManager.getSelectedFormats();
+        const isReadOnly = !!AppConfig.readOnlyMode?.isReadOnly;
 
-        // Проверка что выбрано хотя бы одно действие
-        if (selectedFormats.length === 0) {
-            Notifications.error(
-                'Выберите хотя бы одно действие',
-                AppConfig.notifications.duration.error
-            );
+        // Read-only: в БД не пишем, доступно только скачивание выбранных форматов.
+        if (isReadOnly) {
+            if (formats.length === 0) {
+                Notifications.warning('Выберите формат экспорта в настройках');
+                return;
+            }
+            if (!this._validateForExport()) return;
+
+            this._actionInFlight = true;
+            try {
+                await this._exportFiles(formats);
+            } catch (error) {
+                this._handleSaveExportError(error);
+            } finally {
+                this._actionInFlight = false;
+            }
             return;
         }
 
@@ -97,33 +88,22 @@ export class NavigationManager {
         this._showContentWarnings();
 
         // Экспорт в файл требует валидной структуры: сломанная структура даёт
-        // битый документ. Сохранение «только в БД» НЕ блокируется — акт
-        // сохраняется и помечается статусом валидации на бэке (источник истины),
-        // конкретику покажут уведомления и карточка акта.
-        if (exportFormats.length > 0 && !this._validateForExport()) return;
+        // битый документ. Сохранение в БД эту проверку НЕ проходит (#8).
+        if (formats.length > 0 && !this._validateForExport()) return;
 
-        // Блокируем кнопку
-        generateBtn.disabled = true;
-        const originalText = generateBtn.textContent;
-        generateBtn.textContent = '⏳ Обработка...';
-
+        this._actionInFlight = true;
         try {
-            // 1. Сохранение в БД (если выбрано)
-            if (shouldSaveToDb) {
-                await this._saveToDatabase();
-            }
+            // 1. Сохранение в БД — всегда.
+            await this._saveToDatabase();
 
-            // 2. Экспорт файлов (если выбраны форматы)
-            if (exportFormats.length > 0) {
-                await this._exportFiles(exportFormats);
+            // 2. Экспорт файлов (если в настройках выбраны форматы).
+            if (formats.length > 0) {
+                await this._exportFiles(formats);
             }
-
         } catch (error) {
             this._handleSaveExportError(error);
         } finally {
-            // Разблокируем кнопку
-            generateBtn.disabled = false;
-            generateBtn.textContent = originalText;
+            this._actionInFlight = false;
         }
     }
 
@@ -144,10 +124,10 @@ export class NavigationManager {
     /**
      * Сохранение акта в БД без экспорта файлов.
      *
-     * Используется горячей клавишей Ctrl+S и кликом по индикатору сохранности.
-     * Повторяет db-ветку _handleSaveAndExport (снимок в localStorage делает сам
-     * saveActContent при успехе), включая обработку 409/LockLost. Экспорт файлов
-     * и диалог скачивания сюда НЕ входят — они только на Ctrl+Shift+S / кнопке.
+     * Используется горячей клавишей Ctrl+S (быстрое сохранение только в БД).
+     * Снимок в localStorage делает сам saveActContent при успехе, включая
+     * обработку 409/LockLost. Экспорт файлов и скачивание сюда НЕ входят — они
+     * на Ctrl+Shift+S и кнопке-индикаторе в шапке (saveAndExport).
      */
     static async saveToDatabase() {
         // Проверка наличия выбранного акта
