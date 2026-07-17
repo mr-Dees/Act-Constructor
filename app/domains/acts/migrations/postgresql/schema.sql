@@ -353,6 +353,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
     textblocks_data JSONB NOT NULL DEFAULT '{}',
     violations_data JSONB NOT NULL DEFAULT '{}',
     invoices_data JSONB NOT NULL DEFAULT '{}',
+    content_hash VARCHAR(64),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (act_id, version_number)
 );

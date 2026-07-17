@@ -1142,7 +1142,7 @@ DomainDescriptor(
 | `act_invoices` | Прикрепленные фактуры | FK → acts, CASCADE |
 | `{REF_HADOOP_TABLES}` | Реестр таблиц Hadoop для поиска фактур | Справочная |
 | `audit_log` | Журнал операций (JSONB details) | FK → acts, CASCADE |
-| `act_content_versions` | Снимки содержимого для истории | FK → acts, CASCADE |
+| `act_content_versions` | Снимки содержимого для истории; дедуп по `content_hash` | FK → acts, CASCADE |
 
 **Домен администрирования — 4 таблицы:**
 
@@ -3395,7 +3395,7 @@ LIMIT 20;
 [2] Редактирование под act_lock          PATCH /api/v1/acts/{id}/content
         ↓                                 (требует активный lock на пользователя)
 [3] Сохранение версий контента           StorageManager → debounce 3s + periodic 2min
-        ↓                                 → act_content_versions snapshot (max 50)
+        ↓                                 → act_content_versions snapshot (max 50, дедуп по content_hash)
 [4] Отправка на рассмотрение             POST /api/v1/acts/{id}/send (получение СЗ-номера)
         ↓                                 → service_note + service_note_date
 [5] Принятие / отклонение
@@ -3438,7 +3438,7 @@ LIMIT 20;
 
 Две независимые системы:
 
-**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое сохранение содержимого создаёт запись со снимком `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` (все JSONB), `version_number` инкрементируется. `invoices_data` — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
+**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое `manual`/`periodic`-сохранение содержимого создаёт запись со снимком `tree_data`/`tables_data`/`textblocks_data`/`violations_data`/`invoices_data` (все JSONB), `version_number` инкрементируется. Исключение — дедуп: `create_version` считает канонический SHA-256 содержимого (колонка `content_hash`) и при совпадении с хэшем последней версии снимок НЕ создаёт — no-op сохранение неизменённого акта не плодит версию-дубль и не вытесняет реальную из кольца `max_content_versions`. Дедуп покрывает и снимки-предохранители `restore_version` (централизован в репозитории), best-effort без блокировок; волатильные поля фактур (`id`/таймстемпы) в хэш не входят. `invoices_data` — привязка `node_id` → реквизиты фактуры на момент версии, см. [`docs/migrations/2026-07-14-add-invoices-data-to-versions.md`](../migrations/2026-07-14-add-invoices-data-to-versions.md). Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
 
 **2. Аудит-лог — `{PREFIX}audit_log`** (`migrations/postgresql/schema.sql:338`). Запись о каждом действии (создание, редактирование, lock, отправка СЗ, экспорт). Сервис — `app/domains/acts/services/audit_log_service.py`. Здесь же лежит diff между версиями (по элементам дерева и ячейкам таблиц).
 
@@ -3529,13 +3529,13 @@ LIMIT 20;
 
 Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md):
 - §4 «AppState и состояние конструктора» — рекурсивная Proxy-обёртка через `_wrapStateWithProxy` / `_wrapDeep`, `_stateProxyCache: WeakMap` для защиты от двойной обёртки, `Object.assign(AppState, ...)` расширение из `state-tree.js`/`state-content.js`, pinned tables (`isPinnedTable`, `_getFirstNonPinnedIndex`), protected nodes (секции 1-5).
-- §5 «StorageManager и persistence» — state machine `saved` / `local-only` / `unsaved` (Wave 3), debounce 3 сек + periodic 2 мин, `_dragInProgress` guard, `forceSaveAsync` для Ctrl+S, navigation interception (popstate + `confirmNavigation` + `_lockNavGuard`), per-act LS-ключи с префиксом `actId`.
+- §5 «StorageManager и persistence» — state machine `saved` / `local-only` / `unsaved` (Wave 3), debounce 3 сек + periodic 2 мин, `_dragInProgress` guard, ручное сохранение через `NavigationManager` (Ctrl+S → `saveToDatabase` — PUT в БД; Ctrl+Shift+S / кнопка-индикатор → `saveAndExport` — сохранение + генерация), navigation interception (popstate + `confirmNavigation` + `_lockNavGuard`), per-act LS-ключи с префиксом `actId`.
 
-> **Защита `_trackingDepth` от утечки.** `forceSaveAsync` синхронно отключает трекинг (`disableTracking`), а включает обратно в `release()` через `released`-флаг — декремент гарантирован даже если RAF-кадр не наступит (вкладка ушла в фон / `destroy()` до кадра). Дополнительно `destroy()` принудительно сбрасывает `_trackingDepth=0`. Иначе при переоткрытии конструктора без полной перезагрузки страницы трекинг оставался бы выключенным → правки молча не помечались грязными (тихая потеря данных).
+> **Защита `_trackingDepth` от утечки.** Операции, отключающие трекинг на время работы (`saveActContent` / `generateAct` / `loadActContent`), включают его обратно в `finally`/отложенном таймере; если страница уничтожается до re-enable, `destroy()` принудительно сбрасывает `_trackingDepth=0`. Иначе при переоткрытии конструктора без полной перезагрузки страницы трекинг оставался бы выключенным → правки молча не помечались грязными (тихая потеря данных).
 
 > **Лимиты структуры — из настроек через `/limits`.** Границы таблиц (`max_rows`/`max_cols`/`min_col_width_px`) и шрифта текстблоков (`font_size_min`/`font_size_max`) фронт получает тем же GET `/api/v1/acts/limits`, что и лимиты картинок (`violation-image-validator.js`, `getStructureLimits()`). Гейты таблиц (`table-cells-operations.js`, `table-sizes.js`) и клампинг шрифта (textblock-тулбар) читают именно его. `AppConfig.limits` остаётся синхронным фолбэком/контрактом (пин-тесты). Источник истины этих чисел — настройки `ACTS__TABLES__*`/`ACTS__TEXTBLOCKS__*`, end-to-end (UI-гейт → /limits → Pydantic-валидаторы схемы).
 
-**Связь с lock-механизмом**: при 409 на `PUT /content` `APIClient` бросает `LockLostError`, `NavigationManager._handleSaveAndExport` ловит и делает жёсткий редирект на `/acts` (без `confirmNavigation`-диалога — сессия уже потеряна). Детали — §6 в `frontend-architecture.md`.
+**Связь с lock-механизмом**: при 409 на `PUT /content` `APIClient` бросает `LockLostError`, `NavigationManager._handleSaveExportError` ловит и делает жёсткий редирект на `/acts` (без `confirmNavigation`-диалога — сессия уже потеряна). Детали — §6 в `frontend-architecture.md`.
 
 ### 10.10 Как добавить новый тип блока конструктора
 

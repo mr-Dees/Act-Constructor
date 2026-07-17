@@ -1,102 +1,38 @@
 /**
- * Менеджер меню выбора форматов экспорта
+ * Менеджер форматов экспорта
  *
- * Управляет выпадающим меню выбора форматов,
- * индикаторами выбранных форматов и их визуализацией.
+ * Управляет чекбоксами форматов (TXT/MD/DOCX) в меню настроек:
+ * восстанавливает выбор из localStorage и сохраняет при изменении.
+ * Список выбранных форматов читает кнопка «сохранить и скачать» в шапке.
+ * В базу данных акт сохраняется всегда — отдельной опции для этого нет.
  */
 export class FormatMenuManager {
     static _storageKey = 'selected_formats';
 
     /**
-     * Настройка меню форматов
+     * Настройка секции форматов экспорта в меню настроек
      */
     static setup() {
-        const dropdownBtn = document.getElementById('formatDropdownBtn');
-        const formatMenu = document.getElementById('formatMenu');
+        const menu = document.getElementById('exportFormatsMenu');
 
-        if (!dropdownBtn || !formatMenu) {
-            console.warn('FormatMenuManager: элементы меню форматов не найдены');
+        if (!menu) {
+            console.warn('FormatMenuManager: секция форматов экспорта не найдена');
             return;
         }
 
-        this._setupToggle(dropdownBtn, formatMenu);
-        this._setupOutsideClick(dropdownBtn, formatMenu);
-        this._restoreFormats(formatMenu);
-        this._setupCheckboxHandlers(formatMenu);
-
-        this.updateIndicator();
-    }
-
-    /**
-     * Настройка переключения видимости меню
-     * @private
-     * @param {HTMLElement} button - Кнопка открытия меню
-     * @param {HTMLElement} menu - Элемент меню
-     */
-    static _setupToggle(button, menu) {
-        button.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._positionMenu(button, menu);
-            menu.classList.toggle('hidden');
-            button.classList.toggle('active');
-        });
-    }
-
-    /**
-     * Умное позиционирование меню относительно кнопки
-     * @private
-     * @param {HTMLElement} button - Кнопка-триггер
-     * @param {HTMLElement} menu - Элемент меню
-     */
-    static _positionMenu(button, menu) {
-        if (!menu.classList.contains('hidden')) return;
-
-        const buttonRect = button.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        const spaceBelow = viewportHeight - buttonRect.bottom;
-        const spaceAbove = buttonRect.top;
-        const menuMinHeight = 200;
-
-        // Показываем меню сверху, если снизу недостаточно места
-        if (spaceBelow < menuMinHeight && spaceAbove > menuMinHeight) {
-            menu.style.bottom = 'calc(100% + 8px)';
-            menu.style.top = 'auto';
-        } else {
-            menu.style.top = 'calc(100% + 8px)';
-            menu.style.bottom = 'auto';
-        }
-    }
-
-    /**
-     * Настройка закрытия меню при клике вне его
-     * @private
-     * @param {HTMLElement} button - Кнопка меню
-     * @param {HTMLElement} menu - Элемент меню
-     */
-    static _setupOutsideClick(button, menu) {
-        document.addEventListener('click', (e) => {
-            if (!menu.contains(e.target) && e.target !== button) {
-                menu.classList.add('hidden');
-                button.classList.remove('active');
-            }
-        });
-
-        // Предотвращаем закрытие при клике внутри меню
-        menu.addEventListener('click', (e) => e.stopPropagation());
+        this._restoreFormats(menu);
+        this._setupCheckboxHandlers(menu);
     }
 
     /**
      * Настройка обработчиков изменения чекбоксов
      * @private
-     * @param {HTMLElement} menu - Элемент меню
+     * @param {HTMLElement} menu - Контейнер чекбоксов форматов
      */
     static _setupCheckboxHandlers(menu) {
         const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', () => {
-                this.updateIndicator();
-                this._saveFormats();
-            });
+            checkbox.addEventListener('change', () => this._saveFormats());
         });
     }
 
@@ -112,14 +48,11 @@ export class FormatMenuManager {
     /**
      * Восстанавливает выбранные форматы из localStorage
      * @private
-     * @param {HTMLElement} menu - Элемент меню
+     * @param {HTMLElement} menu - Контейнер чекбоксов форматов
      */
     static _restoreFormats(menu) {
         const saved = localStorage.getItem(this._storageKey);
-        if (!saved) {
-            this._lockDbCheckbox(menu);
-            return;
-        }
+        if (!saved) return;
 
         try {
             const formats = JSON.parse(saved);
@@ -127,97 +60,22 @@ export class FormatMenuManager {
 
             const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(checkbox => {
-                // DB-сохранение обязательно (export читает из БД), localStorage не управляет
-                if (checkbox.value === 'db') return;
                 checkbox.checked = formats.includes(checkbox.value);
             });
         } catch (e) {
             console.error('Ошибка восстановления форматов:', e);
-        } finally {
-            this._lockDbCheckbox(menu);
         }
     }
 
     /**
-     * Принудительно ставит DB-чекбокс checked + disabled.
-     * Экспорт читает контент из БД, поэтому save в БД должен пройти всегда.
-     * @private
-     */
-    static _lockDbCheckbox(menu) {
-        const dbCheckbox = menu.querySelector('input[value="db"]');
-        if (dbCheckbox) {
-            dbCheckbox.checked = true;
-            dbCheckbox.disabled = true;
-        }
-    }
-
-    /**
-     * Получение списка выбранных форматов (включая опцию БД)
-     * @returns {string[]} Массив выбранных форматов и действий
+     * Получение списка выбранных форматов экспорта
+     * @returns {string[]} Массив выбранных форматов (txt/md/docx)
      */
     static getSelectedFormats() {
         const checkboxes = document.querySelectorAll(
-            '#formatMenu input[type="checkbox"]:checked'
+            '#exportFormatsMenu input[type="checkbox"]:checked'
         );
         return Array.from(checkboxes).map(cb => cb.value);
-    }
-
-    /**
-     * Обновление визуального индикатора выбранных форматов
-     */
-    static updateIndicator() {
-        const generateBtn = document.getElementById('generateBtn');
-        const dropdownBtn = document.getElementById('formatDropdownBtn');
-        const selectedFormats = this.getSelectedFormats();
-
-        // Разделяем на БД и форматы экспорта
-        const hasDbSave = selectedFormats.includes('db');
-        const exportFormats = selectedFormats.filter(f => f !== 'db');
-
-        // Формируем текст индикатора
-        const parts = [];
-        if (exportFormats.length > 0) {
-            parts.push(exportFormats.map(f => f.toUpperCase()).join(' + '));
-        }
-        if (hasDbSave) {
-            parts.push('БД');
-        }
-
-        if (parts.length > 0) {
-            const indicatorText = parts.join(' + ');
-            this._setIndicators(generateBtn, dropdownBtn, indicatorText);
-        } else {
-            this._clearIndicators(generateBtn, dropdownBtn);
-        }
-    }
-
-    /**
-     * Установка индикаторов на кнопках
-     * @private
-     * @param {HTMLElement} generateBtn - Кнопка сохранения
-     * @param {HTMLElement} dropdownBtn - Кнопка меню
-     * @param {string} formatsText - Текст с форматами
-     */
-    static _setIndicators(generateBtn, dropdownBtn, formatsText) {
-        dropdownBtn.setAttribute('data-formats', formatsText);
-        dropdownBtn.classList.add('has-formats');
-        dropdownBtn.title = `Выбрано: ${formatsText}`;
-
-        generateBtn.title = `Сохранить в форматах: ${formatsText}`;
-    }
-
-    /**
-     * Очистка всех индикаторов
-     * @private
-     * @param {HTMLElement} generateBtn - Кнопка сохранения
-     * @param {HTMLElement} dropdownBtn - Кнопка меню
-     */
-    static _clearIndicators(generateBtn, dropdownBtn) {
-        dropdownBtn.removeAttribute('data-formats');
-        dropdownBtn.classList.remove('has-formats');
-        dropdownBtn.title = 'Выбрать форматы';
-
-        generateBtn.title = 'Выберите хотя бы один формат';
     }
 }
 

@@ -700,7 +700,11 @@ export class AppConfig {
         // `${stateKeyPrefix}:{actId}` (снимки разных актов не затирают друг друга)
         stateKeyPrefix: 'audit_workstation_state',
 
-        // Дебаунс для автосохранения (мс) - 3 секунды для меньшей частоты
+        // Дебаунс для автосохранения (мс). ФОЛБЭК: на старте StorageManager
+        // переопределяет его значением с бэка (autoSavePeriodSeconds из
+        // /config/lock). Держать синхронным с ACTS__AUTOSAVE__PERIOD_SECONDS
+        // (AutosaveSettings.period_seconds, дефолт 3 сек) — это число работает,
+        // только если конфиг не подгрузился (offline/деградация).
         autoSaveDebounce: 3000,
 
         // Интервал периодического автосохранения (мс) - каждые 2 минуты

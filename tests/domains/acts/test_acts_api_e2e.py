@@ -36,7 +36,7 @@ from app.domains.acts.exceptions import (
     InvoiceError,
     KmConflictError,
 )
-from app.domains.acts.settings import ActsSettings
+from app.domains.acts.settings import ActsSettings, AutosaveSettings
 
 
 USERNAME = "22494524"
@@ -621,6 +621,16 @@ class TestConfigEndpoints:
         body = resp.json()
         assert body["lockDurationMinutes"] == 15
         assert "inactivityTimeoutMinutes" in body
+        # Период автосохранения черновика в браузере отдаётся тем же эндпоинтом.
+        assert body["autoSavePeriodSeconds"] == 3
+
+    def test_autosave_period_default(self):
+        """AutosaveSettings по умолчанию — период 3 сек.
+
+        Инстанцируем модель напрямую (не через .env), чтобы проверить именно
+        дефолт кода, а не значение из реального окружения.
+        """
+        assert AutosaveSettings().period_seconds == 3
 
     def test_invoice_config(self):
         """GET /config/invoice возвращает hiveSchema/gpSchema."""

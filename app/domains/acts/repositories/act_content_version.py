@@ -5,6 +5,7 @@
 для просмотра истории и восстановления.
 """
 
+import hashlib
 import json
 import logging
 
@@ -13,6 +14,45 @@ import asyncpg
 from app.db.repositories.base import BaseRepository
 
 logger = logging.getLogger("audit_workstation.db.repository.content_version")
+
+# Волатильные поля записи фактуры: суррогатный ключ и таймстемпы БД. Исключаем
+# из хэша содержимого — иначе повторное чтение неизменных фактур (updated_at
+# бампается UPSERT-синхронизацией при каждом сохранении) ложно ломало бы дедуп.
+_VOLATILE_INVOICE_FIELDS = ("id", "created_at", "updated_at")
+
+
+def compute_content_hash(
+    tree: dict, tables: dict, textblocks: dict, violations: dict, invoices: dict | None,
+) -> str:
+    """Канонический SHA-256 содержимого снимка версии.
+
+    Стабильная сериализация (`sort_keys` + компактные разделители) — логически
+    равные документы дают равный хэш независимо от порядка ключей. Волатильные
+    поля фактур (`id`/таймстемпы БД) исключаются, чтобы не ломать дедуп. Ключи
+    актового JSON машинные (ASCII), поэтому stdlib-канонизации достаточно —
+    отдельная RFC-8785 библиотека не нужна.
+
+    Содержимое сериализуется здесь отдельно от блоба хранения (у него своя
+    сериализация по полям) — осознанный размен: канонизация ради стабильного
+    хэша важнее экономии одной лишней сериализации на не-горячем пути.
+    """
+    payload = {
+        "tree": tree,
+        "tables": tables,
+        "textblocks": textblocks,
+        "violations": violations,
+        "invoices": {
+            node_id: {
+                k: v for k, v in rec.items() if k not in _VOLATILE_INVOICE_FIELDS
+            }
+            for node_id, rec in (invoices or {}).items()
+        },
+    }
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ActContentVersionRepository(BaseRepository):
@@ -33,9 +73,22 @@ class ActContentVersionRepository(BaseRepository):
         violations: dict,
         invoices: dict | None = None,
         max_versions: int = 50,
-    ) -> int:
+    ) -> int | None:
         """
-        Создаёт новый снэпшот. Возвращает version_number.
+        Создаёт новый снэпшот. Возвращает version_number, либо None если снимок
+        не создавался (содержимое совпало с последней версией — дедуп).
+
+        Дедупликация: считаем канонический хэш содержимого и сравниваем с хэшем
+        последней версии акта; при совпадении INSERT пропускаем — no-op ручное
+        сохранение не плодит версию-дубль и не вытесняет реальную из кольца
+        (max_versions). Дедуп best-effort (без блокировок): редкий гоночный
+        дубль безвреден, история остаётся корректной.
+
+        Хэш покрывает только содержимое (tree/tables/textblocks/violations/
+        invoices), но НЕ метаданные события (save_type/username/время). Поэтому
+        manual-сохранение с контентом, идентичным предыдущему снимку, версию не
+        создаёт — отметка «кто/когда сохранял» в список версий не попадёт (в
+        аудит-лог content_save/restore — попадёт, это отдельный источник).
 
         Ошибки БД ПРОБРАСЫВАЮТСЯ (не глотаются): вызывающие сервисы держат
         снимок версии в одной плоской транзакции с записью контента —
@@ -54,6 +107,26 @@ class ActContentVersionRepository(BaseRepository):
             invoices: Данные фактур акта (привязка node_id → реквизиты); None → {}
             max_versions: Максимальное число версий (старые удаляются)
         """
+        content_hash = compute_content_hash(tree, tables, textblocks, violations, invoices)
+
+        # Дедуп: если содержимое совпало с последней версией — снимок не создаём.
+        # NULL last_hash (версий нет / старая строка без хэша) → создаём.
+        last_hash = await self.conn.fetchval(
+            f"""
+            SELECT content_hash FROM {self.versions_table}
+            WHERE act_id = $1
+            ORDER BY version_number DESC
+            LIMIT 1
+            """,
+            act_id,
+        )
+        if last_hash is not None and last_hash == content_hash:
+            logger.debug(
+                f"Версия акта ID={act_id} не создана: содержимое не изменилось "
+                f"(save_type={save_type}, user={username})"
+            )
+            return None
+
         tree_json = json.dumps(tree, ensure_ascii=False, default=str)
         tables_json = json.dumps(tables, ensure_ascii=False, default=str)
         textblocks_json = json.dumps(textblocks, ensure_ascii=False, default=str)
@@ -66,9 +139,9 @@ class ActContentVersionRepository(BaseRepository):
             INSERT INTO {self.versions_table}
                 (act_id, version_number, save_type, username,
                  tree_data, tables_data, textblocks_data, violations_data,
-                 invoices_data)
+                 invoices_data, content_hash)
             SELECT $1::bigint, COALESCE(MAX(version_number), 0) + 1, $2, $3,
-                   $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb
+                   $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9
             FROM {self.versions_table}
             WHERE act_id = $1
             RETURNING version_number
@@ -81,6 +154,7 @@ class ActContentVersionRepository(BaseRepository):
             textblocks_json,
             violations_json,
             invoices_json,
+            content_hash,
         )
         next_version = row["version_number"]
 

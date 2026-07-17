@@ -32,6 +32,7 @@ def _patch_adapter(mock_adapter):
 async def test_create_version_writes_invoices_data(mock_conn):
     """INSERT снимка содержит колонку invoices_data и её JSON-аргумент."""
     mock_conn.fetchrow.return_value = {"version_number": 1}
+    mock_conn.fetchval.return_value = None  # предыдущих версий нет → создаём
     mock_conn.execute.return_value = "DELETE 0"
     repo = ActContentVersionRepository(mock_conn)
 
@@ -43,14 +44,15 @@ async def test_create_version_writes_invoices_data(mock_conn):
 
     sql = mock_conn.fetchrow.call_args.args[0]
     assert "invoices_data" in sql
-    # invoices_json — последний позиционный аргумент запроса
+    # invoices_json — предпоследний аргумент (последний — content_hash)
     args = mock_conn.fetchrow.call_args.args
-    assert json.loads(args[-1]) == invoices
+    assert json.loads(args[-2]) == invoices
 
 
 async def test_create_version_defaults_invoices_to_empty(mock_conn):
     """Без параметра invoices → пустой блоб {} (акт без фактур не падает)."""
     mock_conn.fetchrow.return_value = {"version_number": 1}
+    mock_conn.fetchval.return_value = None  # предыдущих версий нет → создаём
     mock_conn.execute.return_value = "DELETE 0"
     repo = ActContentVersionRepository(mock_conn)
 
@@ -59,8 +61,9 @@ async def test_create_version_defaults_invoices_to_empty(mock_conn):
         tree={}, tables={}, textblocks={}, violations={},
     )
 
+    # invoices_json — предпоследний аргумент (последний — content_hash)
     args = mock_conn.fetchrow.call_args.args
-    assert json.loads(args[-1]) == {}
+    assert json.loads(args[-2]) == {}
 
 
 # --- репозиторий: чтение ---------------------------------------------------

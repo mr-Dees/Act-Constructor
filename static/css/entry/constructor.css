@@ -48,9 +48,6 @@
 @import '../constructor/help/help-modal.css';
 @import '../constructor/help/help-content.css';
 
-/* Buttons (constructor-specific) */
-@import '../constructor/buttons/buttons-save-group.css';
-
 /* Items */
 @import '../constructor/items/items-base.css';
 @import '../constructor/items/items-levels.css';

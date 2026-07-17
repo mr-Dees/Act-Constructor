@@ -5,6 +5,7 @@
  * Автоматически завершает сессию при бездействии пользователя.
  * Гарантирует одиночный unlock: предотвращает дублирующее снятие блокировки через sendBeacon.
  */
+import { loadActConfig } from './act-config.js';
 import { ChangelogTracker } from './changelog-tracker.js';
 import { InactivityWatchdog } from './inactivity-watchdog.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
@@ -145,12 +146,11 @@ export class LockManager {
      * @private
      */
     static async _loadConfig() {
-        try {
-            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/lock'));
-            if (!response.ok) throw new Error('Не удалось загрузить настройки');
-            this._config = await response.json();
+        const config = await loadActConfig();
+        if (config) {
+            this._config = config;
             console.log('Настройки блокировок загружены:', this._config);
-        } catch (error) {
+        } else {
             console.error('Ошибка загрузки, используем значения по умолчанию');
             this._config = {
                 lockDurationMinutes: AppConfig.lock.lockDurationMinutes,

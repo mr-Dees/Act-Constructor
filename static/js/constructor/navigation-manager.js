@@ -14,25 +14,14 @@ import { AppConfig } from '../shared/app-config.js';
 import { Notifications } from '../shared/notifications.js';
 
 export class NavigationManager {
+    /** Гард от повторного запуска «сохранить и скачать» во время выполнения. */
+    static _actionInFlight = false;
+
     /**
      * Настройка обработчиков навигации
      */
     static setup() {
-        this._setupStepButtons();
         this._setupHeaderNavigation();
-        this._setupSaveButton();
-    }
-
-    /**
-     * Настройка кнопок навигации между шагами
-     * @private
-     */
-    static _setupStepButtons() {
-        const nextBtn = document.getElementById('nextBtn');
-        const backBtn = document.getElementById('backBtn');
-
-        nextBtn?.addEventListener('click', () => App.goToStep(2));
-        backBtn?.addEventListener('click', () => App.goToStep(1));
     }
 
     /**
@@ -50,45 +39,71 @@ export class NavigationManager {
     }
 
     /**
-     * Настройка кнопки "Сохранить и экспортировать"
-     * @private
+     * Сохранение акта и экспорт выбранных форматов — действие кнопки-индикатора
+     * в шапке и горячей клавиши Ctrl+Shift+S. Всегда сохраняем в БД (если есть
+     * что синхронизировать), затем генерируем и скачиваем выбранные в настройках
+     * форматы. Read-only: в БД не пишем — доступно только скачивание файлов.
      */
-    static _setupSaveButton() {
-        const generateBtn = document.getElementById('generateBtn');
-        generateBtn?.addEventListener('click', async () => {
-            await this._handleSaveAndExport(generateBtn);
-        });
+    static async saveAndExport() {
+        return this._runSave(true);
     }
 
     /**
-     * Обработка сохранения и экспорта
-     * @private
-     * @param {HTMLElement} generateBtn - Кнопка сохранения
+     * Быстрое сохранение акта в БД без экспорта — горячая клавиша Ctrl+S.
+     * В режиме просмотра — no-op с уведомлением (запись в БД недоступна).
      */
-    static async _handleSaveAndExport(generateBtn) {
+    static async saveToDatabase() {
+        return this._runSave(false);
+    }
+
+    /**
+     * Общая воронка сохранения для Ctrl+S (withExport=false) и Ctrl+Shift+S /
+     * кнопки-индикатора (withExport=true). Единый гард от повторного запуска,
+     * read-only-ветка и dirty-гейт сохранения в БД — для обеих точек входа.
+     * @private
+     * @param {boolean} withExport - генерировать и скачивать выбранные форматы
+     */
+    static async _runSave(withExport) {
         // Проверка наличия выбранного акта
         if (!window.currentActId) {
             Notifications.warning('Сначала выберите акт');
             return;
         }
 
-        // Воронка «Сохранить и экспортировать»: коммитим зависшие правки
-        // (textblock в debounce, ячейка таблицы) ДО валидации и чтения
-        // exportData() в save/export. Save/export-методы api.js флашат повторно
-        // (идемпотентно), но валидация ниже тоже читает state — флашим здесь.
+        // Гард от повторного запуска, пока предыдущий save/export не завершился.
+        if (this._actionInFlight) return;
+
+        // Коммитим зависшие правки (textblock в debounce, ячейка таблицы) ДО
+        // валидации, чтения exportData() и проверки dirty-состояния. Save/export-
+        // методы api.js флашат повторно (идемпотентно), но валидация и dirty-гейт
+        // ниже тоже читают state.
         StorageManager._flushPendingEdits();
 
-        // Получаем выбранные действия
-        const selectedFormats = FormatMenuManager.getSelectedFormats();
-        const shouldSaveToDb = selectedFormats.includes('db');
-        const exportFormats = selectedFormats.filter(f => f !== 'db');
+        const isReadOnly = !!AppConfig.readOnlyMode?.isReadOnly;
+        const formats = withExport ? FormatMenuManager.getSelectedFormats() : [];
 
-        // Проверка что выбрано хотя бы одно действие
-        if (selectedFormats.length === 0) {
-            Notifications.error(
-                'Выберите хотя бы одно действие',
-                AppConfig.notifications.duration.error
-            );
+        // Read-only: сохранять в БД нельзя ни на одной точке входа.
+        if (isReadOnly) {
+            if (!withExport) {
+                // Ctrl+S в режиме просмотра — сохранять нечего и некуда.
+                Notifications.warning(AppConfig.readOnlyMode.messages.cannotSave);
+                return;
+            }
+            // Ctrl+Shift+S / кнопка: доступно только скачивание выбранных форматов.
+            if (formats.length === 0) {
+                Notifications.warning('Выберите формат экспорта в настройках');
+                return;
+            }
+            if (!this._validateForExport()) return;
+
+            this._actionInFlight = true;
+            try {
+                await this._exportFiles(formats);
+            } catch (error) {
+                this._handleSaveExportError(error);
+            } finally {
+                this._actionInFlight = false;
+            }
             return;
         }
 
@@ -97,61 +112,26 @@ export class NavigationManager {
         this._showContentWarnings();
 
         // Экспорт в файл требует валидной структуры: сломанная структура даёт
-        // битый документ. Сохранение «только в БД» НЕ блокируется — акт
-        // сохраняется и помечается статусом валидации на бэке (источник истины),
-        // конкретику покажут уведомления и карточка акта.
-        if (exportFormats.length > 0 && !this._validateForExport()) return;
+        // битый документ. Сохранение в БД эту проверку НЕ проходит (#8).
+        if (formats.length > 0 && !this._validateForExport()) return;
 
-        // Блокируем кнопку
-        generateBtn.disabled = true;
-        const originalText = generateBtn.textContent;
-        generateBtn.textContent = '⏳ Обработка...';
-
+        this._actionInFlight = true;
         try {
-            // 1. Сохранение в БД (если выбрано)
-            if (shouldSaveToDb) {
-                await this._saveToDatabase();
-            }
+            // 1. Сохранение в БД — всегда. Ручной save persist'ит ТЕКУЩЕЕ
+            // состояние, включая только что закоммиченные pending-правки (H5-A:
+            // ячейка/textblock в редактировании). Гейтить по dirty-флагу нельзя —
+            // он под-репортит такие правки, и save молча потерял бы их (PUT
+            // читает exportActData(), а не флаг).
+            await this._saveToDatabase();
 
-            // 2. Экспорт файлов (если выбраны форматы)
-            if (exportFormats.length > 0) {
-                await this._exportFiles(exportFormats);
+            // 2. Экспорт файлов (если в настройках выбраны форматы).
+            if (formats.length > 0) {
+                await this._exportFiles(formats);
             }
-
         } catch (error) {
-            // 409 Conflict на save: лок акта был снят (фоновый autoExit по
-            // неактивности — вкладка была в фоне). В отличие от обычного
-            // autoExit'а, тут save НЕ прошёл (markAsSyncedWithDB не вызвался) —
-            // изменения НЕ записаны в БД. Ставим ОТДЕЛЬНЫЙ флаг `sessionLockLost`
-            // (не `sessionAutoExited`, у которого плашка лжёт «изменения
-            // сохранены») и редиректим на список. Черновик в localStorage НЕ
-            // трогаем — он остаётся последним носителем несохранённых правок.
-            if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
-                console.warn('[NavigationManager] LockLostError на save → редирект на список актов (изменения НЕ в БД)');
-                sessionStorage.setItem('sessionLockLost', 'true');
-                // Снимаем браузерный beforeunload-warning. allowUnload() НЕ
-                // чистит localStorage — только ставит флаг программного выхода,
-                // так что локальный черновик сохраняется.
-                if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                    StorageManager.allowUnload();
-                }
-                // Жёсткий редирект без confirmNavigation: save вернул 409,
-                // markAsSyncedWithDB не вызвался, hasUnsavedChanges=true →
-                // confirmNavigation показал бы кастомную плашку «Несохранённые
-                // изменения. Уйти?» и блокировал бы навигацию. Сессия уже
-                // завершена — спрашивать поздно.
-                window.location.href = AppConfig.api.getUrl('/acts');
-                return;
-            }
-            console.error('Ошибка при обработке:', error);
-            Notifications.error(
-                `Произошла ошибка: ${error.message}`,
-                AppConfig.notifications.duration.error
-            );
+            this._handleSaveExportError(error);
         } finally {
-            // Разблокируем кнопку
-            generateBtn.disabled = false;
-            generateBtn.textContent = originalText;
+            this._actionInFlight = false;
         }
     }
 
@@ -170,6 +150,40 @@ export class NavigationManager {
     }
 
     /**
+     * Единая обработка ошибки сохранения/экспорта.
+     *
+     * LockLostError (лок снят, 409): save НЕ прошёл — изменения НЕ записаны в БД.
+     * Ставим ОТДЕЛЬНЫЙ флаг `sessionLockLost` (не `sessionAutoExited`, у которого
+     * плашка лжёт «изменения сохранены») и жёстко редиректим на список актов.
+     * Черновик в localStorage НЕ трогаем — он остаётся последним носителем
+     * несохранённых правок. Прочие ошибки — уведомление.
+     * @private
+     */
+    static _handleSaveExportError(error) {
+        if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
+            console.warn('[NavigationManager] LockLostError на save → редирект на список актов (изменения НЕ в БД)');
+            sessionStorage.setItem('sessionLockLost', 'true');
+            // Снимаем браузерный beforeunload-warning. allowUnload() НЕ чистит
+            // localStorage — только ставит флаг программного выхода, так что
+            // локальный черновик сохраняется.
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
+            }
+            // Жёсткий редирект без confirmNavigation: save вернул 409,
+            // markAsSyncedWithDB не вызвался, hasUnsavedChanges=true →
+            // confirmNavigation показал бы плашку «Несохранённые изменения. Уйти?»
+            // и блокировал бы навигацию. Сессия уже завершена — спрашивать поздно.
+            window.location.href = AppConfig.api.getUrl('/acts');
+            return;
+        }
+        console.error('Ошибка при обработке:', error);
+        Notifications.error(
+            `Произошла ошибка: ${error.message}`,
+            AppConfig.notifications.duration.error
+        );
+    }
+
+    /**
      * Экспорт файлов в выбранных форматах
      * @private
      * @param {string[]} formats - Массив форматов для экспорта
@@ -177,7 +191,7 @@ export class NavigationManager {
     static async _exportFiles(formats) {
         try {
             await APIClient.generateAct(formats);
-            // Уведомления и диалог скачивания показаны в APIClient.generateAct
+            // Уведомления показаны в APIClient.generateAct
         } catch (err) {
             console.error('Ошибка экспорта файлов:', err);
             throw err; // Пробрасываем ошибку выше

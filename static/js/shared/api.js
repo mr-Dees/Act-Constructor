@@ -158,7 +158,8 @@ export class APIClient {
             this._showGenerationResults(successCount, errorCount, results);
 
             if (successCount > 0) {
-                await this._handleDownloadPrompt(results, successCount);
+                // Скачиваем созданные файлы сразу, без диалога-вопроса.
+                await this._downloadAllFiles(results);
             }
 
             return successCount > 0;
@@ -243,24 +244,6 @@ export class APIClient {
                 'Не удалось создать файлы',
                 AppConfig.notifications.duration.longSuccess
             );
-        }
-    }
-
-    /**
-     * Обрабатывает предложение скачать созданные файлы
-     * @private
-     */
-    static async _handleDownloadPrompt(results, successCount) {
-        const shouldDownload = await DialogManager.show({
-            title: 'Скачать созданные файлы?',
-            message: `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,
-            icon: '📥',
-            confirmText: 'Скачать все',
-            cancelText: 'Не нужно'
-        });
-
-        if (shouldDownload) {
-            await this._downloadAllFiles(results);
         }
     }
 

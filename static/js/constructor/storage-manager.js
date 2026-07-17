@@ -6,6 +6,7 @@
  * Интегрирован с системой Proxy для автоматического отслеживания изменений.
  * Отслеживает синхронизацию с БД для предотвращения потери данных.
  */
+import { loadActConfig } from './act-config.js';
 import { ItemsRenderer } from './items/items-renderer.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
 import { AppState } from './state/state-core.js';
@@ -23,6 +24,15 @@ export class StorageManager {
      * @type {number|null}
      */
     static _saveTimeout = null;
+
+    /**
+     * Период дебаунса автосохранения в localStorage, мс.
+     * Инициализируется фолбэком из AppConfig, при инициализации менеджера
+     * переопределяется значением с бэка (`autoSavePeriodSeconds` из /config/lock).
+     * @private
+     * @type {number}
+     */
+    static _autoSaveDebounceMs = AppConfig.localStorage.autoSaveDebounce;
 
     /**
      * Интервал периодического автосохранения в localStorage
@@ -207,6 +217,10 @@ export class StorageManager {
             this._checkLocalStorageAvailable();
             this._setupEventHandlers();
             this._updateSaveIndicator();
+            // Подгрузка периода автосохранения с бэка (fire-and-forget):
+            // дебаунс актуален только после первой правки пользователя, поэтому
+            // ждать ответ не нужно; ошибка fetch оставляет фолбэк.
+            this._loadAutoSaveConfig();
 
             console.log('StorageManager инициализирован (без автовосстановления)');
         } catch (error) {
@@ -227,6 +241,21 @@ export class StorageManager {
             localStorage.removeItem(testKey);
         } catch (e) {
             throw new Error('localStorage недоступен');
+        }
+    }
+
+    /**
+     * Загружает период автосохранения с сервера через общий загрузчик
+     * `loadActConfig` (тот же кэшированный GET /config/lock, что и у LockManager).
+     * Берёт `autoSavePeriodSeconds` (секунды) и переводит в мс. При ошибке/
+     * отсутствии значения оставляет фолбэк — инициализацию не роняет.
+     * @private
+     */
+    static async _loadAutoSaveConfig() {
+        const config = await loadActConfig();
+        const seconds = config?.autoSavePeriodSeconds;
+        if (Number.isFinite(seconds) && seconds > 0) {
+            this._autoSaveDebounceMs = seconds * 1000;
         }
     }
 
@@ -651,7 +680,7 @@ export class StorageManager {
 
         this._saveTimeout = setTimeout(() => {
             this.saveState(true);
-        }, AppConfig.localStorage.autoSaveDebounce);
+        }, this._autoSaveDebounceMs);
     }
 
     /**
@@ -953,100 +982,6 @@ export class StorageManager {
     }
 
     /**
-     * Принудительно сохраняет состояние (вызывается кнопкой или Ctrl+S)
-     *
-     * @returns {boolean} true если сохранение успешно
-     */
-    static forceSave() {
-        // Блокируем сохранение в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            Notifications.warning(AppConfig.readOnlyMode.messages.cannotSave);
-            return false;
-        }
-
-        // Отменяем pending дебаунс, если есть
-        if (this._saveTimeout) {
-            clearTimeout(this._saveTimeout);
-            this._saveTimeout = null;
-        }
-
-        // Выполняем сохранение (silent режим)
-        const success = this.saveState(true);
-
-        if (success) {
-            Notifications.success('Изменения сохранены');
-        } else {
-            // Если сохранение не удалось, возвращаем state в 'unsaved'.
-            this._setState('unsaved');
-        }
-
-        return success;
-    }
-
-    /**
-     * Асинхронная версия принудительного сохранения
-     *
-     * Блокирует отслеживание изменений на время выполнения операции.
-     * Используется когда нужна гарантия последовательного выполнения.
-     *
-     * @returns {Promise<boolean>} Promise с результатом сохранения
-     */
-    static async forceSaveAsync() {
-        return new Promise((resolve) => {
-            // Блокируем отслеживание на время сохранения и последующих операций.
-            this.disableTracking();
-
-            // Декремент гарантируется РОВНО один раз. На счастливом пути его
-            // делает отложенный setTimeout (трекинг включается ПОСЛЕ ре-рендера
-            // генерации — enableTrackingAfterSave). Если кадр/таймер не сработают
-            // (вкладка в фоне, страница уничтожается) или планирование RAF кинет
-            // — декремент делает синхронный catch, иначе _trackingDepth залипнет
-            // > 0 и markAsUnsaved() станет no-op'ом (тихая потеря правок, #5).
-            let released = false;
-            const release = () => {
-                if (released) return;
-                released = true;
-                this.enableTracking();
-            };
-
-            // B-14: страховочный таймер ВНЕ requestAnimationFrame. RAF не
-            // гарантирован в фоновой вкладке/при уничтожении страницы — без него
-            // _trackingDepth залип бы >0 и markAsUnsaved() стал бы no-op'ом
-            // (тихая потеря правок). setTimeout надёжнее RAF и идемпотентно
-            // отпускает трекинг (release защищён released-флагом).
-            const safety = setTimeout(release, AppConfig.timings.enableTrackingAfterSave + 1000);
-
-            try {
-                requestAnimationFrame(() => {
-                    let result = false;
-                    let threw = false;
-                    try {
-                        result = this.forceSave();
-                    } catch (error) {
-                        threw = true;
-                        console.error('Ошибка в forceSaveAsync:', error);
-                    } finally {
-                        // Отложенный тайминг сохраняем — трекинг включается
-                        // через AppConfig.timings.enableTrackingAfterSave, а не
-                        // синхронно (иначе ре-рендер генерации пометил бы только
-                        // что сохранённый акт грязным).
-                        setTimeout(() => {
-                            clearTimeout(safety);
-                            release();
-                            resolve(threw ? false : result);
-                        }, AppConfig.timings.enableTrackingAfterSave);
-                    }
-                });
-            } catch (error) {
-                console.error('Ошибка планирования forceSaveAsync:', error);
-                clearTimeout(safety);
-                release();
-                resolve(false);
-            }
-        });
-    }
-
-    /**
      * Временно отключает отслеживание изменений (инкремент глубины, M.11).
      *
      * Используется для операций, которые модифицируют состояние,
@@ -1157,13 +1092,13 @@ export class StorageManager {
 
         if (!button || !label) return;
 
-        // Read-only режим: индикатор всегда заблокирован,
-        // никакие изменения не сохраняются.
+        // Read-only режим: сохранять в БД нельзя, но кнопка остаётся активной —
+        // по ней доступно скачивание выбранных форматов (saveAndExport).
         if (typeof AppConfig !== 'undefined' && AppConfig.readOnlyMode?.isReadOnly) {
             button.classList.remove('unsaved', 'local-only');
             button.classList.add('saved');
-            button.disabled = true;
-            button.title = 'Режим только для чтения';
+            button.disabled = false;
+            button.title = 'Только чтение — сохранить нельзя, доступно скачивание файлов';
             label.textContent = 'Только чтение';
             return;
         }
@@ -1171,24 +1106,26 @@ export class StorageManager {
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');
 
-        // Упрощенная и более понятная логика
+        // Кнопка всегда активна: клик = сохранить в БД + сгенерировать и скачать
+        // выбранные форматы. Цвет и подпись отражают статус сохранности.
+        const actionTitle = 'Сохранить и скачать (Ctrl+Shift+S)';
         if (this._hasUnsavedChanges) {
             // Красный: есть изменения, которые не сохранены даже в localStorage
             button.classList.add('unsaved');
             button.disabled = false;
-            button.title = 'Сохранить изменения (Ctrl+S)';
+            button.title = actionTitle;
             label.textContent = 'Не сохранено';
         } else if (!this._isSyncedWithDB && window.currentActId) {
             // Желтый: сохранено в localStorage, но не в БД
             button.classList.add('local-only');
             button.disabled = false;
-            button.title = 'Сохранить в базу данных (Ctrl+S)';
-            label.textContent = 'Только локально';
+            button.title = actionTitle;
+            label.textContent = 'Локально';
         } else {
             // Белый: полностью синхронизировано
             button.classList.add('saved');
-            button.disabled = true;
-            button.title = 'Все изменения сохранены';
+            button.disabled = false;
+            button.title = actionTitle;
             label.textContent = 'Сохранено';
         }
 
@@ -1265,7 +1202,8 @@ export class StorageManager {
         this._resetDbSaveFailureState();
 
         // Сбрасываем счётчик трекинга: teardown не должен оставить отслеживание
-        // выключенным, если forceSaveAsync не успел вернуть его кадром (#5).
+        // выключенным, если асинхронная операция (save/generate/load) отключила
+        // его и не успела вернуть до уничтожения страницы (#5).
         this._trackingDepth = 0;
     }
 

@@ -30,6 +30,11 @@ class LockSettings(BaseModel):
     inactivity_dialog_timeout_seconds: int = Field(default=15, gt=0)
 
 
+class AutosaveSettings(BaseModel):
+    """Настройки автосохранения черновика акта в браузере."""
+    period_seconds: int = Field(default=3, gt=0, description="Период дебаунса автосохранения в localStorage, сек")
+
+
 class FormattingSettings(BaseModel):
     """Параметры форматирования документов."""
     # DOCX
@@ -205,6 +210,7 @@ class SanitizerSettings(BaseModel):
 class ActsSettings(BaseModel):
     """Корневая модель настроек домена актов."""
     lock: LockSettings = LockSettings()
+    autosave: AutosaveSettings = AutosaveSettings()
     formatting: FormattingSettings = FormattingSettings()
     resource: ResourceSettings = ResourceSettings()
     invoice: InvoiceSettings = InvoiceSettings()

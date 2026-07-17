@@ -159,9 +159,6 @@
     --theme-slider-dot-offset: 2px;
     --theme-slider-dot-translate: 1.25rem;
 
-    /* Auto save period input */
-    --auto-save-input-width: 3.5rem;
-
     /* Help modal */
     --help-modal-max-width: 50rem;
     --help-modal-max-height: 80vh;
@@ -189,7 +186,7 @@
      * кнопки стоят на равном расстоянии; подпись центрируется под своей кнопкой.
      * Компактная (76px): шире сделало бы боковые группы слишком широкими, и при
      * абсолютном позиционировании они залезали бы на центральные «шаги». Подписи
-     * не обрезаются (overflow:visible), а самая длинная — «Только локально» —
+     * не обрезаются (overflow:visible), а самая длинная — «Не сохранено» —
      * слегка «вытекает» за колонку, оставаясь под кнопкой индикатора. */
     --header-action-column-width: 4.75rem;
 

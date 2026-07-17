@@ -25,6 +25,7 @@ class LockConfigResponse(BaseModel):
     inactivityCheckIntervalSeconds: int
     minExtensionIntervalMinutes: float
     inactivityDialogTimeoutSeconds: int
+    autoSavePeriodSeconds: int
 
 
 class InvoiceConfigResponse(BaseModel):

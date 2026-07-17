@@ -392,7 +392,7 @@ API:
 'saved'      ─── markAsUnsaved() ──▶ 'unsaved'
    ▲                                      │
    │                                      │ _debouncedSave (3s) или
-   │                              periodic save (120s) или forceSave()
+   │                                 periodic save (120s)
    │                                      ▼
 markAsSyncedWithDB()  ◀──── PUT /content ──── 'local-only'
    │                          (success)         (LS-only, БД ещё не синхронизирована)
@@ -421,9 +421,9 @@ UI:
 
 Оба периодических таймера пропускают тик при `AppState._dragInProgress` — иначе во время DnD получим лишнюю запись с промежуточным состоянием.
 
-`forceSaveAsync()` — синхронный hotkey Ctrl+S: пишет в LS немедленно, дожидается ответа и возвращает Promise.
+Ручное сохранение — через `NavigationManager` (не через LS): **Ctrl+S** → `saveToDatabase()` → `APIClient.saveActContent(..,{saveType:'manual'})` (прямой PUT в БД, только если есть что синхронизировать; в read-only — no-op). **Ctrl+Shift+S** / клик по кнопке-индикатору → `saveAndExport()` (то же + генерация и скачивание выбранных в настройках форматов).
 
-> **Гарантированный декремент `_trackingDepth`.** На время сохранения `forceSaveAsync` отключает deep-tracking (`disableTracking`) и включает его обратно через `release()` с `released`-флагом — декремент выполняется **даже если RAF-кадр re-enable никогда не наступит** (вкладка ушла в фон / `destroy()` до кадра). Дополнительно `destroy()` принудительно сбрасывает `_trackingDepth=0`. Без этого счётчик «утекал» вверх → `markAsUnsaved()` уходил в no-op, и при переоткрытии конструктора без полной перезагрузки страницы правки молча не помечались грязными (тихая потеря данных).
+> **Гарантированный декремент `_trackingDepth`.** Операции, отключающие deep-tracking на время работы (`saveActContent`, `generateAct`, `loadActContent`), включают его обратно в `finally`/отложенном таймере. Если страница уничтожается до re-enable, `destroy()` принудительно сбрасывает `_trackingDepth=0`. Без этого счётчик «утекал» вверх → `markAsUnsaved()` уходил в no-op, и при переоткрытии конструктора без полной перезагрузки страницы правки молча не помечались грязными (тихая потеря данных).
 
 ### 5.3 Navigation interception
 
@@ -552,7 +552,7 @@ static async _initiateExit(action) {
 
 ### 6.8 NavigationManager и LockLostError
 
-`constructor/navigation-manager.js` (223 строки) — только step-кнопки + save+export pipeline. `_handleSaveAndExport` ловит `LockLostError` из `APIClient.saveActContent` (409 → custom Error subclass из `shared/api.js`) → ставит **`sessionStorage['sessionLockLost']`** (НЕ `sessionAutoExited`: save вернул 409, изменения в БД не записаны — плашка autoExit'а врала бы «сохранено») и делает жёсткий редирект на `/acts`. Локальный черновик при этом НЕ чистится (`allowUnload()` лишь снимает beforeunload-страж). Honest-плашку выбирает чистый `pickSessionExitNotice` (`portal/acts-manager/session-exit-notice.js`).
+`constructor/navigation-manager.js` — навигация по шагам (клик по индикатору шага) + `saveAndExport` (сохранить в БД + сгенерировать и скачать выбранные в настройках форматы; вызывается кликом по кнопке-индикатору в шапке и Ctrl+Shift+S). `saveAndExport` и быстрый `saveToDatabase` (Ctrl+S) через `_handleSaveExportError` ловят `LockLostError` из `APIClient.saveActContent` (409 → custom Error subclass из `shared/api.js`) → ставят **`sessionStorage['sessionLockLost']`** (НЕ `sessionAutoExited`: save вернул 409, изменения в БД не записаны — плашка autoExit'а врала бы «сохранено») и делает жёсткий редирект на `/acts`. Локальный черновик при этом НЕ чистится (`allowUnload()` лишь снимает beforeunload-страж). Honest-плашку выбирает чистый `pickSessionExitNotice` (`portal/acts-manager/session-exit-notice.js`).
 
 **Восстановление черновика на повторном входе:** загрузка акта — `APIClient.loadActContent` = `_fetchActContent` (сеть) + `_applyActContent` (применение); при автозагрузке в конструкторе (`acts-menu.js::_autoLoadAct`) между ними захватывается лок, чтобы условный prompt восстановления показывался уже после захвата (§3.4 — когда известно, занят ли акт). Prompt восстановления локального черновика (`_maybeRestoreDraft`) показывается **только** если акт с момента снимка никто не менял (серверный `updated_at` совпадает с базой снимка); иначе устаревший снимок молча удаляется, контент из БД перезаписывает черновик через `saveState(true)`. В сценарии потери лока (см. выше) honest-редирект уходит на `/acts` без перезагрузки акта — правки физически остаются в `localStorage`, но в этот момент не применяются; honest-плашка сообщает именно это.
 
@@ -1035,7 +1035,6 @@ Constructor **не адаптивен** (0 media queries в `constructor/*`). Э
 @import '../constructor/violation/*.css';                 # 4
 @import '../constructor/preview/*.css';                   # 7
 @import '../constructor/help/*.css';                      # 3
-@import '../constructor/buttons/buttons-save-group.css';  # 1
 @import '../constructor/items/*.css';                     # 4
 @import '../constructor/textblock/*.css';                 # 3
 @import '../constructor/search/find-bar.css';              # 1
