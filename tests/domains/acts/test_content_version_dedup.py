@@ -53,16 +53,19 @@ async def test_inserts_when_hash_differs(mock_conn):
     mock_conn.execute.return_value = "DELETE 0"
     repo = ActContentVersionRepository(mock_conn)
 
+    tree = {"id": "root", "children": [{"id": "x"}]}
     result = await repo.create_version(
         act_id=1, username="12345", save_type="manual",
-        tree={"id": "root", "children": [{"id": "x"}]},
-        tables={}, textblocks={}, violations={},
+        tree=tree, tables={}, textblocks={}, violations={},
     )
 
     assert result == 4
     mock_conn.fetchrow.assert_called_once()
-    # content_hash — последний позиционный аргумент INSERT (64 hex sha256).
-    assert len(mock_conn.fetchrow.call_args.args[-1]) == 64
+    # content_hash — последний позиционный аргумент INSERT — это канонический
+    # хэш именно этих входных данных (invoices по умолчанию None), а не что-то
+    # длиной 64: ловим wrong-variable «сохранили не тот хэш».
+    assert mock_conn.fetchrow.call_args.args[-1] == \
+        compute_content_hash(tree, {}, {}, {}, None)
 
 
 async def test_inserts_when_no_previous_version(mock_conn):
@@ -78,6 +81,43 @@ async def test_inserts_when_no_previous_version(mock_conn):
     )
 
     assert result == 1
+    mock_conn.fetchrow.assert_called_once()
+
+
+async def test_restore_two_snapshot_sequence_dedups_pre_snapshot(mock_conn):
+    """Дедуп в потоке restore на реальном репозитории.
+
+    AuditLogService.restore_version делает две последовательные create_version:
+    pre-snapshot ('auto', текущий контент ДО перезаписи) + post-snapshot
+    ('manual', восстановленный контент). Сервис-тесты мокают create_version и
+    это взаимодействие не ловят (finding F2-review #1). Здесь воспроизводим
+    последовательность на реальном репозитории: если текущий контент равен
+    последней версии, pre-snapshot дедупится (INSERT пропущен), а post-snapshot
+    иного контента — создаётся.
+    """
+    tree_current = {"id": "root", "children": []}
+    tree_restored = {"id": "root", "children": [{"id": "x"}]}
+    hash_current = compute_content_hash(tree_current, {}, {}, {}, {})
+
+    # Последняя версия уже равна текущему контенту → pre-snapshot дедупнётся;
+    # он не вставился, поэтому для post-snapshot последняя версия всё ещё та же.
+    mock_conn.fetchval.side_effect = [hash_current, hash_current]
+    mock_conn.fetchrow.return_value = {"version_number": 6}
+    mock_conn.execute.return_value = "DELETE 0"
+    repo = ActContentVersionRepository(mock_conn)
+
+    pre = await repo.create_version(
+        act_id=1, username="12345", save_type="auto",
+        tree=tree_current, tables={}, textblocks={}, violations={},
+    )
+    assert pre is None  # pre-snapshot текущего == последней версии → пропущен
+    mock_conn.fetchrow.assert_not_called()
+
+    post = await repo.create_version(
+        act_id=1, username="12345", save_type="manual",
+        tree=tree_restored, tables={}, textblocks={}, violations={},
+    )
+    assert post == 6  # восстановленный контент отличается → снимок создан
     mock_conn.fetchrow.assert_called_once()
 
 
