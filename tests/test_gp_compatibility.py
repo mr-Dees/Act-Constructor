@@ -266,7 +266,7 @@ class TestGreenplumSchemaCompatibility:
         required_columns = [
             "act_id", "version_number", "save_type", "username",
             "tree_data", "tables_data", "textblocks_data", "violations_data",
-            "invoices_data",
+            "invoices_data", "content_hash",
         ]
         for db_type in ("postgresql", "greenplum"):
             content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
