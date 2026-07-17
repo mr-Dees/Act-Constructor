@@ -392,7 +392,7 @@ API:
 'saved'      ─── markAsUnsaved() ──▶ 'unsaved'
    ▲                                      │
    │                                      │ _debouncedSave (3s) или
-   │                              periodic save (120s) или forceSave()
+   │                                 periodic save (120s)
    │                                      ▼
 markAsSyncedWithDB()  ◀──── PUT /content ──── 'local-only'
    │                          (success)         (LS-only, БД ещё не синхронизирована)
@@ -421,9 +421,9 @@ UI:
 
 Оба периодических таймера пропускают тик при `AppState._dragInProgress` — иначе во время DnD получим лишнюю запись с промежуточным состоянием.
 
-`forceSaveAsync()` — синхронный hotkey Ctrl+S: пишет в LS немедленно, дожидается ответа и возвращает Promise.
+Ручное сохранение — через `NavigationManager` (не через LS): **Ctrl+S** → `saveToDatabase()` → `APIClient.saveActContent(..,{saveType:'manual'})` (прямой PUT в БД, только если есть что синхронизировать; в read-only — no-op). **Ctrl+Shift+S** / клик по кнопке-индикатору → `saveAndExport()` (то же + генерация и скачивание выбранных в настройках форматов).
 
-> **Гарантированный декремент `_trackingDepth`.** На время сохранения `forceSaveAsync` отключает deep-tracking (`disableTracking`) и включает его обратно через `release()` с `released`-флагом — декремент выполняется **даже если RAF-кадр re-enable никогда не наступит** (вкладка ушла в фон / `destroy()` до кадра). Дополнительно `destroy()` принудительно сбрасывает `_trackingDepth=0`. Без этого счётчик «утекал» вверх → `markAsUnsaved()` уходил в no-op, и при переоткрытии конструктора без полной перезагрузки страницы правки молча не помечались грязными (тихая потеря данных).
+> **Гарантированный декремент `_trackingDepth`.** Операции, отключающие deep-tracking на время работы (`saveActContent`, `generateAct`, `loadActContent`), включают его обратно в `finally`/отложенном таймере. Если страница уничтожается до re-enable, `destroy()` принудительно сбрасывает `_trackingDepth=0`. Без этого счётчик «утекал» вверх → `markAsUnsaved()` уходил в no-op, и при переоткрытии конструктора без полной перезагрузки страницы правки молча не помечались грязными (тихая потеря данных).
 
 ### 5.3 Navigation interception
 
