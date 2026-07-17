@@ -6,6 +6,7 @@
  * Интегрирован с системой Proxy для автоматического отслеживания изменений.
  * Отслеживает синхронизацию с БД для предотвращения потери данных.
  */
+import { loadActConfig } from './act-config.js';
 import { ItemsRenderer } from './items/items-renderer.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
 import { AppState } from './state/state-core.js';
@@ -244,22 +245,17 @@ export class StorageManager {
     }
 
     /**
-     * Загружает период автосохранения с сервера (образец — LockManager._loadConfig).
-     * Берёт `autoSavePeriodSeconds` (секунды) из /config/lock и переводит в мс.
-     * При ошибке/отсутствии значения оставляет фолбэк — инициализацию не роняет.
+     * Загружает период автосохранения с сервера через общий загрузчик
+     * `loadActConfig` (тот же кэшированный GET /config/lock, что и у LockManager).
+     * Берёт `autoSavePeriodSeconds` (секунды) и переводит в мс. При ошибке/
+     * отсутствии значения оставляет фолбэк — инициализацию не роняет.
      * @private
      */
     static async _loadAutoSaveConfig() {
-        try {
-            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/lock'));
-            if (!response.ok) throw new Error('Не удалось загрузить период автосохранения');
-            const config = await response.json();
-            const seconds = config?.autoSavePeriodSeconds;
-            if (Number.isFinite(seconds) && seconds > 0) {
-                this._autoSaveDebounceMs = seconds * 1000;
-            }
-        } catch (error) {
-            console.error('Ошибка загрузки периода автосохранения, используем значение по умолчанию:', error);
+        const config = await loadActConfig();
+        const seconds = config?.autoSavePeriodSeconds;
+        if (Number.isFinite(seconds) && seconds > 0) {
+            this._autoSaveDebounceMs = seconds * 1000;
         }
     }
 
